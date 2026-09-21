@@ -2,11 +2,19 @@
 
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { Suspense, useState, type FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { getOrCreateDeviceId } from '@/lib/deviceId'
 
 export default function ActivatePage() {
+  return (
+    <Suspense fallback={null}>
+      <ActivateForm />
+    </Suspense>
+  )
+}
+
+function ActivateForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const code = searchParams.get('code') ?? ''
@@ -39,7 +47,7 @@ export default function ActivatePage() {
       return
     }
 
-    router.push('/login?activated=1')
+    router.push('/?activated=1')
   }
 
   if (!code) {

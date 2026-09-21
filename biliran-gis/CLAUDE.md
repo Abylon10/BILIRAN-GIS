@@ -43,11 +43,13 @@ before assuming older Next.js behavior, and don't strip that block from diffs.
 **Single merged page, not routes.** `app/page.tsx` implements login and the
 dashboard as two states (`checking` / `needsLogin` / `revealed`) of one
 mounted component, so the "card opens up to reveal the map" transition works
-without a hard navigation. `app/login/page.tsx` is a separate, more built-out
-standalone login route (drifting island scene, corner-of-the-hour animation,
-routes to `/dashboard` on success) — check whether it's actually linked from
-anywhere before assuming it's live; per the architectural decision below, the
-merged `app/page.tsx` is the intended design.
+without a hard navigation. The standalone `app/login/page.tsx` route (an
+alternate, more built-out login screen) was removed — it pushed to a
+`/dashboard` route that never existed and duplicated the merged-page login
+UI, contradicting this settled decision. `app/activate/page.tsx` now
+redirects to `/?activated=1` (not `/login`) after activating an account;
+`app/page.tsx` reads that query param to show a one-time "Account activated"
+message on the login card.
 
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via
@@ -57,7 +59,7 @@ the Supabase session + RLS policies, not this check.
 **Supabase clients are split by privilege** (`lib/supabase.ts` vs.
 `lib/supabaseAdmin.ts`): the anon/browser client is safe in client components;
 `supabaseAdmin` uses the service-role key and must only be used server-side
-(currently only in `app/api/activate/route.ts`).
+(`app/api/activate/route.ts`, `app/api/admin/invite/route.ts`).
 
 **Invitation-based account activation**, no public signup:
 `app/activate/page.tsx` (reads `?code=`) → `POST /api/activate` →
@@ -69,14 +71,41 @@ it redeemed — only on success, in that order. The device id
 and used **only** to bind an invite at redemption time, never for ongoing
 login gating.
 
+Invitation codes are created via `app/api/admin/invite/route.ts` (`GET` to
+list, `POST` to create) — admin-only, checked by decoding the caller's
+Supabase access token (`Authorization: Bearer <token>`, sent from the client
+after `supabase.auth.getSession()`) and requiring `user_profiles.access_level
+=== 'admin'`. Before this route existed, nothing in the app could actually
+produce an `invitation_codes` row, so `/activate` had no real way to be
+reached. Surfaced in the UI as "Invitations" in the hidden "+" menu, shown
+only to admins (`components/AdminInvitePanel.tsx`).
+
+**Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
+which shows the signed-in user's email plus `office`/`access_level` fetched
+via `lib/profile.ts` (`fetchOwnProfile`, anon client — relies on a Supabase
+RLS policy letting a user read their own `user_profiles` row). No
+Storage-backed fields (e.g. a photo) yet.
+
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
 combining an FSI score/label with runoff threshold crossing times
 (`warning_time_hours`, `alert_time_hours`, `danger_time_hours`) produced by
-the external Python pipeline. It's meant to be fetched client-side with a
-plain cached `fetch()` — no DB wiring for this yet. Known limitation: a
-`public/` file only updates on redeploy; a real rainfall-driven refresh would
-need to move this into Supabase Storage or a table.
+the external Python pipeline. It's fetched client-side with a plain cached
+`fetch()` (`lib/dashboardData.ts`, `loadBarangays()`) — no DB wiring for this
+yet. Known limitation: a `public/` file only updates on redeploy; a real
+rainfall-driven refresh would need to move this into Supabase Storage or a
+table. That loader also repairs the two barangay names hit by the known
+source-level double-UTF-8 bug ("Capiñahan," "Santo Niño") — see
+`fixMojibake()` — but the fix is cosmetic and client-side only; the
+underlying `barangay_biliran.geojson` bug (outside this repo) is still open.
+
+`lib/municipalities.ts` maps each barangay's `pgc_prefix` to a municipality
+name via the PSGC numbering convention for Biliran province — derived, not
+sourced from an authoritative table in this repo, though it self-validates
+against the data (exactly 7 prefixes present, and the one missing —
+`807807`, Maripipi — matches this project's documented exclusion). Verify
+against a real PSGC source before depending on it for anything beyond the
+UI.
 
 **Path alias**: `@/*` resolves to the repo root (`tsconfig.json`), e.g.
 `@/lib/supabase`.
@@ -93,23 +122,42 @@ need to move this into Supabase Storage or a table.
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average
 
-## Dashboard UI — target design (not yet built)
+## Dashboard UI
 
-Reference: a weather-monitoring SaaS dashboard layout (wide map+charts panel
-left, narrower "Detail Overview" sidebar right). Mapping of that reference
-onto this project's real data, for whoever builds `app/page.tsx`'s dashboard
-shell next:
+`components/DashboardShell.tsx` (rendered by `app/page.tsx` in place of the
+old `.bfw-dash` placeholder) implements the parts of the original design
+spec below that `barangay_dashboard_data.json` actually supports:
+search-by-barangay/municipality (`components/BarangayList.tsx` +
+`lib/dashboardData.ts` `filterBarangays()`), a "modeled, not live" banner
+naming the single most urgent upcoming Alert/Danger crossing
+(`components/LiveUpdateBanner.tsx`, `mostUrgentCrossing()`), an
+urgency-sorted barangay list standing in for the map (sorted by soonest
+`danger_time_hours`, see `sortByUrgency()`), and a "Detail Overview"-style
+panel on selection (`components/BarangayDetailPanel.tsx`) showing the
+countdown, FSI score/label, basin count, and warning/alert times.
 
-- **Top bar**: search (barangay/municipality), location selector, "synced N min ago" indicator (honest about the static-file staleness), profile icon = the existing hidden "+" menu.
-- **"LIVE UPDATE" banner**: the single most urgent upcoming threshold crossing across all barangays — `min()` over every barangay's `alert_time_hours`/`danger_time_hours`.
-- **Main map**: island map colored by urgency tier (Warning/Alert/Danger) — one consistent color scale, not a separate FSI scale. Badge = count of barangays past Warning.
-- **"Most Urgent Barangays" list** (was "Regional Extremes"): sorted by soonest countdown / `mean_fsi_score`. Keep a "Generate Report" export button (PDF/CSV of the current urgency list).
-- **Hydrograph chart** (was "AQI Trends"): `time_hours` on X, `Q` on Y, Warning/Alert/Danger drawn as horizontal reference lines; hover tooltip for exact values.
-- **Right sidebar "Detail Overview"**: hero stat = big countdown number + unit ("min to Alert") + FSI class as the description line; stat row below = HAND/TWI/LC factor contributions; "View Details" drills into the full FSI methodology for that barangay.
-- **"Contributing Basins"** (was "7-Day Forecast"): horizontal scroll, one tile per basin affecting the barangay (relevant for multi-basin barangays); tapping a tile swaps the main hydrograph to that basin's curve.
-- **"Precipitation Overview"**: the synthetic storm hyetograph (or live forecast once wired up) as an hourly bar chart.
-- Card pattern throughout: header row (title + overflow dots), light shadow, one primary metric per card, one action button at the bottom.
-- Map stays mounted as the base layer at all times; bottom-right hidden "+" menu unchanged.
+**Deliberately not built**, because the data to build them honestly doesn't
+exist in this repo — building fake versions would mislead the officials this
+app is for:
+- **Choropleth map**: needs barangay boundary geometry
+  (`barangay_biliran.geojson`, part of the external pipeline, not checked in
+  here) and/or per-barangay coordinates, neither of which
+  `barangay_dashboard_data.json` carries.
+- **Hydrograph chart** (`time_hours` vs. `Q`): needs a Q-vs-time series per
+  basin; only single crossing-time scalars exist per barangay.
+- **HAND/TWI/LC factor breakdown**: only the combined `mean_fsi_score` is in
+  the data, not the individual factor contributions.
+- **"Contributing Basins" tiles / per-basin curves**: `basin_ids` is just a
+  list of numeric IDs, no names or curves.
+- **"Precipitation Overview" hyetograph**: no rainfall time series in this
+  data.
+
+Add the corresponding fields to the pipeline's JSON output before building
+any of these — see the original reference-mapping notes this section used to
+carry, still useful for whoever does that: a weather-monitoring SaaS layout
+(wide map+charts left, narrower "Detail Overview" sidebar right), card
+pattern = header row + light shadow + one primary metric + one action
+button, map mounted as the base layer at all times.
 
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
@@ -128,7 +176,8 @@ known open bug is source-level UTF-8 double-encoding in
 
 ## Open items
 
-- Dashboard UI (map + countdown panels per the design above) is not yet built — `app/page.tsx`'s `.bfw-dash` section is still a placeholder.
-- Whether `app/login/page.tsx` is still wired into the app or superseded by the merged `app/page.tsx` flow hasn't been resolved — check before building on either.
+- Choropleth map, hydrograph chart, FSI factor breakdown, and precipitation view are blocked on pipeline data this repo doesn't have — see "Deliberately not built" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
-- Admin panel and Profile feature (needs Supabase Storage) are not started.
+- Profile has no Storage-backed fields (e.g. a photo) — no design decisions made yet.
+- The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
+- None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
