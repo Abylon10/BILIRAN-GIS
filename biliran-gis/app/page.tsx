@@ -15,33 +15,48 @@
 // This is a UX gate, not a security boundary — real access control still
 // lives in the Supabase session + RLS policies.
 //
-// Replace the placeholder <DashboardShell> and <IslandScene> pieces with
-// the real MapLibre map once that's ready — the state machine and
-// transition logic around them won't need to change.
+// <DashboardShell> reads public/data/barangay_dashboard_data.json directly;
+// it does not yet include a real map — see its file header for why. Swap
+// <IslandScene> for a real MapLibre choropleth once barangay boundary
+// geometry is available in this repo.
 
 'use client'
 
 import { useEffect, useState, useCallback, type FormEvent } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { fetchOwnProfile } from '@/lib/profile'
+import DashboardShell from '@/components/DashboardShell'
+import ProfilePanel from '@/components/ProfilePanel'
+import AdminInvitePanel from '@/components/AdminInvitePanel'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
 
 type AuthState = 'checking' | 'needsLogin' | 'revealed'
 
+function prefersDark() {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 export default function HomePage() {
   const [authState, setAuthState] = useState<AuthState>('checking')
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (prefersDark() ? 'dark' : 'light'))
   const [menuOpen, setMenuOpen] = useState(false)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activated, setActivated] = useState(false)
 
-  // Follow system theme
+  const [user, setUser] = useState<User | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
+  const [showInvitations, setShowInvitations] = useState(false)
+
+  // Keep theme in sync with system changes after the initial render above.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    setTheme(mq.matches ? 'dark' : 'light')
     const listener = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light')
     mq.addEventListener('change', listener)
     return () => mq.removeEventListener('change', listener)
@@ -54,6 +69,12 @@ export default function HomePage() {
       const lastLogin = window.localStorage.getItem(LAST_LOGIN_KEY)
       const today = new Date().toDateString()
 
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('activated') === '1') {
+        setActivated(true)
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+
       if (session && lastLogin === today) {
         setAuthState('revealed')
       } else {
@@ -62,6 +83,25 @@ export default function HomePage() {
     }
     resolve()
   }, [])
+
+  // Load the signed-in user + admin status once the dashboard is revealed.
+  useEffect(() => {
+    if (authState !== 'revealed') return
+    let cancelled = false
+
+    async function loadUser() {
+      const { data: { user: current } } = await supabase.auth.getUser()
+      if (cancelled || !current) return
+      setUser(current)
+      const profile = await fetchOwnProfile(current.id)
+      if (!cancelled) setIsAdmin(profile?.access_level === 'admin')
+    }
+    loadUser()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authState])
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -86,6 +126,8 @@ export default function HomePage() {
   const handleSignOut = useCallback(async () => {
     await supabase.auth.signOut()
     window.localStorage.removeItem(LAST_LOGIN_KEY)
+    setUser(null)
+    setIsAdmin(false)
     setAuthState('needsLogin')
   }, [])
 
@@ -190,6 +232,12 @@ export default function HomePage() {
           <h2 className="mt-2 text-center text-xl font-semibold" style={{ color: 'var(--text-strong)' }}>Sign in</h2>
           <p className="text-center mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Biliran Flood Watch</p>
 
+          {activated && (
+            <p className="mt-4 rounded-md bg-[#E7F3E9] px-3 py-2 text-center text-sm text-[#2C5F3E]">
+              Account activated — sign in below.
+            </p>
+          )}
+
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
             <Field label="Email" type="email" value={email} onChange={setEmail} valid={email.length > 0 && emailValid} />
             <Field label="Password" type="password" value={password} onChange={setPassword} valid={password.length > 0 && passwordValid} />
@@ -207,13 +255,15 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Dashboard shell placeholder */}
-      <div className="bfw-dash absolute inset-0 z-10 p-6" data-revealed={revealed}>
-        <div>
-          <h1 className="text-lg font-semibold text-[#F2F6F5]">Biliran — flood risk map</h1>
-          <p className="text-sm text-[#CFE0DD]">Live conditions loading…</p>
+      {/* Dashboard shell */}
+      <div className="bfw-dash absolute inset-0 z-10 flex flex-col p-6" data-revealed={revealed}>
+        <div className="mb-4">
+          <h1 className="text-lg font-semibold text-[#F2F6F5]">Biliran — flood risk dashboard</h1>
+          <p className="text-sm text-[#CFE0DD]">MDRRMO / barangay flood early-warning conditions</p>
         </div>
-        {/* Real map, drill-down, and countdown dashboard go here */}
+        <div className="min-h-0 flex-1">
+          {revealed && <DashboardShell />}
+        </div>
       </div>
 
       {/* Bottom-right menu: Profile / Dashboard / Sign out — only relevant once logged in */}
@@ -221,8 +271,11 @@ export default function HomePage() {
         <div className="absolute bottom-5 right-5 z-20 flex flex-col items-end gap-2">
           {menuOpen && (
             <div className="mb-1 flex flex-col overflow-hidden rounded-2xl border shadow-lg backdrop-blur-xl" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-              <MenuItem label="Profile" onClick={() => setMenuOpen(false)} />
+              <MenuItem label="Profile" onClick={() => { setShowProfile(true); setMenuOpen(false) }} />
               <MenuItem label="Dashboard" onClick={() => setMenuOpen(false)} />
+              {isAdmin && (
+                <MenuItem label="Invitations" onClick={() => { setShowInvitations(true); setMenuOpen(false) }} />
+              )}
               <MenuItem label="Sign out" onClick={handleSignOut} />
             </div>
           )}
@@ -243,6 +296,9 @@ export default function HomePage() {
         className="bfw-loading-cover"
         style={{ opacity: authState === 'checking' ? 1 : 0, pointerEvents: authState === 'checking' ? 'auto' : 'none' }}
       />
+
+      {showProfile && user && <ProfilePanel user={user} onClose={() => setShowProfile(false)} />}
+      {showInvitations && isAdmin && <AdminInvitePanel onClose={() => setShowInvitations(false)} />}
     </div>
   )
 }
