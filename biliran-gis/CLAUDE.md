@@ -175,6 +175,20 @@ municipality-zoom target bounds use a tight 7% padding (`muniBoundsByPrefix`)
 so tapping a municipality fills most of the frame with it, not a small shape
 adrift in a lot of open sea.
 
+Two things to keep in mind if you touch this styling again: (1) `#bfw-land-sheen`
+must stay `gradientUnits="userSpaceOnUse"` with `x1`/`y1`/`x2`/`y2` pinned to
+`islandBounds`, not the SVG default `objectBoundingBox` — with the default,
+every polygon draws its own independent light sweep across its own bounding
+box, and since many of Biliran's barangays are long, thin coast-to-interior
+wedges (real geometry, common here — not a data error), that reads as a
+shattered-glass stripe pattern once zoomed in, rather than one light source
+across the scene. (2) `BarangayLayer`'s *unselected* stroke is a translucent
+dark seam (`rgba(11, 30, 40, 0.3)`, 0.0003 wide), not a bright/white one —
+a bright stroke on every one of those same thin wedges is the other half of
+that same "shattered" look, this time from the borders rather than the
+sheen. The selected barangay's white, thicker stroke is unaffected and
+should stay bright so selection still pops.
+
 **Provenance of `public/data/geo/*.geojson`**: derived from three source
 files supplied directly for this project (not re-derived automatically from
 anything already in this repo) — this project's own

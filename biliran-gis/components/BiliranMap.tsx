@@ -165,7 +165,22 @@ export default function BiliranMap({
           <filter id="bfw-land-shadow" x="-40%" y="-40%" width="180%" height="180%">
             <feDropShadow dx="0.0009" dy="0.0014" stdDeviation="0.0016" floodColor="#0B1E28" floodOpacity="0.45" />
           </filter>
-          <linearGradient id="bfw-land-sheen" x1="0" y1="0" x2="1" y2="1">
+          {/*
+            userSpaceOnUse + fixed island-bounds coordinates, not the SVG
+            default (objectBoundingBox): otherwise every polygon draws its
+            own independent light sweep across its own bounding box, and
+            Biliran's barangays are long thin coast-to-interior wedges, so
+            zoomed in that reads as a shattered/striped mess instead of one
+            light source across the whole scene.
+          */}
+          <linearGradient
+            id="bfw-land-sheen"
+            gradientUnits="userSpaceOnUse"
+            x1={islandBounds.minX}
+            y1={islandBounds.minY}
+            x2={islandBounds.maxX}
+            y2={islandBounds.maxY}
+          >
             <stop offset="0%" stopColor="#ffffff" stopOpacity="0.28" />
             <stop offset="45%" stopColor="#ffffff" stopOpacity="0.04" />
             <stop offset="100%" stopColor="#000000" stopOpacity="0.12" />
@@ -343,8 +358,8 @@ function BarangayLayer({
               d={d}
               fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
               fillOpacity={selected ? 1 : 0.88}
-              stroke={selected ? '#fff' : 'var(--card-bg)'}
-              strokeWidth={selected ? 0.0014 : 0.0005}
+              stroke={selected ? '#fff' : 'rgba(11, 30, 40, 0.3)'}
+              strokeWidth={selected ? 0.0014 : 0.0003}
               onClick={() => onSelect(f.properties.key)}
               style={{ cursor: 'pointer' }}
             >
