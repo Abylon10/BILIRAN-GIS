@@ -378,9 +378,10 @@ function BarangayLayer({
 
 function Legend() {
   const stops: [string, number][] = [
-    ['Low', 0.1],
-    ['Moderate', 0.4],
-    ['High', 0.65],
+    ['Very Low', 0.1],
+    ['Low', 0.3],
+    ['Moderate', 0.5],
+    ['High', 0.7],
     ['Very High', 0.9],
   ]
   return (

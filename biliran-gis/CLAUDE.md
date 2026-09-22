@@ -156,8 +156,11 @@ tried first and mis-centered the zoom, because SVG-vs-CSS coordinate-space
 handling for `transform-origin` is inconsistent across browsers — use the
 native SVG `transform` attribute for this, not `style.transform`) and shows
 its barangay polygons, colored by `mean_fsi_score` via a continuous
-green→yellow→orange→red scale (`fsiScoreColor()`, distinct from the
-4-color discrete `urgencyTierColor()` used elsewhere for dots/badges).
+5-stop scale — green/yellow-green/yellow/orange/red for Very Low/Low/
+Moderate/High/Very High (`fsiScoreColor()`, matching the pipeline's fixed
+class thresholds at 0.2/0.4/0.6/0.8 — see the "Known gotchas" section —
+distinct from but color-matched to the discrete `urgencyTierColor()` used
+elsewhere for dots/badges).
 Selecting a barangay (map or list) keeps both in sync. Maripipi has no
 polygon data (see provenance below) and renders as a plain marker; tapping
 it shows a note that it isn't monitored, per the settled decision to label

@@ -8,7 +8,7 @@
 
 import { municipalityForPrefix } from '@/lib/municipalities'
 
-export type FsiLabel = 'Low' | 'Moderate' | 'High' | 'Very High' | string
+export type FsiLabel = 'Very Low' | 'Low' | 'Moderate' | 'High' | 'Very High' | string
 
 export interface BarangayRecord {
   barangay: string
@@ -135,22 +135,33 @@ export function urgencyTierColor(label: FsiLabel): string {
     case 'Moderate':
       return '#D9B23C'
     case 'Low':
+      return '#8CB93D'
+    case 'Very Low':
       return '#4F8A45'
     default:
       return '#7A8A99'
   }
 }
 
+// Matches the pipeline's fixed FSI class thresholds (0.2/0.4/0.6/0.8 — see
+// CLAUDE.md): Very Low/Low/Moderate/High/Very High, one color stop at each
+// band's center so the gradient blends smoothly but still reads as that
+// color across most of its band.
 const SCORE_COLOR_STOPS: [number, [number, number, number]][] = [
-  [0, [79, 138, 69]], // #4F8A45 green
-  [0.35, [217, 178, 60]], // #D9B23C yellow
-  [0.65, [232, 163, 61]], // #E8A33D orange
-  [1, [192, 57, 43]], // #C0392B red
+  [0.1, [79, 138, 69]], // #4F8A45 green — Very Low
+  [0.3, [140, 185, 61]], // #8CB93D yellow-green — Low
+  [0.5, [217, 178, 60]], // #D9B23C yellow — Moderate
+  [0.7, [232, 163, 61]], // #E8A33D orange — High
+  [0.9, [192, 57, 43]], // #C0392B red — Very High
 ]
 
-/** Continuous green→yellow→orange→red fill for a mean_fsi_score in [0, 1], for map polygons. */
+/** Continuous green→yellow-green→yellow→orange→red fill for a mean_fsi_score in [0, 1], for map polygons. */
 export function fsiScoreColor(score: number): string {
   const s = Math.min(1, Math.max(0, score))
+  const [firstStop, firstColor] = SCORE_COLOR_STOPS[0]
+  if (s <= firstStop) return `rgb(${firstColor.join(', ')})`
+  const [lastStop, lastColor] = SCORE_COLOR_STOPS[SCORE_COLOR_STOPS.length - 1]
+  if (s >= lastStop) return `rgb(${lastColor.join(', ')})`
   for (let i = 0; i < SCORE_COLOR_STOPS.length - 1; i++) {
     const [s0, c0] = SCORE_COLOR_STOPS[i]
     const [s1, c1] = SCORE_COLOR_STOPS[i + 1]
