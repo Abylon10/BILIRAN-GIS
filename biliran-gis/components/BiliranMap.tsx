@@ -165,6 +165,9 @@ export default function BiliranMap({
           <filter id="bfw-land-shadow" x="-40%" y="-40%" width="180%" height="180%">
             <feDropShadow dx="0.0009" dy="0.0014" stdDeviation="0.0016" floodColor="#0B1E28" floodOpacity="0.45" />
           </filter>
+          <filter id="bfw-text-shadow" x="-60%" y="-60%" width="220%" height="220%">
+            <feDropShadow dx="0.0003" dy="0.0005" stdDeviation="0.0005" floodColor="#0B1E28" floodOpacity="0.6" />
+          </filter>
           {/*
             userSpaceOnUse + fixed island-bounds coordinates, not the SVG
             default (objectBoundingBox): otherwise every polygon draws its
@@ -249,13 +252,14 @@ export default function BiliranMap({
         <button
           type="button"
           onClick={() => setFocusedMuni(null)}
-          className="absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow backdrop-blur-md"
+          className="absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md"
           style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
         >
           ← All municipalities
         </button>
       )}
 
+      <WeatherBadge />
       <Legend />
 
       {maripipiNote && (
@@ -321,8 +325,10 @@ function MunicipalityLayer({
             x={projected[0]}
             y={projected[1]}
             fontSize={0.006}
+            fontWeight={600}
             textAnchor="middle"
             fill="#fff"
+            filter="url(#bfw-text-shadow)"
             style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 0.0015 }}
           >
             {f.properties.municipality}
@@ -386,19 +392,59 @@ function Legend() {
   ]
   return (
     <div
-      className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] shadow backdrop-blur-md"
+      className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
     >
       {stops.map(([label, score]) => (
         <span key={label} className="flex items-center gap-1">
           <span
             className="inline-block h-2 w-2 rounded-full"
-            style={{ background: fsiScoreColor(score) }}
+            style={{ background: fsiScoreColor(score), boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
             aria-hidden
           />
           {label}
         </span>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Decorative badge reinforcing what the "modeled, not live" banner above the
+ * map already says in text — this is a synthetic design storm, not current
+ * weather. Animated purely for polish (cloud drift, falling rain), not
+ * driven by any real forecast data.
+ */
+function WeatherBadge() {
+  return (
+    <div
+      className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full border py-1.5 pl-2 pr-3 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
+    >
+      <style>{`
+        @keyframes bfw-cloud-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1.5px); } }
+        @keyframes bfw-drop-fall {
+          0% { transform: translateY(-2px); opacity: 0; }
+          25% { opacity: 1; }
+          85% { opacity: 0; }
+          100% { transform: translateY(8px); opacity: 0; }
+        }
+        .bfw-weather-cloud { animation: bfw-cloud-drift 4s ease-in-out infinite; }
+        .bfw-weather-drop { animation: bfw-drop-fall 1.1s linear infinite; }
+      `}</style>
+      <svg width="24" height="20" viewBox="0 0 44 36" aria-hidden>
+        <g className="bfw-weather-cloud">
+          <ellipse cx="15" cy="16" rx="10" ry="8" fill="#AEB9C2" />
+          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill="#C3CDD4" />
+          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill="#DCE3E7" />
+        </g>
+        <line className="bfw-weather-drop" x1="13" y1="25" x2="11" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0s' }} />
+        <line className="bfw-weather-drop" x1="21" y1="25" x2="19" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0.35s' }} />
+        <line className="bfw-weather-drop" x1="29" y1="25" x2="27" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0.7s' }} />
+      </svg>
+      <span className="text-[10px] font-medium" style={{ color: 'var(--text-strong)' }}>
+        Modeled storm
+      </span>
     </div>
   )
 }

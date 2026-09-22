@@ -173,9 +173,18 @@ reads as messy rather than "raised"; a shared diagonal sheen gradient
 (`#bfw-land-sheen`) layered on top of each polygon's fill for a glossy,
 lit-from-one-corner look (deliberately stylized, not meant to read as real
 terrain/hillshade — this project has no DEM data); a radial highlight on the
-sea (`#bfw-sea-glow`); and a `.bfw-map-poly:hover` brightness lift. The
-municipality-zoom target bounds use a tight 7% padding (`muniBoundsByPrefix`)
-so tapping a municipality fills most of the frame with it, not a small shape
+sea (`#bfw-sea-glow`); a `.bfw-map-poly:hover` brightness lift; and a
+tighter `#bfw-text-shadow` filter (plus bolder weight) on municipality
+labels for legibility over the varying fill colors beneath them. The map's
+floating chrome — back button, `Legend`, and the animated `WeatherBadge`
+("Modeled storm", a purely decorative drifting-cloud/falling-rain icon
+reinforcing the same "not live" point the banner above the map makes in
+text) — all share the same glass-chip depth treatment (`shadow-lg
+ring-1 ring-white/10 backdrop-blur-md`) as the map container itself, so the
+UI overlays read as part of one consistent system rather than flat labels
+pasted on top. The municipality-zoom target bounds use a tight 7% padding
+(`muniBoundsByPrefix`) so tapping a municipality fills most of the frame
+with it, not a small shape
 adrift in a lot of open sea.
 
 Two things to keep in mind if you touch this styling again: (1) `#bfw-land-sheen`
