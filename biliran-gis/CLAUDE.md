@@ -86,8 +86,21 @@ only to admins (`components/AdminInvitePanel.tsx`).
 **Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
 which shows the signed-in user's email plus `office`/`access_level` fetched
 via `lib/profile.ts` (`fetchOwnProfile`, anon client — relies on a Supabase
-RLS policy letting a user read their own `user_profiles` row). No
-Storage-backed fields (e.g. a photo) yet.
+RLS policy letting a user read their own `user_profiles` row). It also has
+a photo, backed by a private Supabase Storage `avatars` bucket (see
+`supabase/avatars-storage-setup.sql`, **not auto-applied** — someone with
+Supabase dashboard/CLI access has to run it once): upload goes through
+`POST /api/profile/avatar-upload-url` (Bearer-token-authenticated, any
+signed-in user, no `access_level` check — mints a tokenized
+`createSignedUploadUrl` scoped to `{user.id}/avatar`), the client uploads
+directly to that URL via `supabase.storage.from('avatars').uploadToSignedUrl`,
+then `updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on
+the user's own `user_profiles` row (needs the new "update own row" RLS
+policy from that same SQL file — there wasn't one before). Display always
+goes through a freshly-signed read URL (`getAvatarUrl()`), never a public
+bucket URL — the bucket stays private. The photo also shows as a small
+circular thumbnail on the "+" menu trigger button in `app/page.tsx` once
+one exists, in place of the generic "+" icon.
 
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
@@ -315,7 +328,7 @@ known open bug is source-level UTF-8 double-encoding in
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
-- Profile has no Storage-backed fields (e.g. a photo) — no design decisions made yet.
+- Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
 - The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
 - None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
 - The map has no continuous pinch/scroll zoom, only tap-a-municipality-to-zoom and a "back to all municipalities" button.

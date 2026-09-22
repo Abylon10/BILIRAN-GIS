@@ -25,7 +25,7 @@
 import { useEffect, useState, useCallback, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { fetchOwnProfile } from '@/lib/profile'
+import { fetchOwnProfile, getAvatarUrl } from '@/lib/profile'
 import DashboardShell from '@/components/DashboardShell'
 import ProfilePanel from '@/components/ProfilePanel'
 import AdminInvitePanel from '@/components/AdminInvitePanel'
@@ -51,6 +51,7 @@ export default function HomePage() {
 
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [showInvitations, setShowInvitations] = useState(false)
 
@@ -94,7 +95,12 @@ export default function HomePage() {
       if (cancelled || !current) return
       setUser(current)
       const profile = await fetchOwnProfile(current.id)
-      if (!cancelled) setIsAdmin(profile?.access_level === 'admin')
+      if (cancelled) return
+      setIsAdmin(profile?.access_level === 'admin')
+      if (profile?.avatar_path) {
+        const url = await getAvatarUrl(profile.avatar_path)
+        if (!cancelled) setAvatarUrl(url)
+      }
     }
     loadUser()
 
@@ -284,10 +290,15 @@ export default function HomePage() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Open menu"
             aria-expanded={menuOpen}
-            className="flex h-12 w-12 items-center justify-center rounded-full border shadow-lg backdrop-blur-xl transition-transform"
+            className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border shadow-lg backdrop-blur-xl transition-transform"
             style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)', transform: menuOpen ? 'rotate(45deg)' : 'none' }}
           >
-            <span className="text-2xl leading-none">+</span>
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" style={{ transform: menuOpen ? 'rotate(-45deg)' : 'none' }} />
+            ) : (
+              <span className="text-2xl leading-none">+</span>
+            )}
           </button>
         </div>
       )}
@@ -298,7 +309,9 @@ export default function HomePage() {
         style={{ opacity: authState === 'checking' ? 1 : 0, pointerEvents: authState === 'checking' ? 'auto' : 'none' }}
       />
 
-      {showProfile && user && <ProfilePanel user={user} onClose={() => setShowProfile(false)} />}
+      {showProfile && user && (
+        <ProfilePanel user={user} onClose={() => setShowProfile(false)} onAvatarChange={setAvatarUrl} />
+      )}
       {showInvitations && isAdmin && <AdminInvitePanel onClose={() => setShowInvitations(false)} />}
     </div>
   )
