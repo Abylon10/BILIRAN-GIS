@@ -437,19 +437,22 @@ interface WeatherCondition {
  * close that one number is, nothing more.
  */
 function weatherConditionFor(crossing: Crossing): WeatherCondition {
+  // Darker/more saturated at every tier than the first pass — the pale
+  // near-white grays used before blended straight into the light theme's
+  // near-white --card-bg and were effectively invisible at a glance.
   if (!crossing) {
-    return { label: 'Calm', cloud: ['#E7ECEE', '#D3DBE0', '#C3CDD4'], dropColor: '#7FC1DE', dropCount: 0, duration: 1.6 }
+    return { label: 'Calm', cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
   }
   if (crossing.tier === 'Danger') {
-    return { label: 'Heavy rain', cloud: ['#B7C2C9', '#9AA6AF', '#8A97A1'], dropColor: '#3E7FB0', dropCount: 4, duration: 0.65 }
+    return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65 }
   }
   if (crossing.hours < 0.5) {
-    return { label: 'Rain', cloud: ['#C9D2D8', '#AEB9C2', '#9AA6AF'], dropColor: '#5FA9CC', dropCount: 3, duration: 1.1 }
+    return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1 }
   }
   if (crossing.hours < 1) {
-    return { label: 'Light rain', cloud: ['#DCE3E7', '#C3CDD4', '#AEB9C2'], dropColor: '#7FC1DE', dropCount: 2, duration: 1.6 }
+    return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6 }
   }
-  return { label: 'Cloudy', cloud: ['#E7ECEE', '#D3DBE0', '#C3CDD4'], dropColor: '#7FC1DE', dropCount: 0, duration: 1.6 }
+  return { label: 'Cloudy', cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
 }
 
 function dropX(count: number, index: number): number {
@@ -471,7 +474,7 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
 
   return (
     <div
-      className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full border py-1.5 pl-2 pr-3 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      className="absolute right-3 top-3 flex items-center gap-2 rounded-full border py-2 pl-2.5 pr-3.5 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
       title={title}
     >
@@ -486,11 +489,11 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
         .bfw-weather-cloud { animation: bfw-cloud-drift 4s ease-in-out infinite; }
         .bfw-weather-drop { animation-name: bfw-drop-fall; animation-timing-function: linear; animation-iteration-count: infinite; }
       `}</style>
-      <svg width="24" height="20" viewBox="0 0 44 36" aria-hidden>
+      <svg width="38" height="32" viewBox="0 0 44 36" aria-hidden>
         <g className="bfw-weather-cloud">
-          <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} />
-          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} />
-          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} />
+          <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
         </g>
         {Array.from({ length: condition.dropCount }).map((_, i) => {
           const x = dropX(condition.dropCount, i)
@@ -501,9 +504,9 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
               x1={x}
               y1={25}
               x2={x - 2}
-              y2={30}
+              y2={31}
               stroke={condition.dropColor}
-              strokeWidth={2.2}
+              strokeWidth={3}
               strokeLinecap="round"
               style={{
                 animationDuration: `${condition.duration}s`,
@@ -513,7 +516,7 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
           )
         })}
       </svg>
-      <span className="text-[10px] font-medium" style={{ color: 'var(--text-strong)' }}>
+      <span className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
         {condition.label}
       </span>
     </div>
