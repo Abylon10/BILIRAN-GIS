@@ -208,6 +208,17 @@ export default function BiliranMap({
             <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
           </radialGradient>
           {/*
+            Puffier cloud lobes (DriftingClouds, WeatherIconSVG) use this
+            instead of a flat fill — a soft off-center highlight plus a
+            dimmer rim gives each lobe volume instead of reading as a flat
+            gray/white blob. Purely a styling gradient, not tied to any data.
+          */}
+          <radialGradient id="bfw-cloud-body" cx="38%" cy="32%" r="70%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
+            <stop offset="60%" stopColor="#ffffff" stopOpacity="0.88" />
+            <stop offset="100%" stopColor="#DCE6EA" stopOpacity="0.75" />
+          </radialGradient>
+          {/*
             Stronger version of bfw-land-sheen, used only for zoomed-in
             barangay shapes (BarangayLayer) — they render much larger on
             screen than the island-overview municipalities, so the same
@@ -357,17 +368,22 @@ function DriftingClouds({ bounds }: { bounds: Bounds }) {
         }
       `}</style>
       <g style={{ animation: 'bfw-cloud-cross 65s linear infinite' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.16}) scale(${width * 0.09})`} opacity={0.22} fill="#fff">
-          <ellipse cx="-0.6" cy="0" rx="0.9" ry="0.55" />
-          <ellipse cx="0.3" cy="-0.25" rx="0.8" ry="0.5" />
-          <ellipse cx="0.9" cy="0.15" rx="1.1" ry="0.55" />
+        <g transform={`translate(${cx},${bounds.minY + height * 0.16}) scale(${width * 0.09})`} opacity={0.26}>
+          <ellipse cx="-0.6" cy="0.08" rx="0.9" ry="0.55" fill="#B9C7CE" opacity={0.5} />
+          <ellipse cx="0.9" cy="0.22" rx="1.1" ry="0.55" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="-0.65" cy="-0.05" rx="0.75" ry="0.48" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="0.3" cy="-0.3" rx="0.8" ry="0.5" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="1.35" cy="0.1" rx="0.6" ry="0.4" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="0.05" cy="0.05" rx="1.05" ry="0.42" fill="url(#bfw-cloud-body)" />
         </g>
       </g>
       <g style={{ animation: 'bfw-cloud-cross 82s linear infinite', animationDelay: '-35s' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.34}) scale(${width * 0.065})`} opacity={0.16} fill="#fff">
-          <ellipse cx="-0.5" cy="0" rx="0.75" ry="0.45" />
-          <ellipse cx="0.35" cy="-0.2" rx="0.65" ry="0.4" />
-          <ellipse cx="0.85" cy="0.1" rx="0.9" ry="0.45" />
+        <g transform={`translate(${cx},${bounds.minY + height * 0.34}) scale(${width * 0.065})`} opacity={0.2}>
+          <ellipse cx="-0.5" cy="0.06" rx="0.75" ry="0.45" fill="#B9C7CE" opacity={0.5} />
+          <ellipse cx="0.85" cy="0.18" rx="0.9" ry="0.45" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="-0.55" cy="-0.04" rx="0.6" ry="0.38" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="0.35" cy="-0.24" rx="0.65" ry="0.4" fill="url(#bfw-cloud-body)" />
+          <ellipse cx="0.05" cy="0.04" rx="0.85" ry="0.34" fill="url(#bfw-cloud-body)" />
         </g>
       </g>
     </g>
@@ -605,7 +621,10 @@ function WeatherIconSVG({ condition }: { condition: WeatherCondition }) {
       <g className="bfw-weather-cloud">
         <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
         <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+        <ellipse cx="10" cy="20" rx="7" ry="5.5" fill={condition.cloud[2]} stroke="rgba(11,30,40,0.2)" strokeWidth="0.6" />
         <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+        {/* Soft top-left gloss for a puffier, more dimensional look, closer to a glossy weather-icon-sheet style */}
+        <ellipse cx="19" cy="12" rx="8" ry="4" fill="#ffffff" opacity={0.22} />
       </g>
       {Array.from({ length: condition.dropCount }).map((_, i) => {
         const x = dropX(condition.dropCount, i)

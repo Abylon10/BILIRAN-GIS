@@ -144,7 +144,7 @@ export default function HomePage() {
       <style>{`
         .bfw-root[data-theme='light'] {
           --sky-top: #6EC6E8; --sky-bottom: #DCEFF5;
-          --sea-top: #1E7F8C; --sea-bottom: #58C2C9;
+          --sea-top: #0B5C78; --sea-bottom: #2FA6B8;
           --land: #6FA85B; --land-dark: #4F8A45; --contour: #3E7038; --mountain: #8C7355;
           --sun-glow: rgba(253, 200, 90, 0.55); --sun-core: #FFD873;
           --cloud: rgba(255, 255, 255, 0.9);
@@ -153,7 +153,7 @@ export default function HomePage() {
         }
         .bfw-root[data-theme='dark'] {
           --sky-top: #0B1830; --sky-bottom: #1B2C46;
-          --sea-top: #0B3038; --sea-bottom: #114652;
+          --sea-top: #051E28; --sea-bottom: #0D3D48;
           --land: #33502F; --land-dark: #24391F; --contour: #1B2E17; --mountain: #4A4038;
           --sun-glow: rgba(230, 235, 255, 0.18); --sun-core: #EDEFF7;
           --cloud: rgba(210, 220, 235, 0.35);
