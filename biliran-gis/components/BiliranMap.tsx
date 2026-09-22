@@ -26,7 +26,13 @@ import {
   type GeoFeatureCollection,
   type LineFeatureCollection,
 } from '@/lib/geo'
-import { fsiScoreColor, municipalityWorstScore, type Barangay } from '@/lib/dashboardData'
+import {
+  fsiScoreColor,
+  formatHoursAsCountdown,
+  mostUrgentCrossing,
+  municipalityWorstScore,
+  type Barangay,
+} from '@/lib/dashboardData'
 import { MARIPIPI } from '@/lib/municipalities'
 
 interface MuniProps {
@@ -109,6 +115,10 @@ export default function BiliranMap({
     for (const b of barangays) map.set(b.key, b)
     return map
   }, [barangays])
+
+  // Drives the weather badge's condition — the same underlying signal as
+  // the LIVE UPDATE banner above the map, not a separate/fabricated one.
+  const urgentCrossing = useMemo(() => mostUrgentCrossing(barangays), [barangays])
 
   if (loadError) {
     return (
@@ -259,7 +269,7 @@ export default function BiliranMap({
         </button>
       )}
 
-      <WeatherBadge />
+      <WeatherBadge crossing={urgentCrossing} />
       <Legend />
 
       {maripipiNote && (
@@ -409,17 +419,61 @@ function Legend() {
   )
 }
 
+type Crossing = { barangay: Barangay; tier: 'Alert' | 'Danger'; hours: number } | null
+
+interface WeatherCondition {
+  label: string
+  cloud: [string, string, string]
+  dropColor: string
+  dropCount: number
+  duration: number
+}
+
 /**
- * Decorative badge reinforcing what the "modeled, not live" banner above the
- * map already says in text — this is a synthetic design storm, not current
- * weather. Animated purely for polish (cloud drift, falling rain), not
- * driven by any real forecast data.
+ * Same underlying signal as the LIVE UPDATE banner above the map (the
+ * single most urgent upcoming Alert/Danger crossing, from mostUrgentCrossing
+ * in lib/dashboardData.ts) — not a separately fabricated "weather" value.
+ * Still a modeled-storm scalar, not a live feed; the icon reflects how
+ * close that one number is, nothing more.
  */
-function WeatherBadge() {
+function weatherConditionFor(crossing: Crossing): WeatherCondition {
+  if (!crossing) {
+    return { label: 'Calm', cloud: ['#E7ECEE', '#D3DBE0', '#C3CDD4'], dropColor: '#7FC1DE', dropCount: 0, duration: 1.6 }
+  }
+  if (crossing.tier === 'Danger') {
+    return { label: 'Heavy rain', cloud: ['#B7C2C9', '#9AA6AF', '#8A97A1'], dropColor: '#3E7FB0', dropCount: 4, duration: 0.65 }
+  }
+  if (crossing.hours < 0.5) {
+    return { label: 'Rain', cloud: ['#C9D2D8', '#AEB9C2', '#9AA6AF'], dropColor: '#5FA9CC', dropCount: 3, duration: 1.1 }
+  }
+  if (crossing.hours < 1) {
+    return { label: 'Light rain', cloud: ['#DCE3E7', '#C3CDD4', '#AEB9C2'], dropColor: '#7FC1DE', dropCount: 2, duration: 1.6 }
+  }
+  return { label: 'Cloudy', cloud: ['#E7ECEE', '#D3DBE0', '#C3CDD4'], dropColor: '#7FC1DE', dropCount: 0, duration: 1.6 }
+}
+
+function dropX(count: number, index: number): number {
+  const step = 18 / (count + 1)
+  return 12 + step * (index + 1)
+}
+
+/**
+ * Cloud/rain badge whose condition tracks the same signal as the LIVE
+ * UPDATE banner — not a separate or fabricated weather feed. Still a
+ * modeled-storm scalar, not live rainfall; see the banner above the map
+ * for that distinction in words.
+ */
+function WeatherBadge({ crossing }: { crossing: Crossing }) {
+  const condition = weatherConditionFor(crossing)
+  const title = crossing
+    ? `${condition.label} — ${crossing.barangay.barangay} (${crossing.barangay.municipality}) reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
+    : 'No modeled crossings in range'
+
   return (
     <div
       className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full border py-1.5 pl-2 pr-3 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
+      title={title}
     >
       <style>{`
         @keyframes bfw-cloud-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1.5px); } }
@@ -430,20 +484,37 @@ function WeatherBadge() {
           100% { transform: translateY(8px); opacity: 0; }
         }
         .bfw-weather-cloud { animation: bfw-cloud-drift 4s ease-in-out infinite; }
-        .bfw-weather-drop { animation: bfw-drop-fall 1.1s linear infinite; }
+        .bfw-weather-drop { animation-name: bfw-drop-fall; animation-timing-function: linear; animation-iteration-count: infinite; }
       `}</style>
       <svg width="24" height="20" viewBox="0 0 44 36" aria-hidden>
         <g className="bfw-weather-cloud">
-          <ellipse cx="15" cy="16" rx="10" ry="8" fill="#AEB9C2" />
-          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill="#C3CDD4" />
-          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill="#DCE3E7" />
+          <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} />
+          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} />
+          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} />
         </g>
-        <line className="bfw-weather-drop" x1="13" y1="25" x2="11" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0s' }} />
-        <line className="bfw-weather-drop" x1="21" y1="25" x2="19" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0.35s' }} />
-        <line className="bfw-weather-drop" x1="29" y1="25" x2="27" y2="30" stroke="#5FA9CC" strokeWidth="2.2" strokeLinecap="round" style={{ animationDelay: '0.7s' }} />
+        {Array.from({ length: condition.dropCount }).map((_, i) => {
+          const x = dropX(condition.dropCount, i)
+          return (
+            <line
+              key={i}
+              className="bfw-weather-drop"
+              x1={x}
+              y1={25}
+              x2={x - 2}
+              y2={30}
+              stroke={condition.dropColor}
+              strokeWidth={2.2}
+              strokeLinecap="round"
+              style={{
+                animationDuration: `${condition.duration}s`,
+                animationDelay: `${(i * condition.duration) / condition.dropCount}s`,
+              }}
+            />
+          )
+        })}
       </svg>
       <span className="text-[10px] font-medium" style={{ color: 'var(--text-strong)' }}>
-        Modeled storm
+        {condition.label}
       </span>
     </div>
   )
