@@ -61,13 +61,18 @@ export async function loadBarangays(): Promise<Barangay[]> {
   return cache
 }
 
-/** Most urgent first: soonest modeled time-to-Danger, then highest mean FSI score. */
-export function sortByUrgency(barangays: Barangay[]): Barangay[] {
+/**
+ * Highest susceptibility first: continuous mean_fsi_score descending, per
+ * the settled decision to rank by that score rather than the discrete
+ * dominant_fsi_label class (see CLAUDE.md). Ties broken by soonest modeled
+ * time-to-Danger.
+ */
+export function sortBySeverity(barangays: Barangay[]): Barangay[] {
   return [...barangays].sort((a, b) => {
-    if (a.danger_time_hours !== b.danger_time_hours) {
-      return a.danger_time_hours - b.danger_time_hours
+    if (a.mean_fsi_score !== b.mean_fsi_score) {
+      return b.mean_fsi_score - a.mean_fsi_score
     }
-    return b.mean_fsi_score - a.mean_fsi_score
+    return a.danger_time_hours - b.danger_time_hours
   })
 }
 
@@ -104,6 +109,15 @@ export function mostUrgentCrossing(barangays: Barangay[]): {
   return best
 }
 
+/** Worst-case (highest) mean_fsi_score among a municipality's barangays — safety-first, not an average. */
+export function municipalityWorstScore(barangays: Barangay[], municipality: string): number {
+  let worst = 0
+  for (const b of barangays) {
+    if (b.municipality === municipality && b.mean_fsi_score > worst) worst = b.mean_fsi_score
+  }
+  return worst
+}
+
 export function formatHoursAsCountdown(hours: number): string {
   const totalMinutes = Math.round(hours * 60)
   const h = Math.floor(totalMinutes / 60)
@@ -125,4 +139,28 @@ export function urgencyTierColor(label: FsiLabel): string {
     default:
       return '#7A8A99'
   }
+}
+
+const SCORE_COLOR_STOPS: [number, [number, number, number]][] = [
+  [0, [79, 138, 69]], // #4F8A45 green
+  [0.35, [217, 178, 60]], // #D9B23C yellow
+  [0.65, [232, 163, 61]], // #E8A33D orange
+  [1, [192, 57, 43]], // #C0392B red
+]
+
+/** Continuous green→yellow→orange→red fill for a mean_fsi_score in [0, 1], for map polygons. */
+export function fsiScoreColor(score: number): string {
+  const s = Math.min(1, Math.max(0, score))
+  for (let i = 0; i < SCORE_COLOR_STOPS.length - 1; i++) {
+    const [s0, c0] = SCORE_COLOR_STOPS[i]
+    const [s1, c1] = SCORE_COLOR_STOPS[i + 1]
+    if (s >= s0 && s <= s1) {
+      const t = s1 === s0 ? 0 : (s - s0) / (s1 - s0)
+      const r = Math.round(c0[0] + (c1[0] - c0[0]) * t)
+      const g = Math.round(c0[1] + (c1[1] - c0[1]) * t)
+      const b = Math.round(c0[2] + (c1[2] - c0[2]) * t)
+      return `rgb(${r}, ${g}, ${b})`
+    }
+  }
+  return '#7A8A99'
 }

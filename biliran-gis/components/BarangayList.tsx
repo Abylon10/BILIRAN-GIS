@@ -1,9 +1,8 @@
 // components/BarangayList.tsx
 //
-// Urgency-sorted list of barangays ("Most Urgent Barangays" in the design
-// spec). Stands in for a choropleth map for now — plotting real barangay
-// boundaries needs barangay_biliran.geojson, which isn't in this repo (see
-// CLAUDE.md).
+// Barangay list ranked by flood susceptibility, highest first (see
+// sortBySeverity in lib/dashboardData.ts). Complements BiliranMap — the map
+// shows where, this shows the ranking as a scannable list.
 
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 
@@ -26,7 +25,7 @@ export default function BarangayList({
 
   return (
     <ul className="flex flex-col gap-2">
-      {barangays.map((b) => {
+      {barangays.map((b, i) => {
         const selected = b.key === selectedKey
         return (
           <li key={b.key}>
@@ -39,6 +38,13 @@ export default function BarangayList({
                 borderColor: selected ? '#E8A33D' : 'var(--card-border)',
               }}
             >
+              <span
+                className="w-5 shrink-0 text-center text-xs font-semibold"
+                style={{ color: 'var(--text-soft)' }}
+                aria-hidden
+              >
+                {i + 1}
+              </span>
               <span
                 aria-hidden
                 className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -53,9 +59,9 @@ export default function BarangayList({
                 </span>
               </span>
               <span className="shrink-0 text-right text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
-                {formatHoursAsCountdown(b.danger_time_hours)}
+                {b.mean_fsi_score.toFixed(2)}
                 <span className="block font-normal" style={{ color: 'var(--text-soft)' }}>
-                  to Danger
+                  {formatHoursAsCountdown(b.danger_time_hours)} to Danger
                 </span>
               </span>
             </button>

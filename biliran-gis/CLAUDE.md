@@ -18,7 +18,10 @@ app**. The Python/GDAL geospatial pipeline that computes flood susceptibility
 (FSI) and the runoff/threshold forecast that feeds `public/data/barangay_dashboard_data.json`
 is developed outside this repo and is not checked in here — treat that data
 file as an external input produced elsewhere, not something to regenerate
-from source in this codebase.
+from source in this codebase. The real barangay/municipality boundary
+polygons under `public/data/geo/` are a similar case — see "The real map"
+below for their provenance and how to regenerate them if the source data
+changes.
 
 ## Commands
 
@@ -100,12 +103,10 @@ source-level double-UTF-8 bug ("Capiñahan," "Santo Niño") — see
 underlying `barangay_biliran.geojson` bug (outside this repo) is still open.
 
 `lib/municipalities.ts` maps each barangay's `pgc_prefix` to a municipality
-name via the PSGC numbering convention for Biliran province — derived, not
-sourced from an authoritative table in this repo, though it self-validates
-against the data (exactly 7 prefixes present, and the one missing —
-`807807`, Maripipi — matches this project's documented exclusion). Verify
-against a real PSGC source before depending on it for anything beyond the
-UI.
+name, and gives Maripipi's centroid for its map marker. Confirmed against an
+official PSA/OCHA administrative-boundaries dataset (province/municipality/
+barangay names, PSGC codes, and centroids) supplied for this project —
+no longer just a self-validated guess.
 
 **Path alias**: `@/*` resolves to the repo root (`tsconfig.json`), e.g.
 `@/lib/supabase`.
@@ -125,24 +126,73 @@ UI.
 ## Dashboard UI
 
 `components/DashboardShell.tsx` (rendered by `app/page.tsx` in place of the
-old `.bfw-dash` placeholder) implements the parts of the original design
-spec below that `barangay_dashboard_data.json` actually supports:
-search-by-barangay/municipality (`components/BarangayList.tsx` +
-`lib/dashboardData.ts` `filterBarangays()`), a "modeled, not live" banner
-naming the single most urgent upcoming Alert/Danger crossing
-(`components/LiveUpdateBanner.tsx`, `mostUrgentCrossing()`), an
-urgency-sorted barangay list standing in for the map (sorted by soonest
-`danger_time_hours`, see `sortByUrgency()`), and a "Detail Overview"-style
-panel on selection (`components/BarangayDetailPanel.tsx`) showing the
-countdown, FSI score/label, basin count, and warning/alert times.
+old `.bfw-dash` placeholder): a "modeled, not live" banner naming the single
+most urgent upcoming Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
+`mostUrgentCrossing()`), search/filter by barangay or municipality
+(`filterBarangays()`), the real map (`components/BiliranMap.tsx`, see below),
+a barangay list ranked by susceptibility (`components/BarangayList.tsx`,
+`sortBySeverity()`), and a "Detail Overview" panel on selection
+(`components/BarangayDetailPanel.tsx`) leading with the FSI class/score,
+then basin count and warning/alert/danger times.
 
-**Deliberately not built**, because the data to build them honestly doesn't
-exist in this repo — building fake versions would mislead the officials this
-app is for:
-- **Choropleth map**: needs barangay boundary geometry
-  (`barangay_biliran.geojson`, part of the external pipeline, not checked in
-  here) and/or per-barangay coordinates, neither of which
-  `barangay_dashboard_data.json` carries.
+Ranking is **highest FSI score first** (`sortBySeverity()` in
+`lib/dashboardData.ts`, mean_fsi_score descending, tie-broken by soonest
+`danger_time_hours`) — an explicit product decision, not the time-based
+"soonest crossing" order used earlier. The LIVE UPDATE banner still uses the
+time-based `mostUrgentCrossing()` signal; the two are deliberately different
+questions ("who's worst" vs. "what happens soonest") and aren't meant to
+agree.
+
+**The real map** (`components/BiliranMap.tsx`, `lib/geo.ts`): actual
+barangay and municipality polygons, not a placeholder or a map-tile service
+— rendered as SVG paths, projected client-side from real WGS84 lon/lat with
+a simple cos(latitude)-corrected equirectangular projection (Biliran is
+small enough, ~30km across, that this is accurate enough; see
+`makeProjector()`). No MapLibre/tile dependency, works fully offline. Default
+view is the whole island, **unzoomed and with no municipality pre-selected**
+— tapping a municipality zooms into it (an SVG `transform` on a `<g>`,
+CSS-transitioned; a plain style-based CSS `transform`/`transform-origin` was
+tried first and mis-centered the zoom, because SVG-vs-CSS coordinate-space
+handling for `transform-origin` is inconsistent across browsers — use the
+native SVG `transform` attribute for this, not `style.transform`) and shows
+its barangay polygons, colored by `mean_fsi_score` via a continuous
+green→yellow→orange→red scale (`fsiScoreColor()`, distinct from the
+4-color discrete `urgencyTierColor()` used elsewhere for dots/badges).
+Selecting a barangay (map or list) keeps both in sync. Maripipi has no
+polygon data (see provenance below) and renders as a plain marker; tapping
+it shows a note that it isn't monitored, per the settled decision to label
+it rather than hide it.
+
+**Provenance of `public/data/geo/*.geojson`**: derived from three source
+files supplied directly for this project (not re-derived automatically from
+anything already in this repo) — this project's own
+`barangay_biliran.geojson` (178 raw polygon features; of those, exactly 115
+match `barangay_dashboard_data.json` by name+municipality with zero
+ambiguity, confirming the "115 real, 63 contamination" note below —
+the 63 contamination features are real barangays from a neighboring Leyte
+province, matched by their own separate `adm2_psgc` code, not Biliran data
+gone bad), `waterways_biliran.geojson` (448 OSM waterway lines, kept as a
+faint context layer on the map), and an official PSA/OCHA administrative
+boundaries spreadsheet (municipality/barangay names, PSGC codes, and
+centroids — used to confirm `lib/municipalities.ts` and locate Maripipi).
+Processing (simplify with `shapely.simplify()`, dissolve barangays into
+municipality outlines with `shapely.ops.unary_union`, join to dashboard
+barangays by `pgc_prefix`+normalized name) was a one-off Python/shapely
+script, **not checked into this repo** — if the source geometry or the
+dashboard data's barangay set changes, that join and simplification needs
+to be redone by hand; there's no `npm run` step that regenerates these
+files.
+
+**Known geo-data gap**: `barangay_biliran.geojson`'s real-Naval count is 24,
+matching `barangay_dashboard_data.json` exactly — but the official PSA/OCHA
+list has 26 barangays for Naval. Two real barangays, **Libertad** and
+**Mabini**, aren't in the dashboard dataset (and so aren't on the map or
+anywhere else in this app) at all. Not fixable from this repo; flag it if
+asked why they're missing.
+
+**Deliberately still not built**, because the data honestly doesn't exist in
+this repo — building fake versions would mislead the officials this app is
+for:
 - **Hydrograph chart** (`time_hours` vs. `Q`): needs a Q-vs-time series per
   basin; only single crossing-time scalars exist per barangay.
 - **HAND/TWI/LC factor breakdown**: only the combined `mean_fsi_score` is in
@@ -153,11 +203,11 @@ app is for:
   data.
 
 Add the corresponding fields to the pipeline's JSON output before building
-any of these — see the original reference-mapping notes this section used to
-carry, still useful for whoever does that: a weather-monitoring SaaS layout
-(wide map+charts left, narrower "Detail Overview" sidebar right), card
-pattern = header row + light shadow + one primary metric + one action
-button, map mounted as the base layer at all times.
+any of these.
+
+**Theme**: the dashboard's post-login background is theme-aware, not one
+fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
+.bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
 
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
@@ -176,8 +226,11 @@ known open bug is source-level UTF-8 double-encoding in
 
 ## Open items
 
-- Choropleth map, hydrograph chart, FSI factor breakdown, and precipitation view are blocked on pipeline data this repo doesn't have — see "Deliberately not built" above.
+- Hydrograph chart, FSI factor breakdown, and precipitation view are blocked on pipeline data this repo doesn't have — see "Deliberately still not built" above.
+- No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
+- Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
 - Profile has no Storage-backed fields (e.g. a photo) — no design decisions made yet.
 - The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
 - None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
+- The map has no continuous pinch/scroll zoom, only tap-a-municipality-to-zoom and a "back to all municipalities" button.

@@ -1,12 +1,11 @@
 // lib/municipalities.ts
 //
 // Maps a barangay's `pgc_prefix` (from barangay_dashboard_data.json) to its
-// municipality. Derived from the PSGC numbering convention for Biliran
-// province (080701-080708, alphabetical by municipality) and cross-checked
-// against the dashboard data: it contains exactly 7 prefixes, and the one
-// missing — 807807 — is Maripipi, which matches this project's documented
-// exclusion of Maripipi from monitoring. Verify against an authoritative
-// PSGC source before relying on this for anything beyond the UI.
+// municipality, and gives Maripipi's location for the "unmonitored" map
+// marker. Confirmed against the PSA/OCHA administrative boundaries dataset
+// (adm3_psgc / center_lat / center_lon per municipality) — the same source
+// used to build public/data/geo/*.geojson — not just the PSGC-numbering
+// guess this file used to carry.
 
 export const MUNICIPALITY_BY_PREFIX: Record<string, string> = {
   '807801': 'Almeria',
@@ -22,4 +21,11 @@ export const MONITORED_MUNICIPALITIES = Object.values(MUNICIPALITY_BY_PREFIX).so
 
 export function municipalityForPrefix(pgcPrefix: string): string {
   return MUNICIPALITY_BY_PREFIX[pgcPrefix] ?? 'Unknown'
+}
+
+/** No polygon/barangay data exists for Maripipi in this repo — only its centroid, for the map's "unmonitored" marker. */
+export const MARIPIPI = {
+  name: 'Maripipi',
+  lon: 124.32138273,
+  lat: 11.78861297,
 }
