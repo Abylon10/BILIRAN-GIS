@@ -26,7 +26,7 @@
 
 'use client'
 
-import { useMemo, useState, type RefObject } from 'react'
+import { useMemo, type RefObject } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
@@ -53,12 +53,10 @@ export default function DashboardShell({
   onMunicipalityChange: (name: string | null) => void
   mapSlotRef: RefObject<HTMLDivElement | null>
 }) {
-  const [query, setQuery] = useState('')
-
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
-    () => filterBarangays(sorted, query, municipality),
-    [sorted, query, municipality]
+    () => filterBarangays(sorted, '', municipality),
+    [sorted, municipality]
   )
   const selected = useMemo(
     () => sorted.find((b) => b.key === selectedKey) ?? null,
@@ -84,14 +82,6 @@ export default function DashboardShell({
           <LiveUpdateBanner barangays={barangays} onSelect={(b) => onSelectKey(b.key)} />
 
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search barangay or municipality…"
-              className="min-w-[200px] flex-1 rounded-md border px-3 py-2 text-sm outline-none"
-              style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
-            />
             <select
               value={municipality ?? ''}
               onChange={(e) => onMunicipalityChange(e.target.value || null)}
@@ -106,7 +96,7 @@ export default function DashboardShell({
           </div>
 
           {/*
-            The map is the dominant element here (~60% of the available
+            The map is the dominant element here (~70% of the available
             height), not one of two panes sharing a column with the list.
             This div is an empty spacer, not the map itself — it just
             reserves the layout space (and its position/size is what
@@ -123,7 +113,7 @@ export default function DashboardShell({
               feature's own testing — tap-to-zoom-a-municipality never
               reached the map once boxed into the dashboard).
             */}
-            <div ref={mapSlotRef} className="h-80 shrink-0 md:h-[60%]" style={{ pointerEvents: 'none' }} />
+            <div ref={mapSlotRef} className="h-96 shrink-0 md:h-[70%]" style={{ pointerEvents: 'none' }} />
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
               <div className="min-h-0 overflow-y-auto pr-1">
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>

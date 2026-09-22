@@ -63,8 +63,8 @@ wrapping `.bfw-map-shell` div is `position: fixed`, sized via inline
 `top/left/width/height` computed in a `useLayoutEffect` (`mapRect` state):
 a full-viewport rect when not `revealed`, or `mapSlotRef.getBoundingClientRect()`
 when `revealed` — `mapSlotRef` is an empty spacer div inside
-`DashboardShell` (`<div ref={mapSlotRef} className="h-80 shrink-0
-md:h-[60%]" />`) that reserves the map's layout slot without rendering a
+`DashboardShell` (`<div ref={mapSlotRef} className="h-96 shrink-0
+md:h-[70%]" />`) that reserves the map's layout slot without rendering a
 map itself. `DashboardShell` is **always mounted** now (not `{revealed &&
 <DashboardShell/>}`), same as its own `.bfw-dash` wrapper already was —
 opacity/pointer-events hide it pre-reveal, not a conditional mount — so
@@ -183,18 +183,21 @@ no longer just a self-validated guess.
 `components/DashboardShell.tsx` (rendered by `app/page.tsx` in place of the
 old `.bfw-dash` placeholder): a "modeled, not live" banner naming the single
 most urgent upcoming Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
-`mostUrgentCrossing()`), search/filter by barangay or municipality
-(`filterBarangays()`), an empty spacer reserving the real map's layout slot
-(the map itself is mounted once, persistently, in `app/page.tsx` — see
-"One persistent map" above, and `components/BiliranMap.tsx` below),
-a barangay list ranked by susceptibility (`components/BarangayList.tsx`,
-`sortBySeverity()`), and a "Detail Overview" panel on selection
-(`components/BarangayDetailPanel.tsx`) leading with the FSI class/score,
-then basin count and warning/alert/danger times.
+`mostUrgentCrossing()`), a municipality filter dropdown (`filterBarangays()`,
+called with a constant `''` query — the free-text search input this used
+to pair with was removed; `filterBarangays()` itself still takes a query
+param, just always `''` from here now), an empty spacer reserving the real
+map's layout slot (the map itself is mounted once, persistently, in
+`app/page.tsx` — see "One persistent map" above, and
+`components/BiliranMap.tsx` below), a barangay list ranked by
+susceptibility (`components/BarangayList.tsx`, `sortBySeverity()`), and a
+"Detail Overview" panel on selection (`components/BarangayDetailPanel.tsx`)
+leading with the FSI class/score, then basin count and warning/alert/danger
+times.
 
 **Layout: the map is the dominant element**, not one of two panes sharing
-a column with the list — it's a full-width row on its own (`h-80 shrink-0
-md:h-[60%]`), with the barangay list and detail panel sharing a shorter
+a column with the list — it's a full-width row on its own (`h-96 shrink-0
+md:h-[70%]`), with the barangay list and detail panel sharing a shorter
 row below it (`md:grid-cols-[1fr_320px]`, same as before). This replaced
 an earlier layout where the map only got `h-64`/`45%` of a column it split
 with the list, back when the map was a smaller, single-fixed-zoom element;
