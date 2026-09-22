@@ -15,10 +15,10 @@
 // This is a UX gate, not a security boundary — real access control still
 // lives in the Supabase session + RLS policies.
 //
-// <DashboardShell> reads public/data/barangay_dashboard_data.json directly;
-// it does not yet include a real map — see its file header for why. Swap
-// <IslandScene> for a real MapLibre choropleth once barangay boundary
-// geometry is available in this repo.
+// <DashboardShell> reads public/data/barangay_dashboard_data.json plus the
+// real barangay/municipality polygons in public/data/geo/ — see its and
+// BiliranMap.tsx's file headers for what's included and what's still
+// deferred for lack of data (hydrograph, FSI factor breakdown).
 
 'use client'
 
@@ -160,8 +160,9 @@ export default function HomePage() {
           --card-bg: rgba(11, 24, 40, 0.6); --card-border: rgba(255, 255, 255, 0.12);
           --text-strong: #F2F6F5; --text-soft: #A9C0C6; --field-line: rgba(255, 255, 255, 0.2);
         }
-        /* Revealed state darkens the sky toward a rainy mood, regardless of theme */
-        .bfw-root[data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #3B5368, #223244) !important; }
+        /* Revealed state darkens the sky toward a rainy mood — still theme-aware, so night mode stays dark and day mode stays an overcast daytime gray rather than collapsing to one fixed look. */
+        .bfw-root[data-theme='light'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #5C7A8C, #8FA6AE) !important; }
+        .bfw-root[data-theme='dark'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #3B5368, #223244) !important; }
         .bfw-root[data-revealed='true'] .bfw-sun { opacity: 0; }
         .bfw-root[data-revealed='true'] .bfw-rain { opacity: 1; }
 

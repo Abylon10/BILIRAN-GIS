@@ -7,7 +7,7 @@
 // a Q-vs-time series — add those fields to the pipeline output before
 // building that part.
 
-import { formatHoursAsCountdown, type Barangay } from '@/lib/dashboardData'
+import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 
 export default function BarangayDetailPanel({ barangay }: { barangay: Barangay | null }) {
   if (!barangay) {
@@ -33,18 +33,25 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
         <p className="text-sm" style={{ color: 'var(--text-soft)' }}>{barangay.municipality}</p>
       </div>
 
-      <div>
-        <div className="text-3xl font-bold" style={{ color: 'var(--text-strong)' }}>
-          {formatHoursAsCountdown(barangay.danger_time_hours)}
-        </div>
-        <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
-          to Danger · {barangay.dominant_fsi_label} susceptibility
+      <div className="flex items-center gap-3">
+        <span
+          className="h-3 w-3 shrink-0 rounded-full"
+          style={{ background: urgencyTierColor(barangay.dominant_fsi_label) }}
+          aria-hidden
+        />
+        <div>
+          <div className="text-3xl font-bold" style={{ color: 'var(--text-strong)' }}>
+            {barangay.dominant_fsi_label}
+          </div>
+          <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
+            flood susceptibility · score {barangay.mean_fsi_score.toFixed(3)}
+          </div>
         </div>
       </div>
 
       <dl className="grid grid-cols-2 gap-3 text-sm">
-        <Stat label="FSI score" value={barangay.mean_fsi_score.toFixed(3)} />
         <Stat label="Basins" value={String(barangay.basin_ids.length)} />
+        <Stat label="Danger at" value={formatHoursAsCountdown(barangay.danger_time_hours)} />
         <Stat label="Warning at" value={formatHoursAsCountdown(barangay.warning_time_hours)} />
         <Stat label="Alert at" value={formatHoursAsCountdown(barangay.alert_time_hours)} />
       </dl>

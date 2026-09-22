@@ -1,12 +1,18 @@
 // components/DashboardShell.tsx
 //
 // Replaces the .bfw-dash placeholder in app/page.tsx. Built from what
-// barangay_dashboard_data.json actually contains (see lib/dashboardData.ts).
-// Deliberately does NOT include a choropleth map, hydrograph chart, or
-// precipitation/factor-breakdown cards from the original design spec in
-// CLAUDE.md — those need barangay boundary geometry and per-basin
-// time-series data that aren't part of this repo's data. Building fake
-// versions of those would mislead the officials this app is for.
+// barangay_dashboard_data.json + public/data/geo/*.geojson actually contain
+// (see lib/dashboardData.ts, lib/geo.ts, CLAUDE.md). Still deliberately does
+// NOT include a hydrograph chart or FSI factor breakdown — those need
+// per-basin time-series/factor data that isn't part of this repo's data.
+// Building fake versions of those would mislead the officials this app is
+// for. The map, though, is real: actual barangay/municipality polygons, not
+// a placeholder — see BiliranMap.tsx.
+//
+// The map defaults to the whole-island view, unzoomed — it never
+// auto-focuses a municipality or barangay on load, even though the LIVE
+// UPDATE banner names the most urgent one; that's intentional so officials
+// aren't dropped into one place before they've chosen to look there.
 
 'use client'
 
@@ -14,11 +20,12 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   filterBarangays,
   loadBarangays,
-  sortByUrgency,
+  sortBySeverity,
   type Barangay,
 } from '@/lib/dashboardData'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
+import BiliranMap from '@/components/BiliranMap'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 
@@ -35,7 +42,7 @@ export default function DashboardShell() {
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load data.'))
   }, [])
 
-  const sorted = useMemo(() => (barangays ? sortByUrgency(barangays) : []), [barangays])
+  const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
     () => filterBarangays(sorted, query, municipality),
     [sorted, query, municipality]
@@ -85,9 +92,17 @@ export default function DashboardShell() {
             </select>
           </div>
 
-          <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden md:grid-cols-[1fr_320px]">
-            <div className="overflow-y-auto pr-1">
-              <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
+            <div className="flex min-h-0 flex-col gap-4">
+              <div className="h-64 shrink-0 md:h-[45%]">
+                <BiliranMap barangays={barangays} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+                  Barangays by flood susceptibility, highest first
+                </h3>
+                <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+              </div>
             </div>
             <div className="hidden md:block">
               <BarangayDetailPanel barangay={selected} />
