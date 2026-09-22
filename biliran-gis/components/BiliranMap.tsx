@@ -99,7 +99,7 @@ export default function BiliranMap({
     if (!municipalities) return {}
     const map: Record<string, Bounds> = {}
     for (const f of municipalities.features) {
-      map[f.properties.pgc_prefix] = expandBounds(boundsOf([f], project), 0.15)
+      map[f.properties.pgc_prefix] = expandBounds(boundsOf([f], project), 0.07)
     }
     return map
   }, [municipalities, project])
@@ -148,12 +148,37 @@ export default function BiliranMap({
   const [mLon, mLat] = project(MARIPIPI.lon, MARIPIPI.lat)
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl border" style={{ borderColor: 'var(--card-border)' }}>
+    <div
+      className="relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10"
+      style={{ borderColor: 'var(--card-border)' }}
+    >
+      <style>{`
+        .bfw-map-poly { transition: filter 0.2s ease, stroke-width 0.2s ease; }
+        .bfw-map-poly:hover { filter: brightness(1.14) saturate(1.08); }
+      `}</style>
       <svg
         viewBox={viewBoxOf(islandBounds)}
         className="h-full w-full"
-        style={{ background: 'linear-gradient(to bottom, var(--sea-top), var(--sea-bottom))' }}
+        style={{ background: 'linear-gradient(155deg, var(--sea-top), var(--sea-bottom) 70%)' }}
       >
+        <defs>
+          <filter id="bfw-land-shadow" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0.0009" dy="0.0014" stdDeviation="0.0016" floodColor="#0B1E28" floodOpacity="0.45" />
+          </filter>
+          <linearGradient id="bfw-land-sheen" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.28" />
+            <stop offset="45%" stopColor="#ffffff" stopOpacity="0.04" />
+            <stop offset="100%" stopColor="#000000" stopOpacity="0.12" />
+          </linearGradient>
+          <radialGradient id="bfw-sea-glow" cx="35%" cy="25%" r="75%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
+            <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        {/* Atmospheric sea highlight, fixed (not zoomed) so it always reads as lighting, not geography */}
+        <rect x={islandBounds.minX} y={islandBounds.minY} width={islandBounds.maxX - islandBounds.minX} height={islandBounds.maxY - islandBounds.minY} fill="url(#bfw-sea-glow)" pointerEvents="none" />
+
         <g transform={transform} style={{ transition: 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}>
           {/* Waterways, subtle context layer */}
           <g opacity={0.35} stroke="#7EC8D9" strokeWidth={0.0006} fill="none">
@@ -200,7 +225,7 @@ export default function BiliranMap({
             onClick={() => setMaripipiNote(true)}
             style={{ cursor: 'pointer' }}
           >
-            <circle r={0.0045} fill="#7A8A99" stroke="#fff" strokeWidth={0.0008} opacity={0.85} />
+            <circle r={0.0045} fill="#7A8A99" stroke="#fff" strokeWidth={0.0008} opacity={0.85} filter="url(#bfw-land-shadow)" />
           </g>
         </g>
       </svg>
@@ -247,25 +272,31 @@ function MunicipalityLayer({
   const project = useMemo(() => makeProjector(11.58), [])
   return (
     <g>
-      {municipalities.features.map((f) => {
-        const score = municipalityWorstScore(barangays, f.properties.municipality)
-        return (
-          <path
-            key={f.properties.pgc_prefix}
-            d={geometryToPath(f.geometry, project)}
-            fill={fsiScoreColor(score)}
-            fillOpacity={0.75}
-            stroke="var(--card-bg)"
-            strokeWidth={0.0006}
-            onClick={() => onSelect(f.properties.pgc_prefix)}
-            style={{ cursor: 'pointer' }}
-          >
-            <title>
-              {f.properties.municipality} — worst barangay FSI score {score.toFixed(2)} — tap to zoom in
-            </title>
-          </path>
-        )
-      })}
+      <g filter="url(#bfw-land-shadow)">
+        {municipalities.features.map((f) => {
+          const score = municipalityWorstScore(barangays, f.properties.municipality)
+          const d = geometryToPath(f.geometry, project)
+          return (
+            <g key={f.properties.pgc_prefix}>
+              <path
+                className="bfw-map-poly"
+                d={d}
+                fill={fsiScoreColor(score)}
+                fillOpacity={0.85}
+                stroke="var(--card-bg)"
+                strokeWidth={0.0006}
+                onClick={() => onSelect(f.properties.pgc_prefix)}
+                style={{ cursor: 'pointer' }}
+              >
+                <title>
+                  {f.properties.municipality} — worst barangay FSI score {score.toFixed(2)} — tap to zoom in
+                </title>
+              </path>
+              <path d={d} fill="url(#bfw-land-sheen)" pointerEvents="none" />
+            </g>
+          )
+        })}
+      </g>
       {municipalities.features.map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const projected = project(lon, lat)
@@ -300,26 +331,30 @@ function BarangayLayer({
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   return (
-    <g>
+    <g filter="url(#bfw-land-shadow)">
       {features.map((f) => {
         const b = barangaysByKey.get(f.properties.key)
         const selected = f.properties.key === selectedKey
+        const d = geometryToPath(f.geometry, project)
         return (
-          <path
-            key={f.properties.key}
-            d={geometryToPath(f.geometry, project)}
-            fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
-            fillOpacity={selected ? 1 : 0.8}
-            stroke={selected ? '#fff' : 'var(--card-bg)'}
-            strokeWidth={selected ? 0.0012 : 0.0005}
-            onClick={() => onSelect(f.properties.key)}
-            style={{ cursor: 'pointer' }}
-          >
-            <title>
-              {f.properties.barangay}
-              {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
-            </title>
-          </path>
+          <g key={f.properties.key}>
+            <path
+              className="bfw-map-poly"
+              d={d}
+              fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
+              fillOpacity={selected ? 1 : 0.88}
+              stroke={selected ? '#fff' : 'var(--card-bg)'}
+              strokeWidth={selected ? 0.0014 : 0.0005}
+              onClick={() => onSelect(f.properties.key)}
+              style={{ cursor: 'pointer' }}
+            >
+              <title>
+                {f.properties.barangay}
+                {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
+              </title>
+            </path>
+            <path d={d} fill="url(#bfw-land-sheen)" pointerEvents="none" />
+          </g>
         )
       })}
     </g>

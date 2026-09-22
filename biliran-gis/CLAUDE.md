@@ -163,6 +163,18 @@ polygon data (see provenance below) and renders as a plain marker; tapping
 it shows a note that it isn't monitored, per the settled decision to label
 it rather than hide it.
 
+Depth styling (all in `BiliranMap.tsx`'s `<defs>`): an SVG `feDropShadow`
+filter (`#bfw-land-shadow`) applied per-layer, not per-polygon — per-polygon
+would draw a visible shadow line along every internal barangay border, which
+reads as messy rather than "raised"; a shared diagonal sheen gradient
+(`#bfw-land-sheen`) layered on top of each polygon's fill for a glossy,
+lit-from-one-corner look (deliberately stylized, not meant to read as real
+terrain/hillshade — this project has no DEM data); a radial highlight on the
+sea (`#bfw-sea-glow`); and a `.bfw-map-poly:hover` brightness lift. The
+municipality-zoom target bounds use a tight 7% padding (`muniBoundsByPrefix`)
+so tapping a municipality fills most of the frame with it, not a small shape
+adrift in a lot of open sea.
+
 **Provenance of `public/data/geo/*.geojson`**: derived from three source
 files supplied directly for this project (not re-derived automatically from
 anything already in this repo) — this project's own
