@@ -35,7 +35,7 @@ import {
   municipalityWorstScore,
   type Barangay,
 } from '@/lib/dashboardData'
-import { MARIPIPI } from '@/lib/municipalities'
+import { MARIPIPI, municipalityForPrefix } from '@/lib/municipalities'
 
 interface MuniProps {
   pgc_prefix: string
@@ -63,6 +63,8 @@ export default function BiliranMap({
   selectedKey,
   onSelect,
   showChrome = true,
+  focusedMunicipality = null,
+  onFocusMunicipality,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -73,6 +75,13 @@ export default function BiliranMap({
   // weather ribbon), leaving a cleaner decorative background. The -/+
   // zoom buttons, legend, and ambient motion still show either way.
   showChrome?: boolean
+  // Two-way sync with the dashboard's municipality filter (a municipality
+  // *name*, not a pgc_prefix) — mirrors selectedKey/onSelect's existing
+  // barangay sync. Picking a municipality elsewhere (the dropdown) moves
+  // the map; tapping a municipality on the map calls onFocusMunicipality
+  // so the dropdown follows. null means "all municipalities" / full island.
+  focusedMunicipality?: string | null
+  onFocusMunicipality?: (name: string | null) => void
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -93,7 +102,7 @@ export default function BiliranMap({
 
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-  const dragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startView: View } | null>(null)
+  const dragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startView: View; capturing: boolean } | null>(null)
   const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -202,6 +211,18 @@ export default function BiliranMap({
     setView(clampView({ cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale }, bounds))
   }
 
+  // Shared by the post-guard focusMuni (fired by an actual map tap) and the
+  // sync block below (fired by focusedMunicipality changing from elsewhere,
+  // e.g. the dashboard's municipality filter) — both just need a prefix +
+  // the current island bounds to move the view, neither needs anything
+  // that's only available after the loading guard.
+  function applyMuniFocus(prefix: string, bounds: Bounds) {
+    const focus = muniFocusByPrefix[prefix]
+    if (!focus) return
+    setInteracting(false)
+    setView(clampView(focus, bounds))
+  }
+
   // Keep the map in sync when a barangay is selected from elsewhere (e.g.
   // the list): adjust state during render off a previous-value comparison,
   // rather than in an effect, per https://react.dev/learn/you-might-not-need-an-effect.
@@ -210,6 +231,27 @@ export default function BiliranMap({
     setPrevSelectedKey(selectedKey)
     const feature = selectedKey ? brgyGeo.features.find((f) => f.properties.key === selectedKey) : null
     if (feature) focusBarangay(feature, islandBounds)
+  }
+
+  // Same pattern, for the dashboard's municipality filter driving the map
+  // (the reverse of tapping a municipality on the map, which drives the
+  // filter via onFocusMunicipality below) — focusedMunicipality is a
+  // municipality *name*, not a pgc_prefix, matching MONITORED_MUNICIPALITIES/
+  // filterBarangays's convention.
+  const [prevFocusedMunicipality, setPrevFocusedMunicipality] = useState<string | null | undefined>(undefined)
+  if (focusedMunicipality !== prevFocusedMunicipality && municipalities && islandBounds) {
+    setPrevFocusedMunicipality(focusedMunicipality)
+    if (focusedMunicipality) {
+      const feature = municipalities.features.find((f) => f.properties.municipality === focusedMunicipality)
+      if (feature) applyMuniFocus(feature.properties.pgc_prefix, islandBounds)
+    } else {
+      setInteracting(false)
+      setView({
+        cx: (islandBounds.minX + islandBounds.maxX) / 2,
+        cy: (islandBounds.minY + islandBounds.maxY) / 2,
+        scale: 1,
+      })
+    }
   }
 
   if (loadError) {
@@ -269,15 +311,15 @@ export default function BiliranMap({
   const transform = `translate(${tx},${ty}) scale(${currentView.scale})`
 
   function focusMuni(prefix: string) {
-    const focus = muniFocusByPrefix[prefix]
-    if (!focus || !islandBounds) return
-    setInteracting(false)
-    setView(clampView(focus, islandBounds))
+    if (!islandBounds) return
+    applyMuniFocus(prefix, islandBounds)
+    onFocusMunicipality?.(municipalityForPrefix(prefix))
   }
 
   function resetView() {
     setInteracting(false)
     setView({ cx: islandCx, cy: islandCy, scale: 1 })
+    onFocusMunicipality?.(null)
   }
 
   function setScale(newScale: number) {
@@ -286,16 +328,41 @@ export default function BiliranMap({
     setView(clampView({ cx: currentView.cx, cy: currentView.cy, scale: newScale }, islandBounds))
   }
 
+  // Drag-vs-tap disambiguation: pointer capture is deferred until the
+  // pointer has actually moved past DRAG_THRESHOLD_PX (handlePointerMove),
+  // not grabbed unconditionally on pointerdown. Capturing eagerly on every
+  // pointerdown — including a plain tap on a municipality/barangay polygon
+  // — was found (via this feature's own testing) to suppress the browser's
+  // synthetic 'click' event on that polygon, the same mechanism that once
+  // broke clicks on sibling buttons when pointer handlers lived on an
+  // ancestor container (see CLAUDE.md). A tap that never crosses the
+  // threshold is left alone entirely, so its native click reaches the
+  // polygon's own onClick normally.
+  const DRAG_THRESHOLD_PX = 5
+
   function handlePointerDown(e: React.PointerEvent<SVGSVGElement>) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragRef.current = { pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, startView: currentView }
-    setInteracting(true)
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startView: currentView,
+      capturing: false,
+    }
   }
 
   function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== e.pointerId || !svgRef.current || !islandBounds) return
+
+    if (!drag.capturing) {
+      const movedPx = Math.hypot(e.clientX - drag.startClientX, e.clientY - drag.startClientY)
+      if (movedPx < DRAG_THRESHOLD_PX) return
+      drag.capturing = true
+      setInteracting(true)
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
+
     const [startX, startY] = clientPointToSvgSpace(svgRef.current, drag.startClientX, drag.startClientY)
     const [curX, curY] = clientPointToSvgSpace(svgRef.current, e.clientX, e.clientY)
     const deltaX = curX - startX
@@ -461,17 +528,24 @@ export default function BiliranMap({
           </g>
 
           {/*
-            Both layers stay mounted and crossfade via opacity (driven by
-            barangayOpacity, a continuous function of view.scale) instead of
-            a hard swap — a sudden layer swap under free-form zoom, rather
-            than a discrete tap, would read as a glitch.
+            MunicipalityLayer stays interactive at every zoom level now —
+            no pointerEvents gating here — so any OTHER municipality can be
+            tapped directly to jump there without resetting first; it only
+            fades its own currently-focused (nearestPrefix) municipality's
+            fill/label/icon per-feature (via barangayOpacity), leaving every
+            other municipality at full opacity. BarangayLayer, painted
+            after it in the DOM, still naturally wins hit-testing over its
+            own footprint (SVG painter's-model z-order — independent of
+            opacity), so this doesn't break barangay-level taps within the
+            focused municipality.
           */}
-          <g
-            style={{ opacity: 1 - barangayOpacity, transition: 'opacity 0.4s ease' }}
-            pointerEvents={barangayOpacity > 0.5 ? 'none' : 'auto'}
-          >
-            <MunicipalityLayer municipalities={municipalities} barangays={barangays} onSelect={focusMuni} />
-          </g>
+          <MunicipalityLayer
+            municipalities={municipalities}
+            barangays={barangays}
+            onSelect={focusMuni}
+            nearestPrefix={nearestPrefix}
+            barangayOpacity={barangayOpacity}
+          />
           <g
             style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }}
             pointerEvents={barangayOpacity > 0.5 ? 'auto' : 'none'}
@@ -583,16 +657,28 @@ function MunicipalityLayer({
   municipalities,
   barangays,
   onSelect,
+  nearestPrefix,
+  barangayOpacity,
 }: {
   municipalities: GeoFeatureCollection<MuniProps>
   barangays: Barangay[]
   onSelect: (prefix: string) => void
+  // Only the municipality the current view is nearest to fades out (as
+  // barangayOpacity rises toward its own barangay-level detail taking
+  // over) — every other municipality stays fully visible AND clickable
+  // regardless of zoom, so tapping a different one works at any zoom
+  // level, not just from the full-island overview.
+  nearestPrefix: string | null
+  barangayOpacity: number
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   const bounds = useMemo(() => boundsOf(municipalities.features, project), [municipalities, project])
   // Small enough to sit above a municipality's name label without dominating it.
   const iconScale = (bounds.maxX - bounds.minX) * 0.0019
   const iconOffsetY = (bounds.maxY - bounds.minY) * 0.06
+  function fadeFor(prefix: string): number {
+    return prefix === nearestPrefix ? Math.max(0, 1 - barangayOpacity) : 1
+  }
   return (
     <g>
       <g filter="url(#bfw-land-shadow)">
@@ -600,7 +686,7 @@ function MunicipalityLayer({
           const score = municipalityWorstScore(barangays, f.properties.municipality)
           const d = geometryToPath(f.geometry, project)
           return (
-            <g key={f.properties.pgc_prefix}>
+            <g key={f.properties.pgc_prefix} style={{ opacity: fadeFor(f.properties.pgc_prefix), transition: 'opacity 0.4s ease' }}>
               <path
                 className="bfw-map-poly"
                 d={d}
@@ -636,6 +722,8 @@ function MunicipalityLayer({
           <g
             key={`weather-${f.properties.pgc_prefix}`}
             pointerEvents="none"
+            opacity={fadeFor(f.properties.pgc_prefix)}
+            style={{ transition: 'opacity 0.4s ease' }}
             transform={`translate(${cx - 21 * iconScale},${cy - iconOffsetY - 16 * iconScale}) scale(${iconScale})`}
           >
             <WeatherIconSVG condition={condition} />
@@ -655,7 +743,8 @@ function MunicipalityLayer({
             textAnchor="middle"
             fill="#fff"
             filter="url(#bfw-text-shadow)"
-            style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 0.0015 }}
+            opacity={fadeFor(f.properties.pgc_prefix)}
+            style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 0.0015, transition: 'opacity 0.4s ease' }}
           >
             {f.properties.municipality}
           </text>

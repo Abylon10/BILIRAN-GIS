@@ -245,11 +245,29 @@ rendered box, unlike hand-rolled clientRect-ratio math); `clampCenter()`
 (`lib/geo.ts`) keeps the view from panning the island fully out of frame.
 **These pointer/wheel handlers are deliberately on the `<svg>` element, not
 its wrapping container div** — attaching them to the container instead (an
-actual bug hit and fixed this session) captures pointer events for
+actual bug hit and fixed in an earlier session) captures pointer events for
 descendant buttons too (the back/reset button, the zoom slider), and a
 `setPointerCapture()` call from a pointerdown that bubbled up from a button
 silently breaks that button's own click. Two-finger pinch-zoom isn't
 implemented (an accepted rough edge, not a rejected feature).
+
+**A second, related bug from the same family, hit later**: `handlePointerDown`
+used to call `setPointerCapture()` unconditionally on every pointerdown,
+including a plain tap with zero movement — which turned out to *also*
+suppress the browser's synthetic `click` event on whatever polygon was
+tapped (same mechanism as the button bug above, just against a *descendant*
+of the capturing element — the municipality/barangay `<path>`s — instead of
+a sibling). This silently broke tap-to-zoom-a-municipality/barangay
+entirely, undetected because earlier verification only exercised wheel/
+drag/buttons, never an actual polygon click, after the handlers moved onto
+the `<svg>`. Fixed with drag-vs-tap disambiguation: `handlePointerDown` no
+longer captures immediately — `handlePointerMove` only starts a drag (and
+only then calls `setPointerCapture`) once movement exceeds
+`DRAG_THRESHOLD_PX` (5px); a tap that never crosses it is left alone, so
+its native `click` reaches the polygon's own `onClick` normally. Lesson
+generalized: verify *every* distinct interaction (not just some) against
+real pointer/click events after touching this handler, not just visual
+screenshots of state reached via a different interaction (e.g. wheel).
 
 Tapping a municipality or picking a barangay (map or list) now **animates**
 `view` toward that target's framing rather than a hard state switch — one
@@ -259,26 +277,74 @@ case of the general continuous view, not a separate code path.
 used both for the tap-to-zoom animation and as the crossfade threshold
 below. `nearestMunicipalityPrefix()` picks whichever municipality's own
 focus-center the current `view.cx/cy` is nearest to (Euclidean, all 7
-municipalities — cheap). `MunicipalityLayer` and `BarangayLayer` are
-**both always mounted** and crossfade via a `barangayOpacity` value (0–1,
-a function of `view.scale` relative to the nearest municipality's own fill
-scale) rather than a hard swap — a sudden layer swap under free-form zoom,
-rather than a discrete tap, would read as a glitch. `BarangayLayer` is
-filtered to `nearestMunicipalityPrefix`'s barangays only (not the whole
-115), same as the old per-municipality filter, just continuously
-re-evaluated as the view pans rather than fixed at tap time. Each layer's
-`pointerEvents` flips off once its opacity drops below ~0.5, so the
-mostly-invisible layer during a crossfade doesn't intercept clicks meant
-for the other one. Waterway opacity/stroke-width and the dimmed
-rest-of-island context outlines now interpolate continuously with
-`barangayOpacity` too, instead of a binary on/off. Selecting a barangay
-(map or list) keeps both in sync — `focusBarangay()` frames that specific
-barangay's own bounds (35% padding), not just its municipality.
-Maripipi has no polygon data (see provenance below) and renders as a plain
-marker; tapping it shows a note that it isn't monitored, per the settled
-decision to label it rather than hide it. Zoomed-in barangay shapes also
-carry their own name labels (`BarangayLayer`, same `geometryCentroid()` +
-`#bfw-text-shadow` pattern as the municipality labels).
+municipalities — cheap). `applyMuniFocus(prefix, bounds)` is the one shared
+body both `focusMuni` (an actual map tap) and the `focusedMunicipality`
+sync block (below) call, so a prefix + the current island bounds is all
+either path needs.
+
+`MunicipalityLayer` and `BarangayLayer` are **both always mounted** and
+crossfade via a `barangayOpacity` value (0–1, a function of `view.scale`
+relative to the nearest municipality's own fill scale) rather than a hard
+swap — a sudden layer swap under free-form zoom, rather than a discrete
+tap, would read as a glitch. `BarangayLayer` is filtered to
+`nearestMunicipalityPrefix`'s barangays only (not the whole 115), same as
+the old per-municipality filter, just continuously re-evaluated as the
+view pans rather than fixed at tap time; its own `pointerEvents` still
+flips off below ~0.5 opacity so a mostly-invisible barangay layer doesn't
+intercept clicks. **`MunicipalityLayer` itself stays interactive (no
+`pointerEvents` gating) at every zoom level** — a *different* municipality
+can be tapped directly to jump there without resetting to the full-island
+view first, the point of this session's second change. It fades only its
+own currently-`nearestPrefix` municipality's fill/sheen/label/icon
+(`fadeFor(prefix)`, per-feature, not a group-wide opacity like before) —
+every *other* municipality stays at full opacity, both visible and
+clickable regardless of how deep the view is zoomed into a different one;
+`BarangayLayer`, painted after it in the DOM, still naturally wins
+hit-testing over its own footprint (SVG painter's-model z-order —
+independent of `opacity`), so this doesn't break barangay-level taps
+within the focused municipality. Waterway opacity/stroke-width and the
+dimmed rest-of-island context outlines still interpolate continuously with
+`barangayOpacity`. Selecting a barangay (map or list) keeps both in sync —
+`focusBarangay()` frames that specific barangay's own bounds (35%
+padding), not just its municipality. Maripipi has no polygon data (see
+provenance below) and renders as a plain marker; tapping it shows a note
+that it isn't monitored, per the settled decision to label it rather than
+hide it. Zoomed-in barangay shapes also carry their own name labels
+(`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow` pattern as
+the municipality labels).
+
+**Two-way sync with the dashboard's municipality filter**
+(`DashboardShell.tsx`'s `<select>`, lifted to `app/page.tsx` as
+`focusedMunicipality`/`setFocusedMunicipality`, same shape as
+`selectedKey`'s barangay sync): tapping a municipality on the map
+(`focusMuni`) calls `onFocusMunicipality(municipalityForPrefix(prefix))`
+(`lib/municipalities.ts`), which updates the dropdown; picking one from the
+dropdown flows the other way via a `focusedMunicipality` prop and a
+render-phase sync block (same pattern as `prevSelectedKey`'s, matching by
+`f.properties.municipality === focusedMunicipality` rather than a prefix,
+since the dropdown/`filterBarangays()` convention is municipality *names*)
+that calls `applyMuniFocus`. `resetView()` (the "← All municipalities"
+button) also calls `onFocusMunicipality(null)`, clearing the dropdown back
+to "All municipalities" — otherwise the two could end up visibly
+inconsistent (full-island map, still-filtered list).
+
+**A third bug from the same pointer-capture-adjacent family, hit while
+verifying the above**: once boxed into the dashboard, the map stopped
+receiving ANY pointer events at all (drag/wheel/tap) — `.bfw-map-shell`
+(the map's `position: fixed` wrapper, `app/page.tsx`) sits at `z-index: 0`,
+below `.bfw-dash`'s `z-index: 10`; once `revealed`, `.bfw-dash` becomes
+`pointer-events: auto`, and its own DOM content — specifically
+`DashboardShell`'s *empty* map-slot spacer div, sitting exactly where the
+map visually appears — stacks above the map and silently swallows every
+gesture, even though the map is still visually on top (the spacer is
+invisible/transparent, so you can *see* the map through it, but hit-testing
+follows stacking order, not visibility). Latent since the "one persistent
+map" refactor, never caught because that work's own verification only
+checked the shell's measured rect, not actual interaction. Fixed two ways:
+`.bfw-root[data-revealed='true'] .bfw-map-shell { z-index: 15; }` (above
+`.bfw-dash`, but still below `.bfw-card`'s `10` pre-reveal so the login
+card still floats over the full-bleed map as intended), plus
+`pointer-events: none` on the spacer div itself as defense in depth.
 
 New UI controls, alongside (not replacing) tap-a-municipality: `ZoomControls`
 (bottom-right — `+`/`-` buttons and a slider, all driving the same

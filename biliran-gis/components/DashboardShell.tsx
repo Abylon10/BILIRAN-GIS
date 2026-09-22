@@ -38,16 +38,22 @@ export default function DashboardShell({
   loadError,
   selectedKey,
   onSelectKey,
+  municipality,
+  onMunicipalityChange,
   mapSlotRef,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
   selectedKey: string | null
   onSelectKey: (key: string) => void
+  // Lifted to page.tsx too (same as selectedKey) so the map and this
+  // filter stay in sync both ways — tapping a municipality on the map
+  // updates this, and picking one here moves the map.
+  municipality: string | null
+  onMunicipalityChange: (name: string | null) => void
   mapSlotRef: RefObject<HTMLDivElement | null>
 }) {
   const [query, setQuery] = useState('')
-  const [municipality, setMunicipality] = useState<string | null>(null)
 
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -88,7 +94,7 @@ export default function DashboardShell({
             />
             <select
               value={municipality ?? ''}
-              onChange={(e) => setMunicipality(e.target.value || null)}
+              onChange={(e) => onMunicipalityChange(e.target.value || null)}
               className="rounded-md border px-3 py-2 text-sm outline-none"
               style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
             >
@@ -107,7 +113,17 @@ export default function DashboardShell({
             page.tsx measures to animate the real, persistent map into).
           */}
           <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <div ref={mapSlotRef} className="h-80 shrink-0 md:h-[60%]" />
+            {/*
+              pointer-events: none — this spacer only reserves layout
+              space; the real map is a position:fixed sibling elsewhere in
+              the DOM (app/page.tsx's .bfw-map-shell) sitting at a LOWER
+              z-index than .bfw-dash (which this spacer is inside), so
+              without this the spacer silently swallows every click/drag/
+              wheel gesture meant for the map underneath it (found via this
+              feature's own testing — tap-to-zoom-a-municipality never
+              reached the map once boxed into the dashboard).
+            */}
+            <div ref={mapSlotRef} className="h-80 shrink-0 md:h-[60%]" style={{ pointerEvents: 'none' }} />
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
               <div className="min-h-0 overflow-y-auto pr-1">
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>

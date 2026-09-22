@@ -65,6 +65,11 @@ export default function HomePage() {
   const [barangays, setBarangays] = useState<Barangay[] | null>(null)
   const [mapLoadError, setMapLoadError] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Two-way synced with the map: tapping a municipality on the map sets
+  // this (via BiliranMap's onFocusMunicipality), and it also drives
+  // DashboardShell's municipality filter dropdown — picking one there
+  // moves the map to it, same shape as selectedKey's barangay sync above.
+  const [focusedMunicipality, setFocusedMunicipality] = useState<string | null>(null)
 
   const mapSlotRef = useRef<HTMLDivElement>(null)
   const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
@@ -252,6 +257,20 @@ export default function HomePage() {
           (rounded-xl border shadow-xl) unconditionally — left as-is in
           both states rather than conditionally stripped for full-bleed,
           to avoid coupling this shell's styling to BiliranMap's internals.
+
+          z-index: below .bfw-card (10) pre-reveal, so the login card floats
+          on top of the full-bleed map as intended — but ABOVE .bfw-dash
+          (also 10) once revealed, otherwise .bfw-dash's own DOM content
+          (specifically DashboardShell's empty map-slot spacer, which this
+          shell's box exactly overlaps once boxed) sits stacked above the
+          map and silently swallows every click/drag/wheel gesture meant
+          for it, even though the map is still visually on top (transparent
+          spacer, so you can see through it — but hit-testing follows stack
+          order, not visibility). Found via this feature's own testing:
+          tap-to-zoom-a-municipality never reached the map once boxed into
+          the dashboard until this was raised. Nothing else in .bfw-dash
+          overlaps the map's rectangle (plain flex flow, no other absolutely
+          positioned siblings there), so raising it doesn't hide anything.
         */
         .bfw-map-shell {
           position: fixed;
@@ -260,6 +279,7 @@ export default function HomePage() {
           transition: top 0.9s cubic-bezier(0.22,1,0.36,1), left 0.9s cubic-bezier(0.22,1,0.36,1),
             width 0.9s cubic-bezier(0.22,1,0.36,1), height 0.9s cubic-bezier(0.22,1,0.36,1);
         }
+        .bfw-root[data-revealed='true'] .bfw-map-shell { z-index: 15; }
 
         @media (prefers-reduced-motion: reduce) { .bfw-map-shell { transition: none !important; } }
       `}</style>
@@ -303,6 +323,8 @@ export default function HomePage() {
               selectedKey={selectedKey}
               onSelect={(b) => setSelectedKey(b.key)}
               showChrome={revealed}
+              focusedMunicipality={focusedMunicipality}
+              onFocusMunicipality={setFocusedMunicipality}
             />
           )}
         </div>
@@ -376,6 +398,8 @@ export default function HomePage() {
             loadError={mapLoadError}
             selectedKey={selectedKey}
             onSelectKey={setSelectedKey}
+            municipality={focusedMunicipality}
+            onMunicipalityChange={setFocusedMunicipality}
             mapSlotRef={mapSlotRef}
           />
         </div>
