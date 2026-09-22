@@ -170,7 +170,22 @@ elsewhere for dots/badges).
 Selecting a barangay (map or list) keeps both in sync. Maripipi has no
 polygon data (see provenance below) and renders as a plain marker; tapping
 it shows a note that it isn't monitored, per the settled decision to label
-it rather than hide it.
+it rather than hide it. Zoomed-in barangay shapes also carry their own
+name labels (`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow`
+pattern as the municipality labels), and the waterways context layer goes
+from a flat 0.35 opacity to ~0.65 once zoomed in, where there's room for
+it to read clearly without cluttering the island overview.
+
+**Ambient motion** — decorative, not data (the per-municipality weather
+icons below ARE data-driven; these aren't): the sea highlight has a slow
+`bfw-sea-shimmer` drift, and two semi-transparent clouds cross the
+island-overview view on an infinite loop (`DriftingClouds`, hidden once
+zoomed into a municipality so the motion doesn't compete with
+barangay-level detail). Each municipality also gets its own small weather
+icon on the overview map (`WeatherIconSVG`, shared with the corner ribbon
+— see below), condition computed the same way as the ribbon's, just
+pre-filtered to that municipality's own barangays: `mostUrgentCrossing(
+barangays.filter(b => b.municipality === f.properties.municipality))`.
 
 Depth styling (all in `BiliranMap.tsx`'s `<defs>`): an SVG `feDropShadow`
 filter (`#bfw-land-shadow`) applied per-layer, not per-polygon — per-polygon
@@ -178,20 +193,35 @@ would draw a visible shadow line along every internal barangay border, which
 reads as messy rather than "raised"; a shared diagonal sheen gradient
 (`#bfw-land-sheen`) layered on top of each polygon's fill for a glossy,
 lit-from-one-corner look (deliberately stylized, not meant to read as real
-terrain/hillshade — this project has no DEM data); a radial highlight on the
-sea (`#bfw-sea-glow`); a `.bfw-map-poly:hover` brightness lift; and a
-tighter `#bfw-text-shadow` filter (plus bolder weight) on municipality
-labels for legibility over the varying fill colors beneath them. The map's
-floating chrome — back button, `Legend`, and the animated `WeatherBadge` —
-all share the same glass-chip depth treatment (`shadow-lg ring-1
-ring-white/10 backdrop-blur-md`) as the map container itself, so the UI
-overlays read as part of one consistent system rather than flat labels
-pasted on top. The municipality-zoom target bounds use a tight 7% padding
-(`muniBoundsByPrefix`) so tapping a municipality fills most of the frame
-with it, not a small shape
-adrift in a lot of open sea.
+terrain/hillshade — this project has no DEM data); a `#bfw-land-sheen-strong`
+variant (higher-opacity stops than `#bfw-land-sheen`) used only for zoomed
+barangay shapes, which render much larger on screen than the island
+overview and made the original subtle sheen read as flat at that scale; a
+radial highlight on the sea (`#bfw-sea-glow`); a `.bfw-map-poly:hover`
+brightness lift; and a tighter `#bfw-text-shadow` filter (plus bolder
+weight) on municipality/barangay labels for legibility over the varying
+fill colors beneath them. The `Legend` and back button keep the
+`rounded-full`/`shadow-lg ring-1 ring-white/10 backdrop-blur-md` glass-chip
+look; `WeatherBadge` deliberately does not (see below) — it's a corner
+ribbon, not a chip, on purpose. The municipality-zoom target bounds use a
+tight 7% padding (`muniBoundsByPrefix`) so tapping a municipality fills
+most of the frame with it, not a small shape adrift in a lot of open sea.
 
-Two things to keep in mind if you touch this styling again: (1) `#bfw-land-sheen`
+**`WeatherBadge` is a corner ribbon, not a rounded chip** — a deliberate
+departure from the `Legend`/back-button glass-chip look, because a pill
+shape reads as clickable (like the back button next to it) when this is a
+passive readout. `clip-path: polygon(24px 0, 100% 0, 100% 100%, 0 100%)`
+on a `right-0 top-0`-positioned div (flush, not inset) makes a
+right-trapezoid; the container's own `overflow-hidden` + `rounded-xl`
+clips the ribbon's outer corner to match the card's curve for free, so the
+ribbon itself needs no border-radius. A plain `border`/`box-shadow`
+doesn't follow a `clip-path`'d box correctly — depth comes from `filter:
+drop-shadow(...)` instead. The cloud+rain-drop markup itself lives in a
+shared `WeatherIconSVG` fragment (no wrapping `<svg>`/positioning), reused
+both by the ribbon and, scaled way down, by each municipality's own icon
+on the overview map (see above).
+
+Three things to keep in mind if you touch this styling again: (1) `#bfw-land-sheen`
 must stay `gradientUnits="userSpaceOnUse"` with `x1`/`y1`/`x2`/`y2` pinned to
 `islandBounds`, not the SVG default `objectBoundingBox` — with the default,
 every polygon draws its own independent light sweep across its own bounding
@@ -203,7 +233,20 @@ dark seam (`rgba(11, 30, 40, 0.3)`, 0.0003 wide), not a bright/white one —
 a bright stroke on every one of those same thin wedges is the other half of
 that same "shattered" look, this time from the borders rather than the
 sheen. The selected barangay's white, thicker stroke is unaffected and
-should stay bright so selection still pops.
+should stay bright so selection still pops. (3) **CSS `transform` functions
+need an explicit unit even on SVG elements** — `translateX(0.4)` (bare
+number) is invalid CSS and gets silently dropped, so a `@keyframes`
+animation written that way is present in the DOM but never actually
+moves anything (no console error either — it just does nothing). This is
+different from the SVG `transform` *attribute* (e.g. the zoom `<g
+transform="...">`), which does accept bare numbers. Append `px` — for an
+SVG element this is interpreted as that many SVG user units, not real
+device pixels, which is exactly what the tiny fractional-degree coordinate
+space here needs (`bfw-sea-shimmer`, `bfw-cloud-cross`, and the original
+rain-drop-fall keyframe all rely on this). Verify a new CSS-driven SVG
+animation actually runs by diffing `getComputedStyle(el).transform` at two
+points in time, not by checking the CSS is present — both animations were
+built once already and silently did nothing until checked this way.
 
 **Provenance of `public/data/geo/*.geojson`**: derived from three source
 files supplied directly for this project (not re-derived automatically from
