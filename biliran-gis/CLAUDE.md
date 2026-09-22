@@ -84,10 +84,17 @@ being *present* in the DOM doesn't guarantee it's actually *running*).
 early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
-One known rough edge: the theme-toggle button is pushed further down
-(`top-14` vs `top-5`) while not `revealed`, so it clears the map's own
-top-right weather ribbon, which sits flush in whatever corner
-`BiliranMap` is mounted in — the actual viewport corner, pre-reveal.
+
+**`BiliranMap`'s `showChrome` prop** (default `true`, passed as
+`showChrome={revealed}` at its one call site in `app/page.tsx`) hides
+overlays that only make sense once there's a dashboard around them: the
+zoom slider inside `ZoomControls` (its own `showSlider` prop — the `-`/`+`
+buttons stay either way), the Maripipi marker circle, and the
+`WeatherBadge` ribbon. As a pure decorative login backdrop these were just
+clutter — the ribbon specifically used to collide with the theme-toggle
+button in that state (worked around earlier by pushing the toggle down),
+now moot since the ribbon simply doesn't render there; the toggle is back
+to a fixed `top-5`.
 
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via

@@ -62,10 +62,17 @@ export default function BiliranMap({
   barangays,
   selectedKey,
   onSelect,
+  showChrome = true,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
   onSelect: (barangay: Barangay) => void
+  // False while this map is the full-bleed login backdrop (see
+  // app/page.tsx) — hides overlays that only make sense once there's a
+  // dashboard around them (the zoom slider, the Maripipi marker, the
+  // weather ribbon), leaving a cleaner decorative background. The -/+
+  // zoom buttons, legend, and ambient motion still show either way.
+  showChrome?: boolean
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -481,13 +488,15 @@ export default function BiliranMap({
           </g>
 
           {/* Maripipi — no polygon data, shown as a marker only */}
-          <g
-            transform={`translate(${mLon},${mLat})`}
-            onClick={() => setMaripipiNote(true)}
-            style={{ cursor: 'pointer' }}
-          >
-            <circle r={0.0045} fill="#7A8A99" stroke="#fff" strokeWidth={0.0008} opacity={0.85} filter="url(#bfw-land-shadow)" />
-          </g>
+          {showChrome && (
+            <g
+              transform={`translate(${mLon},${mLat})`}
+              onClick={() => setMaripipiNote(true)}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle r={0.0045} fill="#7A8A99" stroke="#fff" strokeWidth={0.0008} opacity={0.85} filter="url(#bfw-land-shadow)" />
+            </g>
+          )}
         </g>
       </svg>
 
@@ -502,9 +511,9 @@ export default function BiliranMap({
         </button>
       )}
 
-      <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} />
+      <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />
 
-      <WeatherBadge crossing={urgentCrossing} />
+      {showChrome && <WeatherBadge crossing={urgentCrossing} />}
       <Legend />
 
       {maripipiNote && (
@@ -731,10 +740,12 @@ function ZoomControls({
   scale,
   maxScale,
   onChange,
+  showSlider = true,
 }: {
   scale: number
   maxScale: number
   onChange: (scale: number) => void
+  showSlider?: boolean
 }) {
   return (
     <div
@@ -749,16 +760,18 @@ function ZoomControls({
       >
         −
       </button>
-      <input
-        type="range"
-        min={1}
-        max={maxScale}
-        step={0.01}
-        value={scale}
-        onChange={(e) => onChange(Number(e.target.value))}
-        aria-label="Zoom level"
-        className="h-1 w-16 accent-current sm:w-20"
-      />
+      {showSlider && (
+        <input
+          type="range"
+          min={1}
+          max={maxScale}
+          step={0.01}
+          value={scale}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label="Zoom level"
+          className="h-1 w-16 accent-current sm:w-20"
+        />
+      )}
       <button
         type="button"
         onClick={() => onChange(Math.min(maxScale, scale * 1.35))}

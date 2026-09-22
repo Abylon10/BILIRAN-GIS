@@ -298,7 +298,12 @@ export default function HomePage() {
           style={{ top: mapRect.top, left: mapRect.left, width: mapRect.width, height: mapRect.height }}
         >
           {barangays && (
-            <BiliranMap barangays={barangays} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+            <BiliranMap
+              barangays={barangays}
+              selectedKey={selectedKey}
+              onSelect={(b) => setSelectedKey(b.key)}
+              showChrome={revealed}
+            />
           )}
         </div>
       )}
@@ -308,12 +313,7 @@ export default function HomePage() {
         type="button"
         onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
         aria-label="Toggle day and night"
-        // Pushed further down while the map is the full-bleed login
-        // backdrop, so it clears BiliranMap's own top-right weather ribbon
-        // (which sits flush in the actual corner it's mounted in — the
-        // viewport itself, pre-reveal); back to its normal corner spot once
-        // the map is boxed into the dashboard and no longer under it.
-        className={`absolute right-5 z-20 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-colors ${revealed ? 'top-5' : 'top-14'}`}
+        className="absolute right-5 top-5 z-20 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-colors"
         style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
       >
         {theme === 'light' ? '☀ Day' : '☾ Night'}
