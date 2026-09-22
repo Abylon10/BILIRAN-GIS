@@ -22,11 +22,13 @@
 
 'use client'
 
-import { useEffect, useState, useCallback, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { fetchOwnProfile } from '@/lib/profile'
+import { fetchOwnProfile, getAvatarUrl } from '@/lib/profile'
+import { loadBarangays, type Barangay } from '@/lib/dashboardData'
 import DashboardShell from '@/components/DashboardShell'
+import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
 import AdminInvitePanel from '@/components/AdminInvitePanel'
 
@@ -40,6 +42,7 @@ function prefersDark() {
 
 export default function HomePage() {
   const [authState, setAuthState] = useState<AuthState>('checking')
+  const revealed = authState === 'revealed'
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (prefersDark() ? 'dark' : 'light'))
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -51,8 +54,25 @@ export default function HomePage() {
 
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [showInvitations, setShowInvitations] = useState(false)
+
+  // Lifted up from DashboardShell so the one persistent <BiliranMap> below
+  // (mounted here, not inside DashboardShell — see "one map, not two" in
+  // CLAUDE.md) and DashboardShell's list/detail panel share a single fetch
+  // and a single selection, instead of each owning their own copy.
+  const [barangays, setBarangays] = useState<Barangay[] | null>(null)
+  const [mapLoadError, setMapLoadError] = useState<string | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Two-way synced with the map: tapping a municipality on the map sets
+  // this (via BiliranMap's onFocusMunicipality), and it also drives
+  // DashboardShell's municipality filter dropdown — picking one there
+  // moves the map to it, same shape as selectedKey's barangay sync above.
+  const [focusedMunicipality, setFocusedMunicipality] = useState<string | null>(null)
+
+  const mapSlotRef = useRef<HTMLDivElement>(null)
+  const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
 
   // Keep theme in sync with system changes after the initial render above.
   useEffect(() => {
@@ -94,7 +114,12 @@ export default function HomePage() {
       if (cancelled || !current) return
       setUser(current)
       const profile = await fetchOwnProfile(current.id)
-      if (!cancelled) setIsAdmin(profile?.access_level === 'admin')
+      if (cancelled) return
+      setIsAdmin(profile?.access_level === 'admin')
+      if (profile?.avatar_path) {
+        const url = await getAvatarUrl(profile.avatar_path)
+        if (!cancelled) setAvatarUrl(url)
+      }
     }
     loadUser()
 
@@ -102,6 +127,51 @@ export default function HomePage() {
       cancelled = true
     }
   }, [authState])
+
+  // Loaded as soon as the map can mount (authState !== 'checking', i.e.
+  // during needsLogin too) rather than waiting for 'revealed' — it's static
+  // public JSON, no auth required, so fetching it early just warms the
+  // cache before the dashboard needs it (an accepted tradeoff, not a bug).
+  useEffect(() => {
+    if (authState === 'checking') return
+    let cancelled = false
+    loadBarangays()
+      .then((data) => {
+        if (!cancelled) setBarangays(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setMapLoadError(err instanceof Error ? err.message : 'Failed to load data.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [authState])
+
+  // Measures where the map should sit: mapSlotRef's on-screen position when
+  // revealed (DashboardShell's empty spacer for it), or a full-bleed
+  // viewport rect otherwise — the same numbers get applied as inline
+  // top/left/width/height on the map's wrapping div below, CSS-transitioned,
+  // which is what actually produces the shared-element animation between
+  // the login backdrop and the boxed dashboard position. Re-measured on
+  // reveal, on resize, and once barangays data arrives (it can change the
+  // LIVE UPDATE banner's height above the map slot).
+  useLayoutEffect(() => {
+    function measure() {
+      if (revealed && mapSlotRef.current) {
+        const r = mapSlotRef.current.getBoundingClientRect()
+        setMapRect({ top: r.top, left: r.left, width: r.width, height: r.height })
+      } else {
+        setMapRect({ top: 0, left: 0, width: window.innerWidth, height: window.innerHeight })
+      }
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    const raf1 = requestAnimationFrame(measure)
+    return () => {
+      window.removeEventListener('resize', measure)
+      cancelAnimationFrame(raf1)
+    }
+  }, [revealed, barangays])
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -131,7 +201,6 @@ export default function HomePage() {
     setAuthState('needsLogin')
   }, [])
 
-  const revealed = authState === 'revealed'
   const emailValid = /\S+@\S+\.\S+/.test(email)
   const passwordValid = password.length >= 6
 
@@ -144,8 +213,7 @@ export default function HomePage() {
       <style>{`
         .bfw-root[data-theme='light'] {
           --sky-top: #6EC6E8; --sky-bottom: #DCEFF5;
-          --sea-top: #1E7F8C; --sea-bottom: #58C2C9;
-          --land: #6FA85B; --land-dark: #4F8A45; --contour: #3E7038; --mountain: #8C7355;
+          --sea-top: #0B5C78; --sea-bottom: #2FA6B8;
           --sun-glow: rgba(253, 200, 90, 0.55); --sun-core: #FFD873;
           --cloud: rgba(255, 255, 255, 0.9);
           --card-bg: rgba(255, 255, 255, 0.72); --card-border: rgba(255, 255, 255, 0.5);
@@ -153,8 +221,7 @@ export default function HomePage() {
         }
         .bfw-root[data-theme='dark'] {
           --sky-top: #0B1830; --sky-bottom: #1B2C46;
-          --sea-top: #0B3038; --sea-bottom: #114652;
-          --land: #33502F; --land-dark: #24391F; --contour: #1B2E17; --mountain: #4A4038;
+          --sea-top: #051E28; --sea-bottom: #0D3D48;
           --sun-glow: rgba(230, 235, 255, 0.18); --sun-core: #EDEFF7;
           --cloud: rgba(210, 220, 235, 0.35);
           --card-bg: rgba(11, 24, 40, 0.6); --card-border: rgba(255, 255, 255, 0.12);
@@ -167,8 +234,6 @@ export default function HomePage() {
         .bfw-root[data-revealed='true'] .bfw-rain { opacity: 1; }
 
         .bfw-sky { position: absolute; inset: 0; background: linear-gradient(to bottom, var(--sky-top), var(--sky-bottom)); transition: background 1.2s ease; }
-        .bfw-scene { position: absolute; inset: -6%; animation: bfw-drift 42s ease-in-out infinite alternate; }
-        @keyframes bfw-drift { 0% { transform: translate(0,0) scale(1.02); } 100% { transform: translate(18px,-12px) scale(1.02); } }
         .bfw-sun { transition: opacity 1s ease; }
         .bfw-rain { position: absolute; inset: 0; opacity: 0; transition: opacity 1.2s ease; pointer-events: none; }
 
@@ -180,7 +245,43 @@ export default function HomePage() {
 
         .bfw-loading-cover { position: absolute; inset: 0; background: var(--sky-bottom, #DCEFF5); z-index: 50; transition: opacity 0.3s ease; }
 
-        @media (prefers-reduced-motion: reduce) { .bfw-scene { animation: none !important; } }
+        /*
+          The one persistent map's wrapping box — fixed + viewport-relative,
+          its top/left/width/height set inline from a measured rect (see
+          mapRect in HomePage: mapSlotRef's position when revealed, a
+          full-bleed viewport rect otherwise). This is what produces the
+          shared-element transition between the login backdrop and the
+          boxed dashboard position; reuses the same easing as the map's own
+          internal zoom transition (BiliranMap.tsx) for consistency.
+          BiliranMap already rounds/borders its own inner container
+          (rounded-xl border shadow-xl) unconditionally — left as-is in
+          both states rather than conditionally stripped for full-bleed,
+          to avoid coupling this shell's styling to BiliranMap's internals.
+
+          z-index: below .bfw-card (10) pre-reveal, so the login card floats
+          on top of the full-bleed map as intended — but ABOVE .bfw-dash
+          (also 10) once revealed, otherwise .bfw-dash's own DOM content
+          (specifically DashboardShell's empty map-slot spacer, which this
+          shell's box exactly overlaps once boxed) sits stacked above the
+          map and silently swallows every click/drag/wheel gesture meant
+          for it, even though the map is still visually on top (transparent
+          spacer, so you can see through it — but hit-testing follows stack
+          order, not visibility). Found via this feature's own testing:
+          tap-to-zoom-a-municipality never reached the map once boxed into
+          the dashboard until this was raised. Nothing else in .bfw-dash
+          overlaps the map's rectangle (plain flex flow, no other absolutely
+          positioned siblings there), so raising it doesn't hide anything.
+        */
+        .bfw-map-shell {
+          position: fixed;
+          z-index: 0;
+          overflow: hidden;
+          transition: top 0.9s cubic-bezier(0.22,1,0.36,1), left 0.9s cubic-bezier(0.22,1,0.36,1),
+            width 0.9s cubic-bezier(0.22,1,0.36,1), height 0.9s cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-root[data-revealed='true'] .bfw-map-shell { z-index: 15; }
+
+        @media (prefers-reduced-motion: reduce) { .bfw-map-shell { transition: none !important; } }
       `}</style>
 
       <div className="bfw-sky" />
@@ -202,10 +303,32 @@ export default function HomePage() {
         </g>
       </svg>
 
-      {/* Placeholder island scene — swap for the real MapLibre map later */}
-      <div className="bfw-scene">
-        <IslandScene />
-      </div>
+      {/*
+        The one real, persistent map — mounted as soon as authState isn't
+        'checking' (i.e. during needsLogin too), full-bleed behind the login
+        card at first. On sign-in this same instance's wrapping box animates
+        into its boxed dashboard spot (see .bfw-map-shell above) while the
+        login card fades/slides out and the dashboard chrome fades in around
+        it — one map throughout, not a decorative login backdrop swapped for
+        a real map after reveal.
+      */}
+      {authState !== 'checking' && mapRect && (
+        <div
+          className="bfw-map-shell"
+          style={{ top: mapRect.top, left: mapRect.left, width: mapRect.width, height: mapRect.height }}
+        >
+          {barangays && (
+            <BiliranMap
+              barangays={barangays}
+              selectedKey={selectedKey}
+              onSelect={(b) => setSelectedKey(b.key)}
+              showChrome={revealed}
+              focusedMunicipality={focusedMunicipality}
+              onFocusMunicipality={setFocusedMunicipality}
+            />
+          )}
+        </div>
+      )}
 
       {/* Theme toggle */}
       <button
@@ -256,14 +379,29 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Dashboard shell */}
+      {/*
+        Dashboard shell — always mounted (not just when revealed), same as
+        this wrapping .bfw-dash div already was: opacity/pointer-events
+        hide it pre-reveal (see .bfw-dash CSS above), rather than a
+        conditional mount, so its map-slot spacer has a real, measurable
+        layout position for the map-shell transition above even before
+        sign-in.
+      */}
       <div className="bfw-dash absolute inset-0 z-10 flex flex-col p-6" data-revealed={revealed}>
         <div className="mb-4">
           <h1 className="text-lg font-semibold text-[#F2F6F5]">Biliran — flood risk dashboard</h1>
           <p className="text-sm text-[#CFE0DD]">MDRRMO / barangay flood early-warning conditions</p>
         </div>
         <div className="min-h-0 flex-1">
-          {revealed && <DashboardShell />}
+          <DashboardShell
+            barangays={barangays}
+            loadError={mapLoadError}
+            selectedKey={selectedKey}
+            onSelectKey={setSelectedKey}
+            municipality={focusedMunicipality}
+            onMunicipalityChange={setFocusedMunicipality}
+            mapSlotRef={mapSlotRef}
+          />
         </div>
       </div>
 
@@ -284,10 +422,15 @@ export default function HomePage() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Open menu"
             aria-expanded={menuOpen}
-            className="flex h-12 w-12 items-center justify-center rounded-full border shadow-lg backdrop-blur-xl transition-transform"
+            className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border shadow-lg backdrop-blur-xl transition-transform"
             style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)', transform: menuOpen ? 'rotate(45deg)' : 'none' }}
           >
-            <span className="text-2xl leading-none">+</span>
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" style={{ transform: menuOpen ? 'rotate(-45deg)' : 'none' }} />
+            ) : (
+              <span className="text-2xl leading-none">+</span>
+            )}
           </button>
         </div>
       )}
@@ -298,7 +441,9 @@ export default function HomePage() {
         style={{ opacity: authState === 'checking' ? 1 : 0, pointerEvents: authState === 'checking' ? 'auto' : 'none' }}
       />
 
-      {showProfile && user && <ProfilePanel user={user} onClose={() => setShowProfile(false)} />}
+      {showProfile && user && (
+        <ProfilePanel user={user} onClose={() => setShowProfile(false)} onAvatarChange={setAvatarUrl} />
+      )}
       {showInvitations && isAdmin && <AdminInvitePanel onClose={() => setShowInvitations(false)} />}
     </div>
   )
@@ -336,27 +481,5 @@ function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
     >
       {label}
     </button>
-  )
-}
-
-function IslandScene() {
-  return (
-    <svg className="h-full w-full" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" aria-hidden>
-      <defs>
-        <radialGradient id="bfw-sea-grad" cx="50%" cy="50%" r="70%">
-          <stop offset="0%" stopColor="var(--sea-bottom)" />
-          <stop offset="100%" stopColor="var(--sea-top)" />
-        </radialGradient>
-      </defs>
-      <rect x="0" y="0" width="1000" height="1000" fill="url(#bfw-sea-grad)" />
-      <path
-        d="M 500 220 C 610 230, 700 280, 740 360 C 790 450, 780 540, 730 610 C 690 665, 630 720, 560 750 C 500 775, 430 760, 390 715 C 340 660, 300 590, 290 510 C 280 420, 320 330, 400 275 C 430 255, 465 225, 500 220 Z"
-        fill="var(--land)"
-      />
-      <path
-        d="M 470 430 L 500 380 L 535 430 L 555 470 L 445 470 Z"
-        fill="var(--mountain)" opacity="0.85"
-      />
-    </svg>
   )
 }

@@ -54,6 +54,48 @@ redirects to `/?activated=1` (not `/login`) after activating an account;
 `app/page.tsx` reads that query param to show a one-time "Account activated"
 message on the login card.
 
+**One persistent map, not a decorative login backdrop swapped for a real
+one.** A single `<BiliranMap>` instance mounts in `app/page.tsx` itself
+(not inside `DashboardShell`) as soon as `authState !== 'checking'` —
+full-bleed behind the login card at first, the same real interactive map
+throughout, not a hand-drawn placeholder (`IslandScene`, removed). Its
+wrapping `.bfw-map-shell` div is `position: fixed`, sized via inline
+`top/left/width/height` computed in a `useLayoutEffect` (`mapRect` state):
+a full-viewport rect when not `revealed`, or `mapSlotRef.getBoundingClientRect()`
+when `revealed` — `mapSlotRef` is an empty spacer div inside
+`DashboardShell` (`<div ref={mapSlotRef} className="h-96 shrink-0
+md:h-[70%]" />`) that reserves the map's layout slot without rendering a
+map itself. `DashboardShell` is **always mounted** now (not `{revealed &&
+<DashboardShell/>}`), same as its own `.bfw-dash` wrapper already was —
+opacity/pointer-events hide it pre-reveal, not a conditional mount — so
+`mapSlotRef` has a real, measurable position even before sign-in, which is
+what lets the map animate smoothly INTO that exact spot rather than
+jumping there once `DashboardShell` first exists. `.bfw-map-shell`'s CSS
+transition (`top/left/width/height`, `cubic-bezier(0.22,1,0.36,1)`, same
+easing family as the map's own internal zoom transition) is what actually
+produces the shared-element/FLIP-style animation — verified by sampling
+`getComputedStyle(el)` repeatedly right after load and confirming the
+values actually interpolate between the two rects, not just checking the
+CSS is present (the same verification discipline this project already
+uses for CSS-driven SVG animations, for the same reason: a transition
+being *present* in the DOM doesn't guarantee it's actually *running*).
+`barangays`/`selectedKey` are lifted from `DashboardShell` into
+`app/page.tsx` too (loaded as soon as `authState !== 'checking'`, same
+early-fetch tradeoff as the map's own geojson — it's static public JSON,
+no auth needed) so the persistent map and `DashboardShell`'s list/detail
+panel share one fetch and one selection instead of each owning a copy.
+
+**`BiliranMap`'s `showChrome` prop** (default `true`, passed as
+`showChrome={revealed}` at its one call site in `app/page.tsx`) hides
+overlays that only make sense once there's a dashboard around them: the
+zoom slider inside `ZoomControls` (its own `showSlider` prop — the `-`/`+`
+buttons stay either way), the Maripipi marker circle, and the
+`WeatherBadge` ribbon. As a pure decorative login backdrop these were just
+clutter — the ribbon specifically used to collide with the theme-toggle
+button in that state (worked around earlier by pushing the toggle down),
+now moot since the ribbon simply doesn't render there; the toggle is back
+to a fixed `top-5`.
+
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
@@ -86,8 +128,21 @@ only to admins (`components/AdminInvitePanel.tsx`).
 **Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
 which shows the signed-in user's email plus `office`/`access_level` fetched
 via `lib/profile.ts` (`fetchOwnProfile`, anon client — relies on a Supabase
-RLS policy letting a user read their own `user_profiles` row). No
-Storage-backed fields (e.g. a photo) yet.
+RLS policy letting a user read their own `user_profiles` row). It also has
+a photo, backed by a private Supabase Storage `avatars` bucket (see
+`supabase/avatars-storage-setup.sql`, **not auto-applied** — someone with
+Supabase dashboard/CLI access has to run it once): upload goes through
+`POST /api/profile/avatar-upload-url` (Bearer-token-authenticated, any
+signed-in user, no `access_level` check — mints a tokenized
+`createSignedUploadUrl` scoped to `{user.id}/avatar`), the client uploads
+directly to that URL via `supabase.storage.from('avatars').uploadToSignedUrl`,
+then `updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on
+the user's own `user_profiles` row (needs the new "update own row" RLS
+policy from that same SQL file — there wasn't one before). Display always
+goes through a freshly-signed read URL (`getAvatarUrl()`), never a public
+bucket URL — the bucket stays private. The photo also shows as a small
+circular thumbnail on the "+" menu trigger button in `app/page.tsx` once
+one exists, in place of the generic "+" icon.
 
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
@@ -128,12 +183,26 @@ no longer just a self-validated guess.
 `components/DashboardShell.tsx` (rendered by `app/page.tsx` in place of the
 old `.bfw-dash` placeholder): a "modeled, not live" banner naming the single
 most urgent upcoming Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
-`mostUrgentCrossing()`), search/filter by barangay or municipality
-(`filterBarangays()`), the real map (`components/BiliranMap.tsx`, see below),
-a barangay list ranked by susceptibility (`components/BarangayList.tsx`,
-`sortBySeverity()`), and a "Detail Overview" panel on selection
-(`components/BarangayDetailPanel.tsx`) leading with the FSI class/score,
-then basin count and warning/alert/danger times.
+`mostUrgentCrossing()`), a municipality filter dropdown (`filterBarangays()`,
+called with a constant `''` query — the free-text search input this used
+to pair with was removed; `filterBarangays()` itself still takes a query
+param, just always `''` from here now), an empty spacer reserving the real
+map's layout slot (the map itself is mounted once, persistently, in
+`app/page.tsx` — see "One persistent map" above, and
+`components/BiliranMap.tsx` below), a barangay list ranked by
+susceptibility (`components/BarangayList.tsx`, `sortBySeverity()`), and a
+"Detail Overview" panel on selection (`components/BarangayDetailPanel.tsx`)
+leading with the FSI class/score, then basin count and warning/alert/danger
+times.
+
+**Layout: the map is the dominant element**, not one of two panes sharing
+a column with the list — it's a full-width row on its own (`h-96 shrink-0
+md:h-[70%]`), with the barangay list and detail panel sharing a shorter
+row below it (`md:grid-cols-[1fr_320px]`, same as before). This replaced
+an earlier layout where the map only got `h-64`/`45%` of a column it split
+with the list, back when the map was a smaller, single-fixed-zoom element;
+it now supports continuous pan/zoom (see below) and earns more screen
+space.
 
 Ranking is **highest FSI score first** (`sortBySeverity()` in
 `lib/dashboardData.ts`, mean_fsi_score descending, tie-broken by soonest
@@ -154,38 +223,152 @@ barangay and municipality polygons, not a placeholder or a map-tile service
 — rendered as SVG paths, projected client-side from real WGS84 lon/lat with
 a simple cos(latitude)-corrected equirectangular projection (Biliran is
 small enough, ~30km across, that this is accurate enough; see
-`makeProjector()`). No MapLibre/tile dependency, works fully offline. Default
-view is the whole island, **unzoomed and with no municipality pre-selected**
-— tapping a municipality zooms into it (an SVG `transform` on a `<g>`,
-CSS-transitioned; a plain style-based CSS `transform`/`transform-origin` was
-tried first and mis-centered the zoom, because SVG-vs-CSS coordinate-space
-handling for `transform-origin` is inconsistent across browsers — use the
-native SVG `transform` attribute for this, not `style.transform`) and shows
-its barangay polygons, colored by `mean_fsi_score` via a continuous
-5-stop scale — green/yellow-green/yellow/orange/red for Very Low/Low/
-Moderate/High/Very High (`fsiScoreColor()`, matching the pipeline's fixed
-class thresholds at 0.2/0.4/0.6/0.8 — see the "Known gotchas" section —
-distinct from but color-matched to the discrete `urgencyTierColor()` used
-elsewhere for dots/badges).
-Selecting a barangay (map or list) keeps both in sync. Maripipi has no
-polygon data (see provenance below) and renders as a plain marker; tapping
-it shows a note that it isn't monitored, per the settled decision to label
-it rather than hide it. Zoomed-in barangay shapes also carry their own
-name labels (`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow`
-pattern as the municipality labels), and the waterways context layer goes
-from a flat 0.35 opacity to ~0.65 once zoomed in, where there's room for
-it to read clearly without cluttering the island overview.
+`makeProjector()`). No MapLibre/tile dependency, works fully offline.
+
+**Pan/zoom is continuous, hand-rolled, no new dependency** (an explicit
+choice this session — `maplibre-gl`/a pan-zoom library were both
+considered and rejected). A single `view: { cx, cy, scale }` state (island-
+projected coordinate space) replaced an earlier binary `focusedMuni: string
+| null` model; the `<svg viewBox>` never changes, zoom is still purely an
+inner `<g transform>` SVG *attribute* (not CSS `style.transform` — same
+cross-browser `transform-origin` reasoning as before), CSS-transitioned
+except while the user is actively dragging/scrolling (`interacting` state
+disables the transition so direct manipulation tracks the pointer
+instantly instead of lagging behind it). Default view is the whole island,
+**unzoomed and with no municipality pre-selected** — this decision is
+unchanged; only the interaction is now continuous, never the starting
+state. Interactions: `onWheel`-equivalent (a native, non-passive `wheel`
+listener — React's `onWheel` prop is passive by default and can't
+`preventDefault()`) zooms around the pointer position; `onPointerDown/
+Move/Up` on the `<svg>` (Pointer Events cover single-finger touch drag too)
+pan by converting a screen-pixel delta into island-space via
+`clientPointToSvgSpace()` (`lib/geo.ts`, uses `getScreenCTM()` — correct
+regardless of any aspect-ratio letterboxing between the viewBox and the
+rendered box, unlike hand-rolled clientRect-ratio math); `clampCenter()`
+(`lib/geo.ts`) keeps the view from panning the island fully out of frame.
+**These pointer/wheel handlers are deliberately on the `<svg>` element, not
+its wrapping container div** — attaching them to the container instead (an
+actual bug hit and fixed in an earlier session) captures pointer events for
+descendant buttons too (the back/reset button, the zoom slider), and a
+`setPointerCapture()` call from a pointerdown that bubbled up from a button
+silently breaks that button's own click. Two-finger pinch-zoom isn't
+implemented (an accepted rough edge, not a rejected feature).
+
+**A second, related bug from the same family, hit later**: `handlePointerDown`
+used to call `setPointerCapture()` unconditionally on every pointerdown,
+including a plain tap with zero movement — which turned out to *also*
+suppress the browser's synthetic `click` event on whatever polygon was
+tapped (same mechanism as the button bug above, just against a *descendant*
+of the capturing element — the municipality/barangay `<path>`s — instead of
+a sibling). This silently broke tap-to-zoom-a-municipality/barangay
+entirely, undetected because earlier verification only exercised wheel/
+drag/buttons, never an actual polygon click, after the handlers moved onto
+the `<svg>`. Fixed with drag-vs-tap disambiguation: `handlePointerDown` no
+longer captures immediately — `handlePointerMove` only starts a drag (and
+only then calls `setPointerCapture`) once movement exceeds
+`DRAG_THRESHOLD_PX` (5px); a tap that never crosses it is left alone, so
+its native `click` reaches the polygon's own `onClick` normally. Lesson
+generalized: verify *every* distinct interaction (not just some) against
+real pointer/click events after touching this handler, not just visual
+screenshots of state reached via a different interaction (e.g. wheel).
+
+Tapping a municipality or picking a barangay (map or list) now **animates**
+`view` toward that target's framing rather than a hard state switch — one
+case of the general continuous view, not a separate code path.
+`muniFocusByPrefix` (a `useMemo`) precomputes each municipality's own
+"fill the frame" center + scale (7% padding, `expandBounds`), same numbers
+used both for the tap-to-zoom animation and as the crossfade threshold
+below. `nearestMunicipalityPrefix()` picks whichever municipality's own
+focus-center the current `view.cx/cy` is nearest to (Euclidean, all 7
+municipalities — cheap). `applyMuniFocus(prefix, bounds)` is the one shared
+body both `focusMuni` (an actual map tap) and the `focusedMunicipality`
+sync block (below) call, so a prefix + the current island bounds is all
+either path needs.
+
+`MunicipalityLayer` and `BarangayLayer` are **both always mounted** and
+crossfade via a `barangayOpacity` value (0–1, a function of `view.scale`
+relative to the nearest municipality's own fill scale) rather than a hard
+swap — a sudden layer swap under free-form zoom, rather than a discrete
+tap, would read as a glitch. `BarangayLayer` is filtered to
+`nearestMunicipalityPrefix`'s barangays only (not the whole 115), same as
+the old per-municipality filter, just continuously re-evaluated as the
+view pans rather than fixed at tap time; its own `pointerEvents` still
+flips off below ~0.5 opacity so a mostly-invisible barangay layer doesn't
+intercept clicks. **`MunicipalityLayer` itself stays interactive (no
+`pointerEvents` gating) at every zoom level** — a *different* municipality
+can be tapped directly to jump there without resetting to the full-island
+view first, the point of this session's second change. It fades only its
+own currently-`nearestPrefix` municipality's fill/sheen/label/icon
+(`fadeFor(prefix)`, per-feature, not a group-wide opacity like before) —
+every *other* municipality stays at full opacity, both visible and
+clickable regardless of how deep the view is zoomed into a different one;
+`BarangayLayer`, painted after it in the DOM, still naturally wins
+hit-testing over its own footprint (SVG painter's-model z-order —
+independent of `opacity`), so this doesn't break barangay-level taps
+within the focused municipality. Waterway opacity/stroke-width and the
+dimmed rest-of-island context outlines still interpolate continuously with
+`barangayOpacity`. Selecting a barangay (map or list) keeps both in sync —
+`focusBarangay()` frames that specific barangay's own bounds (35%
+padding), not just its municipality. Maripipi has no polygon data (see
+provenance below) and renders as a plain marker; tapping it shows a note
+that it isn't monitored, per the settled decision to label it rather than
+hide it. Zoomed-in barangay shapes also carry their own name labels
+(`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow` pattern as
+the municipality labels).
+
+**Two-way sync with the dashboard's municipality filter**
+(`DashboardShell.tsx`'s `<select>`, lifted to `app/page.tsx` as
+`focusedMunicipality`/`setFocusedMunicipality`, same shape as
+`selectedKey`'s barangay sync): tapping a municipality on the map
+(`focusMuni`) calls `onFocusMunicipality(municipalityForPrefix(prefix))`
+(`lib/municipalities.ts`), which updates the dropdown; picking one from the
+dropdown flows the other way via a `focusedMunicipality` prop and a
+render-phase sync block (same pattern as `prevSelectedKey`'s, matching by
+`f.properties.municipality === focusedMunicipality` rather than a prefix,
+since the dropdown/`filterBarangays()` convention is municipality *names*)
+that calls `applyMuniFocus`. `resetView()` (the "← All municipalities"
+button) also calls `onFocusMunicipality(null)`, clearing the dropdown back
+to "All municipalities" — otherwise the two could end up visibly
+inconsistent (full-island map, still-filtered list).
+
+**A third bug from the same pointer-capture-adjacent family, hit while
+verifying the above**: once boxed into the dashboard, the map stopped
+receiving ANY pointer events at all (drag/wheel/tap) — `.bfw-map-shell`
+(the map's `position: fixed` wrapper, `app/page.tsx`) sits at `z-index: 0`,
+below `.bfw-dash`'s `z-index: 10`; once `revealed`, `.bfw-dash` becomes
+`pointer-events: auto`, and its own DOM content — specifically
+`DashboardShell`'s *empty* map-slot spacer div, sitting exactly where the
+map visually appears — stacks above the map and silently swallows every
+gesture, even though the map is still visually on top (the spacer is
+invisible/transparent, so you can *see* the map through it, but hit-testing
+follows stacking order, not visibility). Latent since the "one persistent
+map" refactor, never caught because that work's own verification only
+checked the shell's measured rect, not actual interaction. Fixed two ways:
+`.bfw-root[data-revealed='true'] .bfw-map-shell { z-index: 15; }` (above
+`.bfw-dash`, but still below `.bfw-card`'s `10` pre-reveal so the login
+card still floats over the full-bleed map as intended), plus
+`pointer-events: none` on the spacer div itself as defense in depth.
+
+New UI controls, alongside (not replacing) tap-a-municipality: `ZoomControls`
+(bottom-right — `+`/`-` buttons and a slider, all driving the same
+`view.scale`) and the existing top-left button, repurposed from "clear
+focusedMuni" to a general `resetView()` (shown whenever `view.scale > 1.02`,
+not just when a municipality was tapped).
 
 **Ambient motion** — decorative, not data (the per-municipality weather
 icons below ARE data-driven; these aren't): the sea highlight has a slow
 `bfw-sea-shimmer` drift, and two semi-transparent clouds cross the
-island-overview view on an infinite loop (`DriftingClouds`, hidden once
-zoomed into a municipality so the motion doesn't compete with
-barangay-level detail). Each municipality also gets its own small weather
-icon on the overview map (`WeatherIconSVG`, shared with the corner ribbon
-— see below), condition computed the same way as the ribbon's, just
-pre-filtered to that municipality's own barangays: `mostUrgentCrossing(
-barangays.filter(b => b.municipality === f.properties.municipality))`.
+island-overview view on an infinite loop (`DriftingClouds`, shown only
+below `view.scale < 1.3` — a rough "still at overview" threshold — so the
+motion doesn't compete with barangay-level detail once zoomed in). Each
+municipality also gets its own small weather icon on the overview map
+(`WeatherIconSVG`, shared with the corner ribbon — see below), condition
+computed the same way as the ribbon's, just pre-filtered to that
+municipality's own barangays: `mostUrgentCrossing(barangays.filter(b =>
+b.municipality === f.properties.municipality))`. Cloud shapes (here and in
+`DriftingClouds`) use overlapping lobes plus a shared `#bfw-cloud-body`
+radial gradient (soft off-center highlight, dimmer rim) instead of a flat
+fill, for a puffier, more dimensional look — styling only, no new data.
 
 Depth styling (all in `BiliranMap.tsx`'s `<defs>`): an SVG `feDropShadow`
 filter (`#bfw-land-shadow`) applied per-layer, not per-polygon — per-polygon
@@ -204,7 +387,7 @@ fill colors beneath them. The `Legend` and back button keep the
 `rounded-full`/`shadow-lg ring-1 ring-white/10 backdrop-blur-md` glass-chip
 look; `WeatherBadge` deliberately does not (see below) — it's a corner
 ribbon, not a chip, on purpose. The municipality-zoom target bounds use a
-tight 7% padding (`muniBoundsByPrefix`) so tapping a municipality fills
+tight 7% padding (`muniFocusByPrefix`) so tapping a municipality fills
 most of the frame with it, not a small shape adrift in a lot of open sea.
 
 **`WeatherBadge` is a corner ribbon, not a rounded chip** — a deliberate
@@ -315,7 +498,7 @@ known open bug is source-level UTF-8 double-encoding in
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
-- Profile has no Storage-backed fields (e.g. a photo) — no design decisions made yet.
+- Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
 - The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
 - None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
-- The map has no continuous pinch/scroll zoom, only tap-a-municipality-to-zoom and a "back to all municipalities" button.
+- The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.
