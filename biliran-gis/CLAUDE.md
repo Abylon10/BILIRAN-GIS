@@ -54,6 +54,41 @@ redirects to `/?activated=1` (not `/login`) after activating an account;
 `app/page.tsx` reads that query param to show a one-time "Account activated"
 message on the login card.
 
+**One persistent map, not a decorative login backdrop swapped for a real
+one.** A single `<BiliranMap>` instance mounts in `app/page.tsx` itself
+(not inside `DashboardShell`) as soon as `authState !== 'checking'` —
+full-bleed behind the login card at first, the same real interactive map
+throughout, not a hand-drawn placeholder (`IslandScene`, removed). Its
+wrapping `.bfw-map-shell` div is `position: fixed`, sized via inline
+`top/left/width/height` computed in a `useLayoutEffect` (`mapRect` state):
+a full-viewport rect when not `revealed`, or `mapSlotRef.getBoundingClientRect()`
+when `revealed` — `mapSlotRef` is an empty spacer div inside
+`DashboardShell` (`<div ref={mapSlotRef} className="h-80 shrink-0
+md:h-[60%]" />`) that reserves the map's layout slot without rendering a
+map itself. `DashboardShell` is **always mounted** now (not `{revealed &&
+<DashboardShell/>}`), same as its own `.bfw-dash` wrapper already was —
+opacity/pointer-events hide it pre-reveal, not a conditional mount — so
+`mapSlotRef` has a real, measurable position even before sign-in, which is
+what lets the map animate smoothly INTO that exact spot rather than
+jumping there once `DashboardShell` first exists. `.bfw-map-shell`'s CSS
+transition (`top/left/width/height`, `cubic-bezier(0.22,1,0.36,1)`, same
+easing family as the map's own internal zoom transition) is what actually
+produces the shared-element/FLIP-style animation — verified by sampling
+`getComputedStyle(el)` repeatedly right after load and confirming the
+values actually interpolate between the two rects, not just checking the
+CSS is present (the same verification discipline this project already
+uses for CSS-driven SVG animations, for the same reason: a transition
+being *present* in the DOM doesn't guarantee it's actually *running*).
+`barangays`/`selectedKey` are lifted from `DashboardShell` into
+`app/page.tsx` too (loaded as soon as `authState !== 'checking'`, same
+early-fetch tradeoff as the map's own geojson — it's static public JSON,
+no auth needed) so the persistent map and `DashboardShell`'s list/detail
+panel share one fetch and one selection instead of each owning a copy.
+One known rough edge: the theme-toggle button is pushed further down
+(`top-14` vs `top-5`) while not `revealed`, so it clears the map's own
+top-right weather ribbon, which sits flush in whatever corner
+`BiliranMap` is mounted in — the actual viewport corner, pre-reveal.
+
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
@@ -142,7 +177,9 @@ no longer just a self-validated guess.
 old `.bfw-dash` placeholder): a "modeled, not live" banner naming the single
 most urgent upcoming Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
 `mostUrgentCrossing()`), search/filter by barangay or municipality
-(`filterBarangays()`), the real map (`components/BiliranMap.tsx`, see below),
+(`filterBarangays()`), an empty spacer reserving the real map's layout slot
+(the map itself is mounted once, persistently, in `app/page.tsx` — see
+"One persistent map" above, and `components/BiliranMap.tsx` below),
 a barangay list ranked by susceptibility (`components/BarangayList.tsx`,
 `sortBySeverity()`), and a "Detail Overview" panel on selection
 (`components/BarangayDetailPanel.tsx`) leading with the FSI class/score,

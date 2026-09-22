@@ -13,34 +13,41 @@
 // auto-focuses a municipality or barangay on load, even though the LIVE
 // UPDATE banner names the most urgent one; that's intentional so officials
 // aren't dropped into one place before they've chosen to look there.
+//
+// The map itself is NOT rendered here — app/page.tsx mounts a single
+// <BiliranMap> that persists across the login and dashboard states (see
+// "one map, not two" in CLAUDE.md), animating its own wrapping box between
+// a full-bleed login backdrop and its boxed spot here. This component just
+// reserves that spot's layout space with an empty ref'd div (mapSlotRef) —
+// page.tsx measures it (getBoundingClientRect) to know where to animate the
+// real map into. barangays/loadError/selectedKey are lifted to page.tsx too,
+// both because the persistent map needs them before this component ever
+// mounts, and so the map and this list/detail panel share one selection.
 
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import {
-  filterBarangays,
-  loadBarangays,
-  sortBySeverity,
-  type Barangay,
-} from '@/lib/dashboardData'
+import { useMemo, useState, type RefObject } from 'react'
+import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
-import BiliranMap from '@/components/BiliranMap'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 
-export default function DashboardShell() {
-  const [barangays, setBarangays] = useState<Barangay[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+export default function DashboardShell({
+  barangays,
+  loadError,
+  selectedKey,
+  onSelectKey,
+  mapSlotRef,
+}: {
+  barangays: Barangay[] | null
+  loadError: string | null
+  selectedKey: string | null
+  onSelectKey: (key: string) => void
+  mapSlotRef: RefObject<HTMLDivElement | null>
+}) {
   const [query, setQuery] = useState('')
   const [municipality, setMunicipality] = useState<string | null>(null)
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
-
-  useEffect(() => {
-    loadBarangays()
-      .then(setBarangays)
-      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load data.'))
-  }, [])
 
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -68,7 +75,7 @@ export default function DashboardShell() {
 
       {barangays && (
         <>
-          <LiveUpdateBanner barangays={barangays} onSelect={(b) => setSelectedKey(b.key)} />
+          <LiveUpdateBanner barangays={barangays} onSelect={(b) => onSelectKey(b.key)} />
 
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -94,21 +101,19 @@ export default function DashboardShell() {
 
           {/*
             The map is the dominant element here (~60% of the available
-            height), not one of two panes sharing a column with the list —
-            it now supports continuous drag-to-pan/wheel-zoom (see
-            BiliranMap.tsx), so it earns more screen real estate than the
-            old fixed h-64/45% split.
+            height), not one of two panes sharing a column with the list.
+            This div is an empty spacer, not the map itself — it just
+            reserves the layout space (and its position/size is what
+            page.tsx measures to animate the real, persistent map into).
           */}
           <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <div className="h-80 shrink-0 md:h-[60%]">
-              <BiliranMap barangays={barangays} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
-            </div>
+            <div ref={mapSlotRef} className="h-80 shrink-0 md:h-[60%]" />
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
               <div className="min-h-0 overflow-y-auto pr-1">
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
                   Barangays by flood susceptibility, highest first
                 </h3>
-                <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+                <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => onSelectKey(b.key)} />
               </div>
               <div className="hidden md:block">
                 <BarangayDetailPanel barangay={selected} />
