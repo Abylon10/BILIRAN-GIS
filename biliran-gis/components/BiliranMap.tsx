@@ -165,6 +165,11 @@ export default function BiliranMap({
       <style>{`
         .bfw-map-poly { transition: filter 0.2s ease, stroke-width 0.2s ease; }
         .bfw-map-poly:hover { filter: brightness(1.14) saturate(1.08); }
+        @keyframes bfw-sea-shimmer {
+          0%, 100% { transform: translate(0px, 0px); }
+          50% { transform: translate(${(islandBounds.maxX - islandBounds.minX) * 0.02}px, ${(islandBounds.maxY - islandBounds.minY) * 0.015}px); }
+        }
+        .bfw-sea-shimmer { animation: bfw-sea-shimmer 16s ease-in-out infinite; }
       `}</style>
       <svg
         viewBox={viewBoxOf(islandBounds)}
@@ -202,14 +207,53 @@ export default function BiliranMap({
             <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
             <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
           </radialGradient>
+          {/*
+            Stronger version of bfw-land-sheen, used only for zoomed-in
+            barangay shapes (BarangayLayer) — they render much larger on
+            screen than the island-overview municipalities, so the same
+            subtle sheen reads as flat at that scale. Explicitly stylized
+            lighting for visual depth, not a stand-in for real terrain —
+            this project has no elevation/DEM data anywhere.
+          */}
+          <linearGradient
+            id="bfw-land-sheen-strong"
+            gradientUnits="userSpaceOnUse"
+            x1={islandBounds.minX}
+            y1={islandBounds.minY}
+            x2={islandBounds.maxX}
+            y2={islandBounds.maxY}
+          >
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
+            <stop offset="45%" stopColor="#ffffff" stopOpacity="0.05" />
+            <stop offset="100%" stopColor="#000000" stopOpacity="0.2" />
+          </linearGradient>
         </defs>
 
-        {/* Atmospheric sea highlight, fixed (not zoomed) so it always reads as lighting, not geography */}
-        <rect x={islandBounds.minX} y={islandBounds.minY} width={islandBounds.maxX - islandBounds.minX} height={islandBounds.maxY - islandBounds.minY} fill="url(#bfw-sea-glow)" pointerEvents="none" />
+        {/* Atmospheric sea highlight — a slow, subtle shimmer for a "living" feel, not tied to zoom */}
+        <rect
+          className="bfw-sea-shimmer"
+          x={islandBounds.minX}
+          y={islandBounds.minY}
+          width={islandBounds.maxX - islandBounds.minX}
+          height={islandBounds.maxY - islandBounds.minY}
+          fill="url(#bfw-sea-glow)"
+          pointerEvents="none"
+        />
+        {focusedMuni === null && <DriftingClouds bounds={islandBounds} />}
 
         <g transform={transform} style={{ transition: 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}>
-          {/* Waterways, subtle context layer */}
-          <g opacity={0.35} stroke="#7EC8D9" strokeWidth={0.0006} fill="none">
+          {/*
+            Waterways — subtle context at the island overview, turned up
+            once zoomed into a municipality where there's room for them to
+            read clearly without cluttering the whole-island view.
+          */}
+          <g
+            opacity={focusedMuni ? 0.65 : 0.35}
+            stroke="#7EC8D9"
+            strokeWidth={focusedMuni ? 0.0009 : 0.0006}
+            fill="none"
+            style={{ transition: 'opacity 0.4s ease, stroke-width 0.4s ease' }}
+          >
             {waterways.features.map((f, i) => (
               <path key={i} d={lineGeometryToPath(f.geometry, project)} />
             ))}
@@ -289,6 +333,47 @@ export default function BiliranMap({
   )
 }
 
+/**
+ * Purely decorative, ambient clouds drifting across the whole-island view
+ * — not per-municipality data (see MunicipalityLayer for that). Island
+ * overview only; showing these over a zoomed single-municipality view
+ * would add motion right where the user is trying to read barangay-level
+ * detail. Travel distance is computed from the real island bounds (baked
+ * directly into the keyframe, not a CSS custom property) so it scales
+ * with the actual map extent rather than a guessed pixel value.
+ */
+function DriftingClouds({ bounds }: { bounds: Bounds }) {
+  const width = bounds.maxX - bounds.minX
+  const height = bounds.maxY - bounds.minY
+  const travel = width * 1.3
+  const cx = bounds.minX + width / 2
+
+  return (
+    <g pointerEvents="none">
+      <style>{`
+        @keyframes bfw-cloud-cross {
+          from { transform: translateX(${-travel}px); }
+          to { transform: translateX(${travel}px); }
+        }
+      `}</style>
+      <g style={{ animation: 'bfw-cloud-cross 65s linear infinite' }}>
+        <g transform={`translate(${cx},${bounds.minY + height * 0.16}) scale(${width * 0.09})`} opacity={0.22} fill="#fff">
+          <ellipse cx="-0.6" cy="0" rx="0.9" ry="0.55" />
+          <ellipse cx="0.3" cy="-0.25" rx="0.8" ry="0.5" />
+          <ellipse cx="0.9" cy="0.15" rx="1.1" ry="0.55" />
+        </g>
+      </g>
+      <g style={{ animation: 'bfw-cloud-cross 82s linear infinite', animationDelay: '-35s' }}>
+        <g transform={`translate(${cx},${bounds.minY + height * 0.34}) scale(${width * 0.065})`} opacity={0.16} fill="#fff">
+          <ellipse cx="-0.5" cy="0" rx="0.75" ry="0.45" />
+          <ellipse cx="0.35" cy="-0.2" rx="0.65" ry="0.4" />
+          <ellipse cx="0.85" cy="0.1" rx="0.9" ry="0.45" />
+        </g>
+      </g>
+    </g>
+  )
+}
+
 function MunicipalityLayer({
   municipalities,
   barangays,
@@ -299,6 +384,10 @@ function MunicipalityLayer({
   onSelect: (prefix: string) => void
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
+  const bounds = useMemo(() => boundsOf(municipalities.features, project), [municipalities, project])
+  // Small enough to sit above a municipality's name label without dominating it.
+  const iconScale = (bounds.maxX - bounds.minX) * 0.0019
+  const iconOffsetY = (bounds.maxY - bounds.minY) * 0.06
   return (
     <g>
       <g filter="url(#bfw-land-shadow)">
@@ -326,6 +415,28 @@ function MunicipalityLayer({
           )
         })}
       </g>
+      {/*
+        Each municipality gets its own weather icon, not just the one
+        global corner ribbon — condition is that municipality's own
+        mostUrgentCrossing() (its barangays only), the exact same function
+        the ribbon and the LIVE UPDATE banner already use, just pre-filtered.
+      */}
+      <WeatherIconStyles />
+      {municipalities.features.map((f) => {
+        const muniBarangays = barangays.filter((b) => b.municipality === f.properties.municipality)
+        const condition = weatherConditionFor(mostUrgentCrossing(muniBarangays))
+        const [lon, lat] = geometryCentroid(f.geometry)
+        const [cx, cy] = project(lon, lat)
+        return (
+          <g
+            key={`weather-${f.properties.pgc_prefix}`}
+            pointerEvents="none"
+            transform={`translate(${cx - 21 * iconScale},${cy - iconOffsetY - 16 * iconScale}) scale(${iconScale})`}
+          >
+            <WeatherIconSVG condition={condition} />
+          </g>
+        )
+      })}
       {municipalities.features.map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const projected = project(lon, lat)
@@ -362,30 +473,52 @@ function BarangayLayer({
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   return (
-    <g filter="url(#bfw-land-shadow)">
+    <g>
+      <g filter="url(#bfw-land-shadow)">
+        {features.map((f) => {
+          const b = barangaysByKey.get(f.properties.key)
+          const selected = f.properties.key === selectedKey
+          const d = geometryToPath(f.geometry, project)
+          return (
+            <g key={f.properties.key}>
+              <path
+                className="bfw-map-poly"
+                d={d}
+                fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
+                fillOpacity={selected ? 1 : 0.88}
+                stroke={selected ? '#fff' : 'rgba(11, 30, 40, 0.3)'}
+                strokeWidth={selected ? 0.0014 : 0.0003}
+                onClick={() => onSelect(f.properties.key)}
+                style={{ cursor: 'pointer' }}
+              >
+                <title>
+                  {f.properties.barangay}
+                  {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
+                </title>
+              </path>
+              {/* Stronger than the island-overview sheen — these shapes render much larger zoomed in, so the same subtle version reads as flat */}
+              <path d={d} fill="url(#bfw-land-sheen-strong)" pointerEvents="none" />
+            </g>
+          )
+        })}
+      </g>
       {features.map((f) => {
-        const b = barangaysByKey.get(f.properties.key)
-        const selected = f.properties.key === selectedKey
-        const d = geometryToPath(f.geometry, project)
+        const [lon, lat] = geometryCentroid(f.geometry)
+        const [x, y] = project(lon, lat)
         return (
-          <g key={f.properties.key}>
-            <path
-              className="bfw-map-poly"
-              d={d}
-              fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
-              fillOpacity={selected ? 1 : 0.88}
-              stroke={selected ? '#fff' : 'rgba(11, 30, 40, 0.3)'}
-              strokeWidth={selected ? 0.0014 : 0.0003}
-              onClick={() => onSelect(f.properties.key)}
-              style={{ cursor: 'pointer' }}
-            >
-              <title>
-                {f.properties.barangay}
-                {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
-              </title>
-            </path>
-            <path d={d} fill="url(#bfw-land-sheen)" pointerEvents="none" />
-          </g>
+          <text
+            key={`label-${f.properties.key}`}
+            x={x}
+            y={y}
+            fontSize={0.0032}
+            fontWeight={600}
+            textAnchor="middle"
+            fill="#fff"
+            filter="url(#bfw-text-shadow)"
+            style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 0.0008 }}
+          >
+            {f.properties.barangay}
+          </text>
         )
       })}
     </g>
@@ -461,10 +594,74 @@ function dropX(count: number, index: number): number {
 }
 
 /**
+ * Cloud + rain-drop shapes only — no wrapping <svg>/positioning — so it can
+ * be reused both inside WeatherBadge's own small <svg> and, scaled way
+ * down inside a <g transform>, at each municipality's centroid on the
+ * overview map (see MunicipalityLayer).
+ */
+function WeatherIconSVG({ condition }: { condition: WeatherCondition }) {
+  return (
+    <>
+      <g className="bfw-weather-cloud">
+        <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+        <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+        <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
+      </g>
+      {Array.from({ length: condition.dropCount }).map((_, i) => {
+        const x = dropX(condition.dropCount, i)
+        return (
+          <line
+            key={i}
+            className="bfw-weather-drop"
+            x1={x}
+            y1={25}
+            x2={x - 2}
+            y2={31}
+            stroke={condition.dropColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            style={{
+              animationDuration: `${condition.duration}s`,
+              animationDelay: `${(i * condition.duration) / condition.dropCount}s`,
+            }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+/** Shared keyframes for WeatherIconSVG instances — cloud drift + rain-drop fall. */
+function WeatherIconStyles() {
+  return (
+    <style>{`
+      @keyframes bfw-cloud-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1.5px); } }
+      @keyframes bfw-drop-fall {
+        0% { transform: translateY(-2px); opacity: 0; }
+        25% { opacity: 1; }
+        85% { opacity: 0; }
+        100% { transform: translateY(8px); opacity: 0; }
+      }
+      .bfw-weather-cloud { animation: bfw-cloud-drift 4s ease-in-out infinite; }
+      .bfw-weather-drop { animation-name: bfw-drop-fall; animation-timing-function: linear; animation-iteration-count: infinite; }
+    `}</style>
+  )
+}
+
+/**
  * Cloud/rain badge whose condition tracks the same signal as the LIVE
  * UPDATE banner — not a separate or fabricated weather feed. Still a
  * modeled-storm scalar, not live rainfall; see the banner above the map
  * for that distinction in words.
+ *
+ * Shaped as a corner ribbon (clip-path right-trapezoid), not a rounded
+ * pill, deliberately — a pill/chip reads as clickable, like the back
+ * button next to it, but this is a passive readout. Flush to the
+ * container's own top-right corner: the map card's `overflow-hidden` +
+ * `rounded-xl` clips the ribbon's outer corner to match the card's curve
+ * for free, so the ribbon itself needs no border-radius. A plain
+ * border/box-shadow doesn't follow a clip-path'd box correctly, so depth
+ * comes from `filter: drop-shadow(...)` instead.
  */
 function WeatherBadge({ crossing }: { crossing: Crossing }) {
   const condition = weatherConditionFor(crossing)
@@ -474,47 +671,17 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
 
   return (
     <div
-      className="absolute right-3 top-3 flex items-center gap-2 rounded-full border py-2 pl-2.5 pr-3.5 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
-      style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
+      className="absolute right-0 top-0 flex items-center gap-2 py-2.5 pl-8 pr-4 backdrop-blur-md"
+      style={{
+        background: 'var(--card-bg)',
+        clipPath: 'polygon(24px 0, 100% 0, 100% 100%, 0 100%)',
+        filter: 'drop-shadow(0 3px 5px rgba(11,30,40,0.35))',
+      }}
       title={title}
     >
-      <style>{`
-        @keyframes bfw-cloud-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1.5px); } }
-        @keyframes bfw-drop-fall {
-          0% { transform: translateY(-2px); opacity: 0; }
-          25% { opacity: 1; }
-          85% { opacity: 0; }
-          100% { transform: translateY(8px); opacity: 0; }
-        }
-        .bfw-weather-cloud { animation: bfw-cloud-drift 4s ease-in-out infinite; }
-        .bfw-weather-drop { animation-name: bfw-drop-fall; animation-timing-function: linear; animation-iteration-count: infinite; }
-      `}</style>
-      <svg width="38" height="32" viewBox="0 0 44 36" aria-hidden>
-        <g className="bfw-weather-cloud">
-          <ellipse cx="15" cy="16" rx="10" ry="8" fill={condition.cloud[2]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
-          <ellipse cx="26" cy="13" rx="9" ry="7.5" fill={condition.cloud[1]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
-          <ellipse cx="21" cy="19" rx="14" ry="7.5" fill={condition.cloud[0]} stroke="rgba(11,30,40,0.25)" strokeWidth="0.75" />
-        </g>
-        {Array.from({ length: condition.dropCount }).map((_, i) => {
-          const x = dropX(condition.dropCount, i)
-          return (
-            <line
-              key={i}
-              className="bfw-weather-drop"
-              x1={x}
-              y1={25}
-              x2={x - 2}
-              y2={31}
-              stroke={condition.dropColor}
-              strokeWidth={3}
-              strokeLinecap="round"
-              style={{
-                animationDuration: `${condition.duration}s`,
-                animationDelay: `${(i * condition.duration) / condition.dropCount}s`,
-              }}
-            />
-          )
-        })}
+      <WeatherIconStyles />
+      <svg width="34" height="28" viewBox="0 0 44 36" aria-hidden>
+        <WeatherIconSVG condition={condition} />
       </svg>
       <span className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
         {condition.label}
