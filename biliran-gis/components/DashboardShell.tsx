@@ -92,20 +92,27 @@ export default function DashboardShell() {
             </select>
           </div>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
-            <div className="flex min-h-0 flex-col gap-4">
-              <div className="h-64 shrink-0 md:h-[45%]">
-                <BiliranMap barangays={barangays} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {/*
+            The map is the dominant element here (~60% of the available
+            height), not one of two panes sharing a column with the list —
+            it now supports continuous drag-to-pan/wheel-zoom (see
+            BiliranMap.tsx), so it earns more screen real estate than the
+            old fixed h-64/45% split.
+          */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="h-80 shrink-0 md:h-[60%]">
+              <BiliranMap barangays={barangays} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
+              <div className="min-h-0 overflow-y-auto pr-1">
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
                   Barangays by flood susceptibility, highest first
                 </h3>
                 <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => setSelectedKey(b.key)} />
               </div>
-            </div>
-            <div className="hidden md:block">
-              <BarangayDetailPanel barangay={selected} />
+              <div className="hidden md:block">
+                <BarangayDetailPanel barangay={selected} />
+              </div>
             </div>
           </div>
 

@@ -147,3 +147,39 @@ export async function fetchGeoJSON<T>(url: string): Promise<T> {
   if (!res.ok) throw new Error(`Failed to load ${url} (${res.status})`)
   return res.json()
 }
+
+/**
+ * Converts a client (screen) point into an SVG element's own viewBox
+ * user-space coordinates, via the browser's screen CTM — this accounts for
+ * the element's actual rendered size/position and any viewBox scaling
+ * (including letterboxing from an aspect-ratio mismatch) correctly, unlike
+ * hand-rolled clientRect-ratio math. Deliberately does NOT account for an
+ * inner <g>'s own transform — call this on the outer <svg> (whose viewBox
+ * is fixed) to get coordinates in the same space as islandBounds, muni/
+ * barangay bounds, etc., regardless of the current pan/zoom.
+ */
+export function clientPointToSvgSpace(svg: SVGSVGElement, clientX: number, clientY: number): Position {
+  const ctm = svg.getScreenCTM()
+  if (!ctm) return [0, 0]
+  const point = svg.createSVGPoint()
+  point.x = clientX
+  point.y = clientY
+  const transformed = point.matrixTransform(ctm.inverse())
+  return [transformed.x, transformed.y]
+}
+
+/**
+ * Clamps a pan/zoom view center so continuous dragging can't push the
+ * island fully out of frame — allows some slack past the bounds edge
+ * (so you can pan close to the coastline) without losing the island
+ * entirely off-screen.
+ */
+export function clampCenter(center: Position, bounds: Bounds, slackFraction = 0.15): Position {
+  const w = bounds.maxX - bounds.minX
+  const h = bounds.maxY - bounds.minY
+  const minX = bounds.minX - w * slackFraction
+  const maxX = bounds.maxX + w * slackFraction
+  const minY = bounds.minY - h * slackFraction
+  const maxY = bounds.maxY + h * slackFraction
+  return [Math.min(Math.max(center[0], minX), maxX), Math.min(Math.max(center[1], minY), maxY)]
+}

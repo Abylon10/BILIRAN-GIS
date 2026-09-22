@@ -11,9 +11,11 @@
 
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   boundsOf,
+  clampCenter,
+  clientPointToSvgSpace,
   expandBounds,
   fetchGeoJSON,
   geometryCentroid,
@@ -46,6 +48,16 @@ interface BrgyProps {
   pgc_prefix: string
 }
 
+interface View {
+  cx: number
+  cy: number
+  scale: number
+}
+
+// Max zoom: close enough to comfortably read barangay labels on the
+// smallest municipalities without a hard-coded per-municipality lookup.
+const MAX_SCALE = 9
+
 export default function BiliranMap({
   barangays,
   selectedKey,
@@ -59,8 +71,23 @@ export default function BiliranMap({
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
   const [waterways, setWaterways] = useState<LineFeatureCollection | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [focusedMuni, setFocusedMuni] = useState<string | null>(null)
+  // Continuous pan/zoom state (island-projected coordinate space), replacing
+  // the old binary focusedMuni: string | null. null until islandBounds is
+  // known, then initialized to the full-island framing (see below) — the
+  // map must never auto-focus a municipality on load, only the interaction
+  // is continuous now, not the starting state.
+  const [view, setView] = useState<View | null>(null)
+  // True while the user is directly dragging/scrolling the map — disables
+  // the eased CSS transition so direct manipulation tracks the pointer
+  // instantly, rather than lagging behind it. Programmatic jumps (tap a
+  // municipality, pick a barangay, zoom buttons, reset) keep the transition.
+  const [interacting, setInteracting] = useState(false)
   const [maripipiNote, setMaripipiNote] = useState(false)
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const dragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startView: View } | null>(null)
+  const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -76,18 +103,6 @@ export default function BiliranMap({
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load map data.'))
   }, [])
 
-  // Keep the map in sync when a barangay is selected from elsewhere (e.g. the
-  // list): adjust state during render off a previous-value comparison,
-  // rather than in an effect, per https://react.dev/learn/you-might-not-need-an-effect.
-  const [prevSelectedKey, setPrevSelectedKey] = useState<string | null | undefined>(undefined)
-  if (selectedKey !== prevSelectedKey && brgyGeo) {
-    setPrevSelectedKey(selectedKey)
-    const feature = selectedKey ? brgyGeo.features.find((f) => f.properties.key === selectedKey) : null
-    if (feature && feature.properties.pgc_prefix !== focusedMuni) {
-      setFocusedMuni(feature.properties.pgc_prefix)
-    }
-  }
-
   const project = useMemo(() => makeProjector(11.58), [])
 
   const islandBounds: Bounds | null = useMemo(() => {
@@ -101,14 +116,59 @@ export default function BiliranMap({
     return expandBounds(bounds, 0.1)
   }, [municipalities, project])
 
-  const muniBoundsByPrefix = useMemo(() => {
-    if (!municipalities) return {}
-    const map: Record<string, Bounds> = {}
+  // Native (non-React-synthetic) wheel listener, added with { passive: false }
+  // so preventDefault() actually stops page scroll — React's onWheel prop is
+  // attached passively by default and can't block the native scroll.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !islandBounds) return
+    const bounds = islandBounds
+    const icx = (bounds.minX + bounds.maxX) / 2
+    const icy = (bounds.minY + bounds.maxY) / 2
+
+    function handleWheel(e: WheelEvent) {
+      e.preventDefault()
+      if (!svgRef.current) return
+      const zoomFactor = Math.exp(-e.deltaY * 0.0015)
+
+      setInteracting(true)
+      if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current)
+      wheelTimeoutRef.current = setTimeout(() => setInteracting(false), 200)
+
+      setView((prev) => {
+        const base = prev ?? { cx: icx, cy: icy, scale: 1 }
+        const newScale = Math.min(MAX_SCALE, Math.max(1, base.scale * zoomFactor))
+        const [pointerX, pointerY] = clientPointToSvgSpace(svgRef.current!, e.clientX, e.clientY)
+        const tx = icx - base.scale * base.cx
+        const ty = icy - base.scale * base.cy
+        const contentX = (pointerX - tx) / base.scale
+        const contentY = (pointerY - ty) / base.scale
+        const newCx = contentX + (icx - pointerX) / newScale
+        const newCy = contentY + (icy - pointerY) / newScale
+        const [cx, cy] = clampCenter([newCx, newCy], bounds, 0.15)
+        return { cx, cy, scale: newScale }
+      })
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [islandBounds])
+
+  // Each municipality's own "fill the frame" center + scale — used both to
+  // animate the view when tapping a municipality, and as the crossfade
+  // threshold for whichever municipality the current view is nearest to.
+  const muniFocusByPrefix = useMemo(() => {
+    if (!municipalities || !islandBounds) return {}
+    const islandW = islandBounds.maxX - islandBounds.minX
+    const islandH = islandBounds.maxY - islandBounds.minY
+    const map: Record<string, View> = {}
     for (const f of municipalities.features) {
-      map[f.properties.pgc_prefix] = expandBounds(boundsOf([f], project), 0.07)
+      const b = expandBounds(boundsOf([f], project), 0.07)
+      const scale = Math.min(islandW / (b.maxX - b.minX), islandH / (b.maxY - b.minY))
+      map[f.properties.pgc_prefix] = { cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale }
     }
     return map
-  }, [municipalities, project])
+  }, [municipalities, islandBounds, project])
 
   const barangaysByKey = useMemo(() => {
     const map = new Map<string, Barangay>()
@@ -119,6 +179,31 @@ export default function BiliranMap({
   // Drives the weather badge's condition — the same underlying signal as
   // the LIVE UPDATE banner above the map, not a separate/fabricated one.
   const urgentCrossing = useMemo(() => mostUrgentCrossing(barangays), [barangays])
+
+  function clampView(next: View, bounds: Bounds): View {
+    const scale = Math.min(MAX_SCALE, Math.max(1, next.scale))
+    const [cx, cy] = clampCenter([next.cx, next.cy], bounds, 0.15)
+    return { cx, cy, scale }
+  }
+
+  function focusBarangay(feature: GeoFeature<BrgyProps>, bounds: Bounds) {
+    const b = expandBounds(boundsOf([feature], project), 0.35)
+    const islandW = bounds.maxX - bounds.minX
+    const islandH = bounds.maxY - bounds.minY
+    const scale = Math.min(islandW / (b.maxX - b.minX), islandH / (b.maxY - b.minY))
+    setInteracting(false)
+    setView(clampView({ cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale }, bounds))
+  }
+
+  // Keep the map in sync when a barangay is selected from elsewhere (e.g.
+  // the list): adjust state during render off a previous-value comparison,
+  // rather than in an effect, per https://react.dev/learn/you-might-not-need-an-effect.
+  const [prevSelectedKey, setPrevSelectedKey] = useState<string | null | undefined>(undefined)
+  if (selectedKey !== prevSelectedKey && brgyGeo && islandBounds) {
+    setPrevSelectedKey(selectedKey)
+    const feature = selectedKey ? brgyGeo.features.find((f) => f.properties.key === selectedKey) : null
+    if (feature) focusBarangay(feature, islandBounds)
+  }
 
   if (loadError) {
     return (
@@ -136,29 +221,102 @@ export default function BiliranMap({
     )
   }
 
-  // Zoom is a CSS transform on a <g>, computed against the fixed island viewBox,
-  // rather than animating viewBox itself (which CSS can't transition smoothly).
+  // Zoom is an SVG transform attribute on a <g>, computed against the fixed
+  // island viewBox (which never itself changes), rather than animating
+  // viewBox (which CSS can't transition smoothly).
   const islandCx = (islandBounds.minX + islandBounds.maxX) / 2
   const islandCy = (islandBounds.minY + islandBounds.maxY) / 2
 
-  let transform = 'translate(0,0) scale(1)'
-  if (focusedMuni && muniBoundsByPrefix[focusedMuni]) {
-    const target = muniBoundsByPrefix[focusedMuni]
-    const scale = Math.min(
-      (islandBounds.maxX - islandBounds.minX) / (target.maxX - target.minX),
-      (islandBounds.maxY - islandBounds.minY) / (target.maxY - target.minY)
+  // Default view (full island, unzoomed) — set once, during render, the
+  // first time islandBounds becomes available (same pattern as the
+  // selectedKey sync above). currentView is used as a same-render fallback
+  // so the rest of this render pass has a value even though React discards
+  // it and re-renders immediately after this setView call.
+  const currentView: View = view ?? { cx: islandCx, cy: islandCy, scale: 1 }
+  if (view === null) {
+    setView(currentView)
+  }
+
+  function nearestMunicipalityPrefix(cx: number, cy: number): string | null {
+    let best: string | null = null
+    let bestDist = Infinity
+    for (const [prefix, focus] of Object.entries(muniFocusByPrefix)) {
+      const d = (focus.cx - cx) ** 2 + (focus.cy - cy) ** 2
+      if (d < bestDist) {
+        bestDist = d
+        best = prefix
+      }
+    }
+    return best
+  }
+
+  const nearestPrefix = nearestMunicipalityPrefix(currentView.cx, currentView.cy)
+  const muniFillScale = nearestPrefix ? muniFocusByPrefix[nearestPrefix].scale : 3
+  const lowThreshold = muniFillScale * 0.55
+  const highThreshold = muniFillScale * 0.85
+  const barangayOpacity = Math.min(1, Math.max(0, (currentView.scale - lowThreshold) / (highThreshold - lowThreshold)))
+  const isZoomed = currentView.scale > 1.02
+
+  const tx = islandCx - currentView.scale * currentView.cx
+  const ty = islandCy - currentView.scale * currentView.cy
+  const transform = `translate(${tx},${ty}) scale(${currentView.scale})`
+
+  function focusMuni(prefix: string) {
+    const focus = muniFocusByPrefix[prefix]
+    if (!focus || !islandBounds) return
+    setInteracting(false)
+    setView(clampView(focus, islandBounds))
+  }
+
+  function resetView() {
+    setInteracting(false)
+    setView({ cx: islandCx, cy: islandCy, scale: 1 })
+  }
+
+  function setScale(newScale: number) {
+    if (!islandBounds) return
+    setInteracting(false)
+    setView(clampView({ cx: currentView.cx, cy: currentView.cy, scale: newScale }, islandBounds))
+  }
+
+  function handlePointerDown(e: React.PointerEvent<SVGSVGElement>) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragRef.current = { pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, startView: currentView }
+    setInteracting(true)
+  }
+
+  function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId || !svgRef.current || !islandBounds) return
+    const [startX, startY] = clientPointToSvgSpace(svgRef.current, drag.startClientX, drag.startClientY)
+    const [curX, curY] = clientPointToSvgSpace(svgRef.current, e.clientX, e.clientY)
+    const deltaX = curX - startX
+    const deltaY = curY - startY
+    setView(
+      clampView(
+        {
+          cx: drag.startView.cx - deltaX / drag.startView.scale,
+          cy: drag.startView.cy - deltaY / drag.startView.scale,
+          scale: drag.startView.scale,
+        },
+        islandBounds
+      )
     )
-    const tcx = (target.minX + target.maxX) / 2
-    const tcy = (target.minY + target.maxY) / 2
-    const tx = islandCx - scale * tcx
-    const ty = islandCy - scale * tcy
-    transform = `translate(${tx},${ty}) scale(${scale})`
+  }
+
+  function endDrag(e: React.PointerEvent<SVGSVGElement>) {
+    if (dragRef.current?.pointerId === e.pointerId) {
+      dragRef.current = null
+      setInteracting(false)
+    }
   }
 
   const [mLon, mLat] = project(MARIPIPI.lon, MARIPIPI.lat)
 
   return (
     <div
+      ref={containerRef}
       className="relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10"
       style={{ borderColor: 'var(--card-border)' }}
     >
@@ -172,9 +330,18 @@ export default function BiliranMap({
         .bfw-sea-shimmer { animation: bfw-sea-shimmer 16s ease-in-out infinite; }
       `}</style>
       <svg
+        ref={svgRef}
         viewBox={viewBoxOf(islandBounds)}
         className="h-full w-full"
-        style={{ background: 'linear-gradient(155deg, var(--sea-top), var(--sea-bottom) 70%)' }}
+        style={{
+          background: 'linear-gradient(155deg, var(--sea-top), var(--sea-bottom) 70%)',
+          touchAction: 'none',
+          cursor: interacting ? 'grabbing' : 'grab',
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
       >
         <defs>
           <filter id="bfw-land-shadow" x="-40%" y="-40%" width="180%" height="180%">
@@ -250,57 +417,68 @@ export default function BiliranMap({
           fill="url(#bfw-sea-glow)"
           pointerEvents="none"
         />
-        {focusedMuni === null && <DriftingClouds bounds={islandBounds} />}
+        {currentView.scale < 1.3 && <DriftingClouds bounds={islandBounds} />}
 
-        <g transform={transform} style={{ transition: 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}>
+        <g
+          className="bfw-zoom-group"
+          transform={transform}
+          style={{ transition: interacting ? 'none' : 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}
+        >
           {/*
             Waterways — subtle context at the island overview, turned up
-            once zoomed into a municipality where there's room for them to
-            read clearly without cluttering the whole-island view.
+            continuously as barangayOpacity rises (i.e. as the view nears
+            barangay-reading zoom), rather than a hard on/off switch.
           */}
           <g
-            opacity={focusedMuni ? 0.65 : 0.35}
+            opacity={0.35 + barangayOpacity * 0.3}
             stroke="#7EC8D9"
-            strokeWidth={focusedMuni ? 0.0009 : 0.0006}
+            strokeWidth={0.0006 + barangayOpacity * 0.0003}
             fill="none"
-            style={{ transition: 'opacity 0.4s ease, stroke-width 0.4s ease' }}
           >
             {waterways.features.map((f, i) => (
               <path key={i} d={lineGeometryToPath(f.geometry, project)} />
             ))}
           </g>
 
-          {focusedMuni === null ? (
-            <MunicipalityLayer
-              municipalities={municipalities}
-              barangays={barangays}
-              onSelect={(prefix) => setFocusedMuni(prefix)}
-            />
-          ) : (
-            <>
-              {/* dimmed context outlines of the rest of the island */}
-              <g opacity={0.12}>
-                {municipalities.features.map((f) => (
-                  <path
-                    key={f.properties.pgc_prefix}
-                    d={geometryToPath(f.geometry, project)}
-                    fill="none"
-                    stroke="var(--text-strong)"
-                    strokeWidth={0.0004}
-                  />
-                ))}
-              </g>
-              <BarangayLayer
-                features={brgyGeo.features.filter((f) => f.properties.pgc_prefix === focusedMuni)}
-                barangaysByKey={barangaysByKey}
-                selectedKey={selectedKey}
-                onSelect={(key) => {
-                  const b = barangaysByKey.get(key)
-                  if (b) onSelect(b)
-                }}
+          {/* dimmed context outlines of the rest of the island, fading in as barangayOpacity rises */}
+          <g opacity={0.12 * barangayOpacity} pointerEvents="none">
+            {municipalities.features.map((f) => (
+              <path
+                key={f.properties.pgc_prefix}
+                d={geometryToPath(f.geometry, project)}
+                fill="none"
+                stroke="var(--text-strong)"
+                strokeWidth={0.0004}
               />
-            </>
-          )}
+            ))}
+          </g>
+
+          {/*
+            Both layers stay mounted and crossfade via opacity (driven by
+            barangayOpacity, a continuous function of view.scale) instead of
+            a hard swap — a sudden layer swap under free-form zoom, rather
+            than a discrete tap, would read as a glitch.
+          */}
+          <g
+            style={{ opacity: 1 - barangayOpacity, transition: 'opacity 0.4s ease' }}
+            pointerEvents={barangayOpacity > 0.5 ? 'none' : 'auto'}
+          >
+            <MunicipalityLayer municipalities={municipalities} barangays={barangays} onSelect={focusMuni} />
+          </g>
+          <g
+            style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }}
+            pointerEvents={barangayOpacity > 0.5 ? 'auto' : 'none'}
+          >
+            <BarangayLayer
+              features={nearestPrefix ? brgyGeo.features.filter((f) => f.properties.pgc_prefix === nearestPrefix) : []}
+              barangaysByKey={barangaysByKey}
+              selectedKey={selectedKey}
+              onSelect={(key) => {
+                const b = barangaysByKey.get(key)
+                if (b) onSelect(b)
+              }}
+            />
+          </g>
 
           {/* Maripipi — no polygon data, shown as a marker only */}
           <g
@@ -313,16 +491,18 @@ export default function BiliranMap({
         </g>
       </svg>
 
-      {focusedMuni && (
+      {isZoomed && (
         <button
           type="button"
-          onClick={() => setFocusedMuni(null)}
+          onClick={resetView}
           className="absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md"
           style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
         >
           ← All municipalities
         </button>
       )}
+
+      <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} />
 
       <WeatherBadge crossing={urgentCrossing} />
       <Legend />
@@ -538,6 +718,56 @@ function BarangayLayer({
         )
       })}
     </g>
+  )
+}
+
+/**
+ * Zoom slider + +/- buttons, driving the same view.scale as wheel-zoom and
+ * tap-a-municipality — a dedicated, always-visible control for continuous
+ * zoom, alongside (not replacing) the tap-to-zoom shortcut and the
+ * top-left "back to all municipalities" reset button.
+ */
+function ZoomControls({
+  scale,
+  maxScale,
+  onChange,
+}: {
+  scale: number
+  maxScale: number
+  onChange: (scale: number) => void
+}) {
+  return (
+    <div
+      className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+    >
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(1, scale / 1.35))}
+        aria-label="Zoom out"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
+      >
+        −
+      </button>
+      <input
+        type="range"
+        min={1}
+        max={maxScale}
+        step={0.01}
+        value={scale}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Zoom level"
+        className="h-1 w-16 accent-current sm:w-20"
+      />
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(maxScale, scale * 1.35))}
+        aria-label="Zoom in"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
+      >
+        +
+      </button>
+    </div>
   )
 }
 
