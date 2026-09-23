@@ -1,11 +1,13 @@
 // components/BarangayDetailPanel.tsx
 //
 // "Detail Overview" sidebar from the design spec in CLAUDE.md. The
-// HAND/TWI/LC factor breakdown and per-basin hydrograph called for in that
-// spec aren't shown here because barangay_dashboard_data.json only carries
-// the combined mean_fsi_score, not the individual factor contributions or
-// a Q-vs-time series — add those fields to the pipeline output before
-// building that part.
+// HAND/TWI/LC factor breakdown and a real per-basin hydrograph CHART called
+// for in that spec aren't shown here because barangay_dashboard_data.json
+// only carries the combined mean_fsi_score, not the individual factor
+// contributions or a Q-vs-time series — add those fields to the pipeline
+// output before building either. A labeled hydrograph *placeholder*
+// (below) is shown though, directly under the FSI block — a deliberate,
+// honest "not yet modeled" corner, not a step toward a fake chart.
 
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 
@@ -45,6 +47,27 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
           </div>
           <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
             flood susceptibility · score {barangay.mean_fsi_score.toFixed(3)}
+          </div>
+        </div>
+      </div>
+
+      {/*
+        Directly below the FSI block above — a labeled, honest placeholder
+        (dashed border + muted opacity, same visual cue used elsewhere in
+        this app for a reserved-but-unavailable feature), not a fabricated
+        curve. See the file header comment for why a real chart isn't here.
+      */}
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed px-3 py-2"
+        style={{ borderColor: 'var(--card-border)', opacity: 0.75 }}
+      >
+        <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: 'var(--text-soft)' }} aria-hidden />
+        <div>
+          <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+            Hydrograph
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
+            No basin flow data available yet
           </div>
         </div>
       </div>
