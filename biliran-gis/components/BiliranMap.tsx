@@ -620,10 +620,17 @@ export default function BiliranMap({
         </button>
       )}
 
-      {!compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
+      {showChrome && !compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
 
       {showChrome && !compact && <WeatherBadge crossing={urgentCrossing} />}
-      <Legend compact={compact} />
+      {/*
+        showChrome-gated (hidden pre-login, like the rest of this chrome),
+        but NOT !compact-gated — unlike ZoomControls/WeatherBadge, Legend
+        has its own dedicated compact variant (dots-only) specifically so
+        it stays visible and legible at the small compact-map size, so it
+        shouldn't disappear entirely just because the map is compact.
+      */}
+      {showChrome && <Legend compact={compact} />}
     </div>
   )
 }
