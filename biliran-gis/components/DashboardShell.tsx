@@ -26,19 +26,34 @@
 
 'use client'
 
-import { useMemo, useRef, type RefObject } from 'react'
+import { useMemo, useRef, useState, type RefObject } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 
-// How far the barangay list has to scroll, and how long it has to sit
-// still past that point, before the map compacts — both tuned so ordinary
-// scrolling through the list doesn't flicker the map in and out near the
-// threshold (the settled answer to Part 3's "instant vs debounced" question).
-const SCROLL_COMPACT_THRESHOLD_PX = 50
+// Row count, not a pixel value — more meaningful than an arbitrary pixel
+// threshold since row height could vary, and robust to it if it ever does
+// (checked via each row's own getBoundingClientRect, not row-height math).
+// SCROLL_DEBOUNCE_MS still avoids flickering the map in and out mid-scroll
+// (the settled answer to Part 3's "instant vs debounced" question) — though
+// now that compacting is one-way (see handleListScroll below), "flicker"
+// really just means "compact a beat too early while still fast-scrolling
+// past row 8," not an in-and-out toggle.
+const ROW_COMPACT_THRESHOLD = 8
 const SCROLL_DEBOUNCE_MS = 100
+
+// ~20% bigger than the original 160×120 starting point — eyeballed
+// against the real layout, not a pixel-perfect spec.
+const COMPACT_MAP_WIDTH = 192
+const COMPACT_MAP_HEIGHT = 144
+
+// How far down a swipe has to travel, starting from the very top of the
+// list, before it's treated as the deliberate "fill the middle space"
+// gesture rather than an ordinary drag — best-effort/eyeballed, same as
+// the sizing constants above.
+const SWIPE_DOWN_THRESHOLD_PX = 60
 
 export default function DashboardShell({
   barangays,
@@ -80,14 +95,76 @@ export default function DashboardShell({
     [sorted, selectedKey]
   )
 
+  // One-way: once compacted, scroll position no longer matters — only an
+  // explicit tap on the compacted map re-expands it (see onCompactTap in
+  // app/page.tsx). So this only ever calls onListScrolledChange(true), and
+  // only while not already compact.
   const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
-    const scrollTop = e.currentTarget.scrollTop
+    if (listScrolled) return
+    const container = e.currentTarget
     if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current)
     scrollDebounceRef.current = setTimeout(() => {
-      onListScrolledChange(scrollTop > SCROLL_COMPACT_THRESHOLD_PX)
+      // Re-queried at settle time (not per scroll tick) — container is a
+      // real DOM node captured above, safe to read after the debounce
+      // delay (unlike the SyntheticEvent itself, whose currentTarget goes
+      // stale once the handler returns).
+      const targetRow = container.querySelectorAll('li')[ROW_COMPACT_THRESHOLD - 1]
+      // Fewer than ROW_COMPACT_THRESHOLD barangays in the filtered list
+      // (e.g. a small municipality filter) — that row never exists, so
+      // scrolling can never trigger compacting; nothing to do.
+      if (!targetRow) return
+      if (targetRow.getBoundingClientRect().top <= container.getBoundingClientRect().top) {
+        onListScrolledChange(true)
+      }
     }, SCROLL_DEBOUNCE_MS)
   }
+
+  // Once the map is compact, swiping down on the list — starting from the
+  // very top of it, where there's nothing left to scroll — restructures
+  // the layout so the list fills the space beside the compact map instead
+  // of only below it (the space to the compact map's right otherwise sits
+  // empty). Starting the gesture only at scrollTop 0 keeps it from
+  // conflicting with an ordinary downward drag mid-list, which just
+  // scrolls content (reveals earlier rows) rather than meaning this.
+  const [swipedLayout, setSwipedLayout] = useState(false)
+  const swipeRef = useRef<{ pointerId: number; startY: number; armed: boolean } | null>(null)
+
+  // Reset the swiped layout once the map fully re-expands (onCompactTap),
+  // so a later re-compact starts from the normal stacked layout again —
+  // render-phase state sync off a previous-value comparison, same pattern
+  // BiliranMap.tsx already uses for its own selectedKey/focusedMunicipality
+  // sync, rather than an effect.
+  const [prevListScrolled, setPrevListScrolled] = useState(listScrolled)
+  if (listScrolled !== prevListScrolled) {
+    setPrevListScrolled(listScrolled)
+    if (!listScrolled) setSwipedLayout(false)
+  }
+
+  function handleListPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!listScrolled || swipedLayout) return
+    if (e.currentTarget.scrollTop > 0) return
+    swipeRef.current = { pointerId: e.pointerId, startY: e.clientY, armed: true }
+  }
+
+  function handleListPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const swipe = swipeRef.current
+    if (!swipe || !swipe.armed || swipe.pointerId !== e.pointerId) return
+    if (e.currentTarget.scrollTop > 0) {
+      swipe.armed = false
+      return
+    }
+    if (e.clientY - swipe.startY > SWIPE_DOWN_THRESHOLD_PX) {
+      setSwipedLayout(true)
+      swipe.armed = false
+    }
+  }
+
+  function endListSwipe(e: React.PointerEvent<HTMLDivElement>) {
+    if (swipeRef.current?.pointerId === e.pointerId) swipeRef.current = null
+  }
+
+  const compactAndSwiped = listScrolled && swipedLayout
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -135,8 +212,29 @@ export default function DashboardShell({
             map into. Shrinking it to the compact size below is what gives
             the list its reclaimed vertical space — the grid row underneath
             is flex-1, so it grows to fill whatever this spacer gives up.
+
+            Swiped-layout (compactAndSwiped) switches this wrapper from a
+            flex column to a 2×2 CSS grid instead: the map spacer is
+            pinned to the top-left cell at its exact usual size/position
+            (so mapSlotRef's measured rect — and therefore the real map's
+            on-screen box — never changes because of this; only this
+            component's own layout around it does), and the list+detail
+            grid below is repositioned to fill the remaining column
+            (beside the map) and both rows (still below it too), rather
+            than starting only below the map's row. The FSI legend itself
+            stays put — it's rendered inside BiliranMap's own box, clipped
+            to it (overflow-hidden), so it can't physically extend into
+            this component's layout; the list is sized to sit beside that
+            box without overlapping it instead.
           */}
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div
+            className={compactAndSwiped ? 'grid min-h-0 flex-1 gap-4' : 'flex min-h-0 flex-1 flex-col gap-4'}
+            style={
+              compactAndSwiped
+                ? { gridTemplateColumns: `${COMPACT_MAP_WIDTH}px 1fr`, gridTemplateRows: `${COMPACT_MAP_HEIGHT}px 1fr` }
+                : undefined
+            }
+          >
             {/*
               pointer-events: none — this spacer only reserves layout
               space; the real map is a position:fixed sibling elsewhere in
@@ -154,10 +252,26 @@ export default function DashboardShell({
             <div
               ref={mapSlotRef}
               className={listScrolled ? 'shrink-0' : 'h-96 shrink-0 md:h-[70%]'}
-              style={{ pointerEvents: 'none', width: listScrolled ? 160 : undefined, height: listScrolled ? 120 : undefined }}
+              style={{
+                pointerEvents: 'none',
+                width: listScrolled ? COMPACT_MAP_WIDTH : undefined,
+                height: listScrolled ? COMPACT_MAP_HEIGHT : undefined,
+                ...(compactAndSwiped ? { gridColumn: 1, gridRow: 1 } : {}),
+              }}
             />
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]">
-              <div ref={listScrollRef} onScroll={handleListScroll} className="min-h-0 overflow-y-auto pr-1">
+            <div
+              className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]"
+              style={compactAndSwiped ? { gridColumn: 2, gridRow: '1 / span 2' } : undefined}
+            >
+              <div
+                ref={listScrollRef}
+                onScroll={handleListScroll}
+                onPointerDown={handleListPointerDown}
+                onPointerMove={handleListPointerMove}
+                onPointerUp={endListSwipe}
+                onPointerCancel={endListSwipe}
+                className="min-h-0 overflow-y-auto pr-1"
+              >
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
                   Barangays by flood susceptibility, highest first
                 </h3>

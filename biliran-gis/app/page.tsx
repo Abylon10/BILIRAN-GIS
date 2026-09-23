@@ -88,10 +88,13 @@ export default function HomePage() {
   const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
 
   // Compact map on barangay-list scroll (DashboardShell.tsx owns the
-  // scroll listener/debounce and flips this; this ref is used both there,
-  // as the list's own scroll container, and here, to scroll it back to
-  // top when the compacted map is tapped — see BiliranMap.tsx's
-  // onCompactTap prop).
+  // scroll listener/debounce and flips this true once the list scrolls
+  // past the row threshold). One-way: scroll position alone never flips
+  // it back — only an explicit tap on the compacted map does, via
+  // onCompactTap below, which sets it directly. listScrollRef is used
+  // both there, as the list's own scroll container, and here, purely as a
+  // courtesy to scroll it back to top when the map re-expands (no longer
+  // the mechanism that drives listScrolled, now that it's one-way).
   const [listScrolled, setListScrolled] = useState(false)
   const listScrollRef = useRef<HTMLDivElement>(null)
 
@@ -359,7 +362,10 @@ export default function HomePage() {
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
               compact={revealed && listScrolled}
-              onCompactTap={() => listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+              onCompactTap={() => {
+                setListScrolled(false)
+                listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+              }}
             />
           )}
         </div>

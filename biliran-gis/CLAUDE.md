@@ -87,23 +87,32 @@ panel share one fetch and one selection instead of each owning a copy.
 
 **Compact map while the barangay list is scrolled.** Same `mapSlotRef`
 mechanism as above, reused rather than duplicated: `DashboardShell` owns a
-debounced scroll listener (`SCROLL_COMPACT_THRESHOLD_PX` = 50,
-`SCROLL_DEBOUNCE_MS` = 100 — the debounce is what keeps scrolling back and
-forth right at the threshold from flickering the map in and out) on the
-barangay list's own scroll container, and flips `listScrolled` (lifted to
-`app/page.tsx`, same shape as `revealed`) once the list has settled past
-it. `mapSlotRef` itself — the *same* spacer div, not a second one — just
-resizes from its normal `h-96`/`md:h-[70%]` box down to a small fixed
-160×120 box (still the first child of the flex column, so "docked
-top-left" falls out of ordinary flex flow rather than needing absolute
-positioning) when `listScrolled` is true; the list's own grid row is
-`flex-1`, so it grows into whatever height the spacer gives up. No
-transition on the spacer itself (it's invisible either way) — re-measuring
-it after it's already settled at its new size is what feeds `mapRect`,
-and `.bfw-map-shell`'s existing transition (above) is what actually
-animates the visible map smoothly between the two spots, same as the
-login→dashboard reveal. `LiveUpdateBanner` unmounts while `listScrolled`
-(reappears once scrolled back up) rather than shrinking in place.
+scroll listener on the barangay list's own scroll container that flips
+`listScrolled` (lifted to `app/page.tsx`, same shape as `revealed`) once
+the list has scrolled past a **row-count** threshold
+(`ROW_COMPACT_THRESHOLD` = 8), not a pixel value — found by locating the
+8th `<li>` inside the scroll container (`BarangayList`'s own rows, no
+change needed there) and comparing its `getBoundingClientRect().top`
+against the container's own, so it stays correct even if row height ever
+varies. `SCROLL_DEBOUNCE_MS` (100) still avoids compacting a beat too
+early mid-fast-scroll. This is **one-way**: `handleListScroll` only ever
+calls `onListScrolledChange(true)`, and only while not already compact —
+scrolling back to the top does nothing once compacted; the only way back
+is an explicit tap on the compacted map (`onCompactTap`, below), which now
+sets `listScrolled` false directly rather than relying on scroll position
+to un-flip it (a `scrollTo({ top: 0 })` alongside that is purely a
+courtesy return-to-top, not the trigger). `mapSlotRef` itself — the *same*
+spacer div, not a second one — just resizes from its normal
+`h-96`/`md:h-[70%]` box down to a small fixed `COMPACT_MAP_WIDTH` ×
+`COMPACT_MAP_HEIGHT` box (192×144) when `listScrolled` is true; the list's
+own grid row is `flex-1`, so it grows into whatever height the spacer
+gives up. No transition on the spacer itself (it's invisible either way)
+— re-measuring it after it's already settled at its new size is what
+feeds `mapRect`, and `.bfw-map-shell`'s existing transition (above) is
+what actually animates the visible map smoothly between spots, same as
+the login→dashboard reveal. `LiveUpdateBanner` unmounts while
+`listScrolled` (reappears once the map fully re-expands) rather than
+shrinking in place.
 
 `BiliranMap`'s `compact` prop (default `false`) turns it into a passive
 thumbnail rather than a smaller version of the interactive map: the wheel
@@ -111,29 +120,56 @@ listener and `handlePointerDown`'s drag-tracking both no-op when `compact`,
 and the `<svg>` gets an `onClickCapture` that calls the caller's
 `onCompactTap` and `stopPropagation()`s before the tap ever reaches
 `MunicipalityLayer`/`BarangayLayer`'s own per-polygon `onClick` — so
-tapping the thumbnail always means "expand," never "select." `onCompactTap`
-(`app/page.tsx`) just scrolls the list's own container back to `scrollTop:
-0`; since `listScrolled` is driven purely by scroll position, that alone
-un-flips it and the map animates back out — no separate override flag
-needed. `ZoomControls` and `WeatherBadge` are hidden outright when compact
-(`showChrome && !compact`) rather than shrunk, since their own gestures/
-clutter don't fit a passive thumbnail either. The reset button and
-`Legend` get their own smaller `compact` variants instead of hiding
-(`Legend`'s compact form drops text labels — a dots-only pill — since the
-full labeled pill overflows at this size); the reset button's `onClick`
-also `stopPropagation()`s when compact so resetting the view doesn't also
-read as the tap-to-expand gesture on the `<svg>` underneath it.
+tapping the thumbnail always means "expand," never "select." `ZoomControls`
+and `WeatherBadge` are hidden outright when compact (`showChrome &&
+!compact`) rather than shrunk, since their own gestures/clutter don't fit
+a passive thumbnail either. `Legend` is the one exception — gated on
+`showChrome` alone, not `!compact` — since it has its own smaller
+`compact` variant (dots-only, since the full labeled pill overflows at
+this size) rather than hiding. The reset button also gets a `compact`
+size variant, and its `onClick` `stopPropagation()`s when compact so
+resetting the view doesn't also read as the tap-to-expand gesture on the
+`<svg>` underneath it.
+
+**Swipe-down-to-fill layout, once already compact.** A further gesture —
+distinct from ordinary scrolling — on top of the compact state above:
+swiping down on the barangay list, starting from `scrollTop: 0` (the
+gesture is only armed there, in `DashboardShell`'s
+`handleListPointerDown`, specifically so it can't be confused with an
+ordinary downward drag mid-list, which just reveals earlier rows), past
+`SWIPE_DOWN_THRESHOLD_PX` (60) sets local `swipedLayout` state. This
+restructures the map-spacer/list wrapper from a flex column (map row,
+list row below it) into a 2×2 CSS grid: the map spacer is pinned to the
+top-left cell at its usual exact size (so `mapSlotRef`'s measured rect —
+and the real map's on-screen box — never changes because of this; only
+`DashboardShell`'s own layout around it does), and the list+detail grid
+moves to fill the remaining column beside the map (and both rows, so it
+still extends below it too) instead of starting only below the map's row.
+`FSI` `Legend` itself can't move into that space — it's rendered inside
+`BiliranMap`'s own box, clipped by that box's `overflow: hidden` — so the
+list is just sized to sit beside the compact map+legend without
+overlapping it, not literally merged with it. `swipedLayout` resets to
+`false` whenever `listScrolled` goes back to `false` (render-phase sync
+off a previous-value comparison, same pattern as `BiliranMap.tsx`'s own
+`selectedKey`/`focusedMunicipality` sync), so a later re-compact starts
+from the normal stacked layout again.
 
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
 overlays that only make sense once there's a dashboard around them: the
-zoom slider inside `ZoomControls` (its own `showSlider` prop — the `-`/`+`
-buttons stay either way) and the `WeatherBadge` ribbon. As a pure
-decorative login backdrop these were just
+entire `ZoomControls` pill (both the `−`/`+` buttons and its slider — an
+earlier version kept the buttons showing either way, since only the
+slider itself had its own `showSlider` gate; both are gone pre-login now),
+`Legend`, and the `WeatherBadge` ribbon. As a pure decorative login
+backdrop these were just
 clutter — the ribbon specifically used to collide with the theme-toggle
 button in that state (worked around earlier by pushing the toggle down),
 now moot since the ribbon simply doesn't render there; the toggle is back
-to a fixed `top-5`.
+to a fixed `top-5`. `Legend` is gated on `showChrome` alone, not
+`showChrome && !compact` like `ZoomControls`/`WeatherBadge` — it has its
+own dedicated compact (dots-only) variant specifically so it stays
+visible at the small compact-map size, unlike those two which just
+disappear outright when compact.
 
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via
