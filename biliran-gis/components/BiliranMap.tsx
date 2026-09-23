@@ -71,6 +71,8 @@ export default function BiliranMap({
   showChrome = true,
   focusedMunicipality = null,
   onFocusMunicipality,
+  compact = false,
+  onCompactTap,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -88,6 +90,16 @@ export default function BiliranMap({
   // so the dropdown follows. null means "all municipalities" / full island.
   focusedMunicipality?: string | null
   onFocusMunicipality?: (name: string | null) => void
+  // True while docked as the small top-left thumbnail during barangay-list
+  // scroll (see DashboardShell.tsx) — a passive live view, not a smaller
+  // version of the normal interactive map: wheel-zoom, drag-pan, and
+  // municipality/barangay taps are all suppressed, and any tap on the map
+  // itself (other than the reset button) calls onCompactTap instead, which
+  // the caller uses to scroll the barangay list back to top and exit
+  // compact mode. Avoids gesture conflicts with the list scrolling right
+  // next to it, and avoids trying to support precise pan/zoom at ~50% size.
+  compact?: boolean
+  onCompactTap?: () => void
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -150,7 +162,7 @@ export default function BiliranMap({
 
     function handleWheel(e: WheelEvent) {
       e.preventDefault()
-      if (!svgRef.current) return
+      if (!svgRef.current || compact) return
       const zoomFactor = Math.exp(-e.deltaY * WHEEL_ZOOM_COEFFICIENT)
 
       setInteracting(true)
@@ -174,7 +186,7 @@ export default function BiliranMap({
 
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
-  }, [islandBounds])
+  }, [islandBounds, compact])
 
   // Each municipality's own "fill the frame" center + scale — used both to
   // animate the view when tapping a municipality, and as the crossfade
@@ -352,6 +364,7 @@ export default function BiliranMap({
   const DRAG_THRESHOLD_PX = 5
 
   function handlePointerDown(e: React.PointerEvent<SVGSVGElement>) {
+    if (compact) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     dragRef.current = {
       pointerId: e.pointerId,
@@ -421,8 +434,22 @@ export default function BiliranMap({
         style={{
           background: 'linear-gradient(155deg, var(--sea-top), var(--sea-bottom) 70%)',
           touchAction: 'none',
-          cursor: interacting ? 'grabbing' : 'grab',
+          cursor: compact ? 'pointer' : interacting ? 'grabbing' : 'grab',
         }}
+        // Compact mode's one live gesture: any tap anywhere on the map
+        // expands it back out, instead of panning/selecting. Captured
+        // (rather than a plain onClick) so it fires before — and
+        // suppresses — the municipality/barangay polygons' own onClick
+        // below, without needing to thread a "disabled" flag through
+        // MunicipalityLayer/BarangayLayer themselves.
+        onClickCapture={
+          compact
+            ? (e) => {
+                e.stopPropagation()
+                onCompactTap?.()
+              }
+            : undefined
+        }
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -588,18 +615,28 @@ export default function BiliranMap({
       {isZoomed && (
         <button
           type="button"
-          onClick={resetView}
-          className="absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+          onClick={(e) => {
+            // Kept even at compact size (per the settled Part 3 design) —
+            // stopPropagation so resetting the view doesn't also read as
+            // the map-background tap that expands the map back out.
+            if (compact) e.stopPropagation()
+            resetView()
+          }}
+          className={
+            compact
+              ? 'absolute left-1.5 top-1.5 rounded-full border px-1.5 py-1 text-[9px] font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md'
+              : 'absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md'
+          }
           style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
         >
-          ← All municipalities
+          {compact ? '← All' : '← All municipalities'}
         </button>
       )}
 
-      <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />
+      {!compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
 
-      {showChrome && <WeatherBadge crossing={urgentCrossing} />}
-      <Legend />
+      {showChrome && !compact && <WeatherBadge crossing={urgentCrossing} />}
+      <Legend compact={compact} />
 
       {maripipiNote && (
         <div
@@ -884,7 +921,7 @@ function ZoomControls({
   )
 }
 
-function Legend() {
+function Legend({ compact = false }: { compact?: boolean }) {
   const stops: [string, number][] = [
     ['Very Low', 0.1],
     ['Low', 0.3],
@@ -892,6 +929,28 @@ function Legend() {
     ['High', 0.7],
     ['Very High', 0.9],
   ]
+
+  // At ~50% map size (compact) the full text-labeled pill overflows and
+  // reads as clutter — collapse to dots-only (still legible via title
+  // tooltips) rather than shrinking text past reading size.
+  if (compact) {
+    return (
+      <div
+        className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+        style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
+      >
+        {stops.map(([label, score]) => (
+          <span
+            key={label}
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: fsiScoreColor(score), boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
+            title={label}
+          />
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div
       className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"

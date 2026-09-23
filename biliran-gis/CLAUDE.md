@@ -85,6 +85,45 @@ early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
 
+**Compact map while the barangay list is scrolled.** Same `mapSlotRef`
+mechanism as above, reused rather than duplicated: `DashboardShell` owns a
+debounced scroll listener (`SCROLL_COMPACT_THRESHOLD_PX` = 50,
+`SCROLL_DEBOUNCE_MS` = 100 — the debounce is what keeps scrolling back and
+forth right at the threshold from flickering the map in and out) on the
+barangay list's own scroll container, and flips `listScrolled` (lifted to
+`app/page.tsx`, same shape as `revealed`) once the list has settled past
+it. `mapSlotRef` itself — the *same* spacer div, not a second one — just
+resizes from its normal `h-96`/`md:h-[70%]` box down to a small fixed
+160×120 box (still the first child of the flex column, so "docked
+top-left" falls out of ordinary flex flow rather than needing absolute
+positioning) when `listScrolled` is true; the list's own grid row is
+`flex-1`, so it grows into whatever height the spacer gives up. No
+transition on the spacer itself (it's invisible either way) — re-measuring
+it after it's already settled at its new size is what feeds `mapRect`,
+and `.bfw-map-shell`'s existing transition (above) is what actually
+animates the visible map smoothly between the two spots, same as the
+login→dashboard reveal. `LiveUpdateBanner` unmounts while `listScrolled`
+(reappears once scrolled back up) rather than shrinking in place.
+
+`BiliranMap`'s `compact` prop (default `false`) turns it into a passive
+thumbnail rather than a smaller version of the interactive map: the wheel
+listener and `handlePointerDown`'s drag-tracking both no-op when `compact`,
+and the `<svg>` gets an `onClickCapture` that calls the caller's
+`onCompactTap` and `stopPropagation()`s before the tap ever reaches
+`MunicipalityLayer`/`BarangayLayer`'s own per-polygon `onClick` — so
+tapping the thumbnail always means "expand," never "select." `onCompactTap`
+(`app/page.tsx`) just scrolls the list's own container back to `scrollTop:
+0`; since `listScrolled` is driven purely by scroll position, that alone
+un-flips it and the map animates back out — no separate override flag
+needed. `ZoomControls` and `WeatherBadge` are hidden outright when compact
+(`showChrome && !compact`) rather than shrunk, since their own gestures/
+clutter don't fit a passive thumbnail either. The reset button and
+`Legend` get their own smaller `compact` variants instead of hiding
+(`Legend`'s compact form drops text labels — a dots-only pill — since the
+full labeled pill overflows at this size); the reset button's `onClick`
+also `stopPropagation()`s when compact so resetting the view doesn't also
+read as the tap-to-expand gesture on the `<svg>` underneath it.
+
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
 overlays that only make sense once there's a dashboard around them: the
