@@ -120,10 +120,12 @@ Invitation codes are created via `app/api/admin/invite/route.ts` (`GET` to
 list, `POST` to create) — admin-only, checked by decoding the caller's
 Supabase access token (`Authorization: Bearer <token>`, sent from the client
 after `supabase.auth.getSession()`) and requiring `user_profiles.access_level
-=== 'admin'`. Before this route existed, nothing in the app could actually
-produce an `invitation_codes` row, so `/activate` had no real way to be
-reached. Surfaced in the UI as "Invitations" in the hidden "+" menu, shown
-only to admins (`components/AdminInvitePanel.tsx`).
+=== 'admin'` via `lib/requireAdmin.ts` (shared by every admin route —
+extracted once a second admin endpoint needed the identical check, rather
+than duplicating it). Before this route existed, nothing in the app could
+actually produce an `invitation_codes` row, so `/activate` had no real way
+to be reached. Surfaced in the UI as "Invitations" in the hidden "+" menu,
+shown only to admins (`components/AdminInvitePanel.tsx`).
 
 **Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
 which shows the signed-in user's email plus `office`/`access_level` fetched
@@ -143,6 +145,22 @@ goes through a freshly-signed read URL (`getAvatarUrl()`), never a public
 bucket URL — the bucket stays private. The photo also shows as a small
 circular thumbnail on the "+" menu trigger button in `app/page.tsx` once
 one exists, in place of the generic "+" icon.
+
+**Structured name fields** (`title`/`first_name`/`family_name` — not one
+combined name string) were added on `user_profiles` via
+`supabase/profile-name-fields-setup.sql` (same not-auto-applied pattern).
+`lib/profile.ts`'s `formatDisplayName()` picks `"title first_name
+family_name"` when it fits a max-length constant, else falls back to
+`"title family_name"` (e.g. "Mr. Dela Cruz") — kept structured specifically
+so this fallback is reliable rather than parsed from free text. That same
+SQL file also fixes a real gap found while adding these columns: the
+existing "update own row" RLS policy had no column restriction, so any
+signed-in user could `update user_profiles set access_level = 'admin'
+where user_id = auth.uid()` directly via the Supabase client — RLS
+restricts which *rows* a policy covers, not which *columns*, so the fix is
+a column-level `grant`/`revoke` (users can update their own `office`/
+`title`/`first_name`/`family_name`/`avatar_path`, explicitly not
+`access_level`), not another RLS policy.
 
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each

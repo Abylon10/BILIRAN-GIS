@@ -7,25 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-
-async function requireAdmin(req: NextRequest) {
-  const authHeader = req.headers.get('authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  if (!token) return null
-
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
-  if (userError || !userData.user) return null
-
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from('user_profiles')
-    .select('access_level')
-    .eq('user_id', userData.user.id)
-    .single()
-
-  if (profileError || !profile || profile.access_level !== 'admin') return null
-
-  return userData.user
-}
+import { requireAdmin } from '@/lib/requireAdmin'
 
 function generateCode(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()
