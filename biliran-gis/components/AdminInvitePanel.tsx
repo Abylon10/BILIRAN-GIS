@@ -236,7 +236,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-md bg-[#E8A33D] py-2 text-sm font-semibold text-[#0B3654] transition-colors hover:bg-[#DB962E] disabled:cursor-not-allowed disabled:opacity-50"
+          className="bfw-btn w-full rounded-md py-2 text-sm font-semibold"
         >
           {loading ? 'Creating…' : 'Create invitation'}
         </button>
@@ -283,7 +283,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
                         type="button"
                         onClick={() => saveEdit(inv.id)}
                         disabled={busy}
-                        className="rounded bg-[#E8A33D] px-2 py-1 text-xs font-semibold text-[#0B3654] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="bfw-btn rounded px-2 py-1 text-xs font-semibold"
                       >
                         {busy ? 'Saving…' : 'Save'}
                       </button>

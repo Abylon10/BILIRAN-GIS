@@ -611,10 +611,9 @@ export default function BiliranMap({
           }}
           className={
             compact
-              ? 'absolute left-1.5 top-1.5 rounded-full border px-1.5 py-1 text-[9px] font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md'
-              : 'absolute left-3 top-3 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg ring-1 ring-white/10 backdrop-blur-md'
+              ? 'bfw-btn absolute left-1.5 top-1.5 rounded-full px-1.5 py-1 text-[9px] font-medium'
+              : 'bfw-btn absolute left-3 top-3 rounded-full px-3 py-1.5 text-xs font-medium'
           }
-          style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
         >
           {compact ? '← All' : '← All municipalities'}
         </button>
@@ -873,7 +872,7 @@ function ZoomControls({
         type="button"
         onClick={() => onChange(Math.max(1, scale / 1.35))}
         aria-label="Zoom out"
-        className="flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
+        className="bfw-btn flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
       >
         −
       </button>
@@ -893,7 +892,7 @@ function ZoomControls({
         type="button"
         onClick={() => onChange(Math.min(maxScale, scale * 1.35))}
         aria-label="Zoom in"
-        className="flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
+        className="bfw-btn flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold leading-none"
       >
         +
       </button>

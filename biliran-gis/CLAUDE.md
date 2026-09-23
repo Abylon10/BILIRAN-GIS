@@ -85,6 +85,51 @@ early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
 
+**Color system: one teal/slate palette, day/night as two brightness
+bands within it** (`app/page.tsx`, the `.bfw-root[data-theme='light'/
+'dark']` CSS custom-property blocks). Both the decorative sky/sea/sun/
+cloud backdrop and the "chrome" (card/button/text colors) are built from
+the same six anchors (design reference: a teal color-combo swatch) —
+`#031716`/`#032F30` (near-black/very-dark teal), `#0A7075`/`#0C969C`
+(dark-medium/medium-bright teal), `#6BA3BE` (light blue-teal), `#274D60`
+(slate blue) — rather than the app's old separate warm-sun/sky-blue
+scheme. Day and night are kept in **non-overlapping brightness bands**
+(day: `#0C969C` → pale tint; night: near-black → `#032F30`) rather than
+sharing a middle tone — an earlier pass had night's `--sea-bottom` equal
+to day's `--sea-top`, which made most of the visible gradient read as
+the same color in both themes since a 2-stop gradient's later portion is
+a solid fill, not a full traverse. A few gradient stops (sky-bottom, sun
+core/glow, the pale card-bg tint) are tints mixed toward white from these
+anchors, since the source palette has no near-white tone to soften into.
+
+New variables beyond the original `--card-bg`/`--card-border`/
+`--text-strong`/`--text-soft`/`--field-line` set: `--header-bg`/
+`--body-bg`/`--separator` (the dashboard's header band vs. content area,
+below), and `--btn-from`/`--btn-to`/`--btn-text` (the shared button
+gradient — lighter pairing in day mode, darker in night, per the design
+reference's own day/night button guidance).
+
+**`.bfw-btn`** (same `<style>` block) is the shared "oval, not flat"
+button treatment — a diagonal `linear-gradient(145deg, var(--btn-from),
+var(--btn-to))` fill plus an inset top highlight and a soft drop shadow,
+replacing the old flat `var(--card-bg)` fill on primary buttons. Applied
+to buttons meant to read as CTAs/controls (theme toggle, sign-in, the
+map's zoom `−`/`+` and "All municipalities" reset, Save/Create in
+`ProfilePanel`/`AdminInvitePanel`) — not to text-link-style actions
+(Cancel, Edit, the `Modal` `×` close) or the avatar-photo button, which
+stay in their existing understated styles since gradient-pill styling
+would misrepresent them as primary actions.
+
+**Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
+title row and the `DashboardShell` content area are now two separate
+color panels — a `--header-bg` band with a `--separator`-colored
+`border-b-2`, then a `--body-bg` wash beneath it — rather than one
+uniformly-padded column with no background of its own. The header's own
+title/subtitle text stays a fixed light tint (not `var(--text-strong)`),
+since `--header-bg` is deliberately dark in both themes (a branded band,
+not a theme-following surface) — using the theme-following text color
+would fail contrast in light mode, where `--text-strong` is near-black.
+
 **Compact map while the barangay list is scrolled.** Same `mapSlotRef`
 mechanism as above, reused rather than duplicated: `DashboardShell` owns a
 scroll listener on the barangay list's own scroll container that flips
@@ -131,28 +176,22 @@ size variant, and its `onClick` `stopPropagation()`s when compact so
 resetting the view doesn't also read as the tap-to-expand gesture on the
 `<svg>` underneath it.
 
-**Swipe-down-to-fill layout, once already compact.** A further gesture —
-distinct from ordinary scrolling — on top of the compact state above:
-swiping down on the barangay list, starting from `scrollTop: 0` (the
-gesture is only armed there, in `DashboardShell`'s
-`handleListPointerDown`, specifically so it can't be confused with an
-ordinary downward drag mid-list, which just reveals earlier rows), past
-`SWIPE_DOWN_THRESHOLD_PX` (60) sets local `swipedLayout` state. This
-restructures the map-spacer/list wrapper from a flex column (map row,
-list row below it) into a 2×2 CSS grid: the map spacer is pinned to the
-top-left cell at its usual exact size (so `mapSlotRef`'s measured rect —
-and the real map's on-screen box — never changes because of this; only
-`DashboardShell`'s own layout around it does), and the list+detail grid
-moves to fill the remaining column beside the map (and both rows, so it
-still extends below it too) instead of starting only below the map's row.
-`FSI` `Legend` itself can't move into that space — it's rendered inside
-`BiliranMap`'s own box, clipped by that box's `overflow: hidden` — so the
-list is just sized to sit beside the compact map+legend without
-overlapping it, not literally merged with it. `swipedLayout` resets to
-`false` whenever `listScrolled` goes back to `false` (render-phase sync
-off a previous-value comparison, same pattern as `BiliranMap.tsx`'s own
-`selectedKey`/`focusedMunicipality` sync), so a later re-compact starts
-from the normal stacked layout again.
+**Fill-the-middle layout, once compact.** As soon as `listScrolled` is
+true — no separate gesture required (an earlier version gated this
+behind a swipe-down pointer gesture; dropped because it only armed on
+pointer drag, so it was unreachable via an ordinary mouse-wheel scroll,
+leaving that space empty for anyone not touch-dragging) — the
+map-spacer/list wrapper in `DashboardShell` switches from a flex column
+(map row, list row below it) into a 2×2 CSS grid: the map spacer is
+pinned to the top-left cell at its usual exact compact size (so
+`mapSlotRef`'s measured rect — and the real map's on-screen box — never
+changes because of this; only `DashboardShell`'s own layout around it
+does), and the list+detail grid fills the remaining column beside the
+map (and both rows, so it still extends below it too) instead of leaving
+that space empty. `FSI` `Legend` itself can't move into that space — it's
+rendered inside `BiliranMap`'s own box, clipped by that box's
+`overflow: hidden` — so the list is just sized to sit beside the compact
+map+legend without overlapping it, not literally merged with it.
 
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
