@@ -131,28 +131,22 @@ size variant, and its `onClick` `stopPropagation()`s when compact so
 resetting the view doesn't also read as the tap-to-expand gesture on the
 `<svg>` underneath it.
 
-**Swipe-down-to-fill layout, once already compact.** A further gesture —
-distinct from ordinary scrolling — on top of the compact state above:
-swiping down on the barangay list, starting from `scrollTop: 0` (the
-gesture is only armed there, in `DashboardShell`'s
-`handleListPointerDown`, specifically so it can't be confused with an
-ordinary downward drag mid-list, which just reveals earlier rows), past
-`SWIPE_DOWN_THRESHOLD_PX` (60) sets local `swipedLayout` state. This
-restructures the map-spacer/list wrapper from a flex column (map row,
-list row below it) into a 2×2 CSS grid: the map spacer is pinned to the
-top-left cell at its usual exact size (so `mapSlotRef`'s measured rect —
-and the real map's on-screen box — never changes because of this; only
-`DashboardShell`'s own layout around it does), and the list+detail grid
-moves to fill the remaining column beside the map (and both rows, so it
-still extends below it too) instead of starting only below the map's row.
-`FSI` `Legend` itself can't move into that space — it's rendered inside
-`BiliranMap`'s own box, clipped by that box's `overflow: hidden` — so the
-list is just sized to sit beside the compact map+legend without
-overlapping it, not literally merged with it. `swipedLayout` resets to
-`false` whenever `listScrolled` goes back to `false` (render-phase sync
-off a previous-value comparison, same pattern as `BiliranMap.tsx`'s own
-`selectedKey`/`focusedMunicipality` sync), so a later re-compact starts
-from the normal stacked layout again.
+**Fill-the-middle layout, once compact.** As soon as `listScrolled` is
+true — no separate gesture required (an earlier version gated this
+behind a swipe-down pointer gesture; dropped because it only armed on
+pointer drag, so it was unreachable via an ordinary mouse-wheel scroll,
+leaving that space empty for anyone not touch-dragging) — the
+map-spacer/list wrapper in `DashboardShell` switches from a flex column
+(map row, list row below it) into a 2×2 CSS grid: the map spacer is
+pinned to the top-left cell at its usual exact compact size (so
+`mapSlotRef`'s measured rect — and the real map's on-screen box — never
+changes because of this; only `DashboardShell`'s own layout around it
+does), and the list+detail grid fills the remaining column beside the
+map (and both rows, so it still extends below it too) instead of leaving
+that space empty. `FSI` `Legend` itself can't move into that space — it's
+rendered inside `BiliranMap`'s own box, clipped by that box's
+`overflow: hidden` — so the list is just sized to sit beside the compact
+map+legend without overlapping it, not literally merged with it.
 
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
