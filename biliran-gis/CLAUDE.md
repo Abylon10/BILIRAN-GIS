@@ -125,25 +125,39 @@ var(--btn-to))` fill plus an inset top highlight and a soft drop shadow,
 replacing the old flat `var(--card-bg)` fill on primary buttons. Applied
 to buttons meant to read as CTAs/controls: theme toggle, sign-in, the
 map's zoom `−`/`+` and "All municipalities" reset, `DashboardShell`'s
-municipality filter `<select>` (its *closed* state only — the native
-option-list popup isn't stylable this way in most browsers, an accepted
-platform limit), and every primary action in `ProfilePanel`/
-`AdminInvitePanel` (Save changes, Sign out, Create invitation, the inline
-row's Save) — not text-link-style actions (Cancel, Edit, Revoke, the
-`Modal` `×` close, "Upload/Change photo") or the avatar-photo button,
-which stay in their existing understated styles since gradient-pill
-styling would misrepresent them as primary actions.
+municipality filter trigger button (see below), and every primary action
+in `ProfilePanel`/`AdminInvitePanel` (Save changes, Sign out, Create
+invitation, the inline row's Save) — not text-link-style actions (Cancel,
+Edit, Revoke, the `Modal` `×` close, "Upload/Change photo") or the
+avatar-photo button, which stay in their existing understated styles
+since gradient-pill styling would misrepresent them as primary actions.
 
-Because the `<select>`'s `color: var(--btn-text)` (a near-white tint,
-meant for the gradient-filled closed state) inherits down into its
-`<option>` children, and the OS-rendered *open* popup ignores `.bfw-btn`'s
-gradient and always shows a plain white/light background regardless of
-theme, every unselected option used to render white-on-white —
-effectively invisible except for the browser's own blue selected-row
-highlight. Fixed with a scoped override, `select.bfw-btn option { color:
-#031716; background: #ffffff; }`, right after `.bfw-btn:disabled` — the
-popup itself still can't take the gradient (same platform limit as
-above), but its text is now always readable.
+**Municipality filter is a custom dropdown** (`components/
+MunicipalityFilterDropdown.tsx`), not a native `<select>` anymore. The
+`<select>` version's *open* option-list popup was OS-rendered and
+couldn't take the app's own styling at all — an earlier round could only
+patch its text/background contrast (`select.bfw-btn option { color:
+#031716; background: #ffffff; }`, after every option had rendered
+invisible: white `--btn-text` inherited onto the popup's own always-white
+background), never give it real design. Replaced entirely: the closed
+trigger keeps the same `.bfw-btn` look the select had, but the open panel
+is plain React, so its rows are styled exactly like `BarangayList`'s rows
+(rounded-lg border, amber selected-row highlight) — "same design as the
+list," not just a contrast patch.
+
+The open panel is rendered via `createPortal` into `document.body` with
+`position: fixed` coordinates computed from the trigger's own
+`getBoundingClientRect()`, **not** as a normal `absolute`-positioned
+child. `.bfw-dash` (where this component normally lives in the tree) is a
+stacking context pinned at `z-index: 10`, deliberately kept *below* the
+persistent map's `z-index: 15` (see `.bfw-map-shell` below) — so nothing
+inside `.bfw-dash` can out-z-index the map locally, confirmed via
+Playwright when the map's own `<svg>` intercepted clicks meant for the
+dropdown's options before the portal fix. Portaling to `document.body`
+escapes that stacking context entirely. The panel closes on outside
+click, `Escape`, window resize, or scroll (repositioning isn't tracked
+live — closing and requiring a re-open is simpler than keeping a fixed
+popover glued to a moving trigger).
 
 **Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
 title row and the `DashboardShell` content area are now two separate
@@ -389,8 +403,7 @@ realistic long name + office pairing, not just a visual guess.
 
 **Profile** (`components/ProfilePanel.tsx`): the signed-in user's email,
 editable `title`/`first_name`/`family_name`/`office` fields (`lib/profile.ts`'s
-`updateOwnProfileFields()`), read-only `access_level` (never user-editable —
-see the security fix below), a photo backed by a private Supabase Storage
+`updateOwnProfileFields()`), a photo backed by a private Supabase Storage
 `avatars` bucket (see `supabase/avatars-storage-setup.sql`, **not
 auto-applied** — someone with Supabase dashboard/CLI access has to run it
 once): upload goes through `POST /api/profile/avatar-upload-url`
@@ -453,7 +466,13 @@ where user_id = auth.uid()` directly via the Supabase client — RLS
 restricts which *rows* a policy covers, not which *columns*, so the fix is
 a column-level `grant`/`revoke` (users can update their own `office`/
 `title`/`first_name`/`family_name`/`avatar_path`, explicitly not
-`access_level`), not another RLS policy.
+`access_level`), not another RLS policy. `ProfilePanel.tsx` used to also
+*display* `access_level` (read-only) below the editable fields; removed
+per a later UI request — this was never itself a security control (the
+grant/revoke above is what actually blocks writes), so removing the
+display changes nothing about authorization, only what the user sees.
+`access_level` still drives every real check (`lib/requireAdmin.ts`, the
+post-login admin-panel auto-open in `app/page.tsx`) exactly as before.
 
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
@@ -809,17 +828,27 @@ for:
 Add the corresponding fields to the pipeline's JSON output before building
 any of these.
 
-**Hydrograph corner is a labeled placeholder, not a chart.** Once the
-compact layout is active (`listScrolled`, see "Selecting a barangay also
-compacts the map" above), `DashboardShell.tsx` reserves the grid cell
-directly below the compact map spacer (column 1, row 2 — otherwise empty
-in that grid) for a small dashed-border, muted-opacity card reading
-"Hydrograph — No basin flow data available yet"
-(`HYDROGRAPH_UNAVAILABLE_LABEL`). This is a deliberate, honest "not yet
-modeled" placeholder — asked of and confirmed by the user rather than
-either fabricating a curve or silently omitting the corner — not a step
-toward a fake chart; it still needs the same pipeline data as the real
-"Hydrograph chart" bullet above before it can become one.
+**Hydrograph corner is a labeled placeholder, not a chart.**
+`components/BarangayDetailPanel.tsx` renders a small dashed-border,
+muted-opacity card reading "Hydrograph — No basin flow data available
+yet" directly below the FSI block (dot + susceptibility label + score) —
+"below the FSI corner," matching the same wording used for the existing
+FSI block. This is a deliberate, honest "not yet modeled" placeholder —
+asked of and confirmed by the user rather than either fabricating a curve
+or silently omitting the corner — not a step toward a fake chart; it
+still needs the same pipeline data as the real "Hydrograph chart" bullet
+above before it can become one. Since `BarangayDetailPanel` is the one
+component used for both the sidebar (`hidden md:block`) and the inline
+mobile (`md:hidden`) detail views, this single placeholder covers both
+without extra wiring.
+
+An earlier version of this placeholder lived in `DashboardShell.tsx`'s
+compact-map grid instead (the cell directly below the compact map
+spacer) — moved here after the user reported it as still missing despite
+being on-screen: "the FSI corner" turned out to mean this detail panel's
+own FSI block, not the map's `Legend` chip, so a placeholder sitting
+beside the map rather than below the barangay's actual FSI info wasn't
+read as satisfying the request at all.
 
 **Theme**: the dashboard's post-login background is theme-aware, not one
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']

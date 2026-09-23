@@ -380,19 +380,6 @@ export default function HomePage() {
         .bfw-btn:hover:not(:disabled) { filter: brightness(1.08); }
         .bfw-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 4px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
         .bfw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        /*
-          The municipality filter <select> uses .bfw-btn for its closed
-          (collapsed) state, but its *open* option-list popup is rendered
-          by the OS, not this page — it ignores our gradient and always
-          shows a plain white/light dropdown, regardless of theme. Without
-          this, every unselected option inherited .bfw-btn's white
-          --btn-text on that white popup and was invisible (only the
-          browser's own blue selected-row highlight made the current
-          option readable). Force a plain dark-on-white pairing here
-          specifically, since it has to survive that OS-controlled
-          rendering rather than our own CSS.
-        */
-        select.bfw-btn option { color: #031716; background: #ffffff; }
 
         /*
           The one persistent map's wrapping box — fixed + viewport-relative,

@@ -3,9 +3,11 @@
 // Profile view behind the header profile button (components/
 // HeaderProfileButton.tsx): account email, editable title/first/family
 // name + office (user_profiles — see supabase/profile-name-fields-setup.sql
-// for the columns and a related access_level RLS-column-grant fix),
-// access level (read-only, never user-editable), a photo backed by a
-// private Supabase Storage bucket (see supabase/avatars-storage-setup.sql
+// for the columns and a related access_level RLS-column-grant fix — that
+// column still isn't user-editable, it's just no longer surfaced here at
+// all, not even read-only; access_level still drives real authorization
+// server-side, e.g. lib/requireAdmin.ts, none of that changed), a photo
+// backed by a private Supabase Storage bucket (see supabase/avatars-storage-setup.sql
 // and app/api/profile/avatar-upload-url/route.ts — the bucket stays
 // private, upload goes through a per-request signed upload URL, display
 // through a freshly-signed read URL, never a public bucket URL), and a
@@ -44,7 +46,6 @@ export default function ProfilePanel({
   onProfileFieldsChange?: (fields: Pick<Profile, 'title' | 'first_name' | 'family_name' | 'office'>) => void
   onSignOut: () => void
 }) {
-  const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'error'>('idle')
@@ -63,7 +64,6 @@ export default function ProfilePanel({
     let cancelled = false
     fetchOwnProfile(user.id).then(async (p) => {
       if (cancelled) return
-      setProfile(p)
       setLoading(false)
       if (p) {
         setTitle(p.title ?? '')
@@ -240,10 +240,6 @@ export default function ProfilePanel({
         </button>
       </form>
 
-      <dl className="mt-4 space-y-3 text-sm">
-        <Row label="Access level" value={loading ? 'Loading…' : profile?.access_level ?? '—'} />
-      </dl>
-
       <div className="mt-5 space-y-2 border-t pt-4" style={{ borderColor: 'var(--card-border)' }}>
         <button
           type="button"
@@ -283,15 +279,6 @@ function FieldInput({
         style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
       />
     </label>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <dt style={{ color: 'var(--text-soft)' }}>{label}</dt>
-      <dd className="font-medium" style={{ color: 'var(--text-strong)' }}>{value}</dd>
-    </div>
   )
 }
 

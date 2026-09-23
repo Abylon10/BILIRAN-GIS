@@ -6,11 +6,14 @@
 // NOT include a real hydrograph chart or FSI factor breakdown — those need
 // per-basin time-series/factor data that isn't part of this repo's data.
 // Building fake versions of those would mislead the officials this app is
-// for. The compact layout below does reserve a labeled hydrograph corner
-// (HYDROGRAPH_UNAVAILABLE_LABEL) so the spot exists and reads honestly as
+// for. BarangayDetailPanel.tsx does reserve a labeled hydrograph corner,
+// directly below its FSI corner, so the spot exists and reads honestly as
 // "not yet modeled" rather than either fabricating a curve or looking
-// broken/missing. The map, though, is real: actual barangay/municipality
-// polygons, not a placeholder — see BiliranMap.tsx.
+// broken/missing — see that file, not here; an earlier version of this
+// placeholder lived in this file's compact-map grid instead, which turned
+// out not to be what "below the FSI corner" meant. The map, though, is
+// real: actual barangay/municipality polygons, not a placeholder — see
+// BiliranMap.tsx.
 //
 // The map defaults to the whole-island view, unzoomed — it never
 // auto-focuses a municipality or barangay on load, even though the LIVE
@@ -31,10 +34,10 @@
 
 import { useMemo, useRef, type RefObject } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
-import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
+import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
 
 // Row count, not a pixel value — more meaningful than an arbitrary pixel
 // threshold since row height could vary, and robust to it if it ever does
@@ -51,11 +54,6 @@ const SCROLL_DEBOUNCE_MS = 100
 // against the real layout, not a pixel-perfect spec.
 const COMPACT_MAP_WIDTH = 192
 const COMPACT_MAP_HEIGHT = 144
-
-// Not a chart — see the file header comment. This corner exists so the
-// compact layout has a labeled, honest placeholder instead of either a
-// fabricated curve or an empty gap where a hydrograph would eventually go.
-const HYDROGRAPH_UNAVAILABLE_LABEL = 'No basin flow data available yet'
 
 export default function DashboardShell({
   barangays,
@@ -147,16 +145,7 @@ export default function DashboardShell({
           {!listScrolled && <LiveUpdateBanner barangays={barangays} onSelect={(b) => onSelectKey(b.key)} />}
 
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={municipality ?? ''}
-              onChange={(e) => onMunicipalityChange(e.target.value || null)}
-              className="bfw-btn rounded-full px-3 py-2 text-sm outline-none"
-            >
-              <option value="">All municipalities</option>
-              {MONITORED_MUNICIPALITIES.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} />
           </div>
 
           {/*
@@ -211,31 +200,6 @@ export default function DashboardShell({
                 ...(listScrolled ? { gridColumn: 1, gridRow: 1 } : {}),
               }}
             />
-
-            {/*
-              Directly below the compact map (and its FSI legend, which
-              lives inside the map's own box) — the grid cell at column 1,
-              row 2 is otherwise empty once compact. Deliberately NOT a
-              chart (see the file header comment) — dashed border + muted
-              text mark it as a reserved-but-unavailable feature, not a
-              broken one.
-            */}
-            {listScrolled && (
-              <div
-                className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-2 py-1 text-center"
-                style={{
-                  gridColumn: 1,
-                  gridRow: 2,
-                  width: COMPACT_MAP_WIDTH,
-                  borderColor: 'var(--card-border)',
-                  color: 'var(--text-soft)',
-                  opacity: 0.75,
-                }}
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wide">Hydrograph</span>
-                <span className="text-[10px] leading-tight">{HYDROGRAPH_UNAVAILABLE_LABEL}</span>
-              </div>
-            )}
 
             <div
               className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]"
