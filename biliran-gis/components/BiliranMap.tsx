@@ -5,9 +5,10 @@
 // barangay_biliran.geojson, see CLAUDE.md) rendered as SVG paths. No map
 // tile service involved. Default view is the whole island, unzoomed —
 // tapping a municipality zooms into it and reveals its barangay polygons;
-// tapping a barangay selects it. Maripipi has no polygon data here, so it's
-// shown as a plain "unmonitored" marker, per the project's documented
-// exclusion from monitoring.
+// tapping a barangay selects it. Maripipi has no polygon data here and
+// isn't shown at all — its coordinates (lib/municipalities.ts) are only
+// used to keep it inside islandBounds framing, per the project's
+// documented exclusion from monitoring.
 
 'use client'
 
@@ -79,9 +80,9 @@ export default function BiliranMap({
   onSelect: (barangay: Barangay) => void
   // False while this map is the full-bleed login backdrop (see
   // app/page.tsx) — hides overlays that only make sense once there's a
-  // dashboard around them (the zoom slider, the Maripipi marker, the
-  // weather ribbon), leaving a cleaner decorative background. The -/+
-  // zoom buttons, legend, and ambient motion still show either way.
+  // dashboard around them (the zoom slider, the weather ribbon), leaving a
+  // cleaner decorative background. The -/+ zoom buttons, legend, and
+  // ambient motion still show either way.
   showChrome?: boolean
   // Two-way sync with the dashboard's municipality filter (a municipality
   // *name*, not a pgc_prefix) — mirrors selectedKey/onSelect's existing
@@ -116,7 +117,6 @@ export default function BiliranMap({
   // instantly, rather than lagging behind it. Programmatic jumps (tap a
   // municipality, pick a barangay, zoom buttons, reset) keep the transition.
   const [interacting, setInteracting] = useState(false)
-  const [maripipiNote, setMaripipiNote] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -410,8 +410,6 @@ export default function BiliranMap({
     }
   }
 
-  const [mLon, mLat] = project(MARIPIPI.lon, MARIPIPI.lat)
-
   return (
     <div
       ref={containerRef}
@@ -598,17 +596,6 @@ export default function BiliranMap({
               }}
             />
           </g>
-
-          {/* Maripipi — no polygon data, shown as a marker only */}
-          {showChrome && (
-            <g
-              transform={`translate(${mLon},${mLat})`}
-              onClick={() => setMaripipiNote(true)}
-              style={{ cursor: 'pointer' }}
-            >
-              <circle r={0.0045} fill="#7A8A99" stroke="#fff" strokeWidth={0.0008} opacity={0.85} filter="url(#bfw-land-shadow)" />
-            </g>
-          )}
         </g>
       </svg>
 
@@ -637,20 +624,6 @@ export default function BiliranMap({
 
       {showChrome && !compact && <WeatherBadge crossing={urgentCrossing} />}
       <Legend compact={compact} />
-
-      {maripipiNote && (
-        <div
-          className="absolute inset-0 flex items-center justify-center bg-black/30"
-          onClick={() => setMaripipiNote(false)}
-        >
-          <div
-            className="rounded-xl border px-4 py-3 text-sm shadow-lg"
-            style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
-          >
-            Maripipi is not monitored by this system (resource constraints) — no flood data is modeled for it.
-          </div>
-        </div>
-      )}
     </div>
   )
 }

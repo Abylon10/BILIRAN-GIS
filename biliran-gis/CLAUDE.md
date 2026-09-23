@@ -8,10 +8,10 @@ Biliran Flood Watch — a flood early-warning web app for MDRRMO officials in
 Biliran province, Philippines. **Not public-facing**: access is restricted to
 MDRRMO personnel and barangay presidents across 7 of Biliran's 8 municipalities
 (Naval, Almeria, Biliran, Cabucgayan, Caibiran, Culaba, Kawayan — **Maripipi is
-excluded** for resource constraints and shown labeled "unmonitored," not
-hidden). Core design intent: tell officials how much time remains safe for
-evacuation before conditions become unsafe — a countdown, not just a static
-risk color.
+excluded** for resource constraints and does not appear on the map at all, no
+polygon data and no marker). Core design intent: tell officials how much time
+remains safe for evacuation before conditions become unsafe — a countdown, not
+just a static risk color.
 
 This repository (`biliran-gis/`) contains only the **Next.js/Supabase web
 app**. The Python/GDAL geospatial pipeline that computes flood susceptibility
@@ -128,8 +128,8 @@ read as the tap-to-expand gesture on the `<svg>` underneath it.
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
 overlays that only make sense once there's a dashboard around them: the
 zoom slider inside `ZoomControls` (its own `showSlider` prop — the `-`/`+`
-buttons stay either way), the Maripipi marker circle, and the
-`WeatherBadge` ribbon. As a pure decorative login backdrop these were just
+buttons stay either way) and the `WeatherBadge` ribbon. As a pure
+decorative login backdrop these were just
 clutter — the ribbon specifically used to collide with the theme-toggle
 button in that state (worked around earlier by pushing the toggle down),
 now moot since the ribbon simply doesn't render there; the toggle is back
@@ -285,7 +285,8 @@ source-level double-UTF-8 bug ("Capiñahan," "Santo Niño") — see
 underlying `barangay_biliran.geojson` bug (outside this repo) is still open.
 
 `lib/municipalities.ts` maps each barangay's `pgc_prefix` to a municipality
-name, and gives Maripipi's centroid for its map marker. Confirmed against an
+name, and gives Maripipi's centroid (used only to keep it inside the map's
+`islandBounds` framing — Maripipi itself isn't shown). Confirmed against an
 official PSA/OCHA administrative-boundaries dataset (province/municipality/
 barangay names, PSGC codes, and centroids) supplied for this project —
 no longer just a self-validated guess.
@@ -446,9 +447,9 @@ frame is usually more zoomed-in than its municipality's), so it doesn't
 need special-casing in the crossfade above: the resulting scale still sits
 above `highThreshold`, so the barangay stays fully opaque/selected-styled
 rather than fading toward the overview look. Maripipi has no polygon data
-(see provenance below) and renders as a plain marker; tapping it shows a
-note that it isn't monitored, per the settled decision to label it rather
-than hide it. Zoomed-in barangay shapes also carry their own name labels
+(see provenance below) and isn't shown on the map at all — its coordinates
+are only used to keep it inside `islandBounds` framing. Zoomed-in barangay
+shapes also carry their own name labels
 (`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow` pattern as
 the municipality labels).
 
