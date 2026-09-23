@@ -715,6 +715,7 @@ export default function HomePage() {
             listScrollRef={listScrollRef}
             listScrolled={listScrolled}
             onListScrolledChange={setListScrolled}
+            theme={theme}
           />
         </div>
       </div>

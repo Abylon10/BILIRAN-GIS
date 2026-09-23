@@ -66,6 +66,7 @@ export default function DashboardShell({
   listScrollRef,
   listScrolled,
   onListScrolledChange,
+  theme,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
@@ -84,6 +85,12 @@ export default function DashboardShell({
   listScrollRef: RefObject<HTMLDivElement | null>
   listScrolled: boolean
   onListScrolledChange: (scrolled: boolean) => void
+  // Passed straight through to MunicipalityFilterDropdown — its open panel
+  // is portaled to document.body (see that file), outside .bfw-root's
+  // [data-theme] scope that defines --card-bg/--text-strong/etc., so it
+  // can't read those CSS variables via normal inheritance and needs the
+  // theme as an explicit prop instead.
+  theme: 'light' | 'dark'
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -145,7 +152,7 @@ export default function DashboardShell({
           {!listScrolled && <LiveUpdateBanner barangays={barangays} onSelect={(b) => onSelectKey(b.key)} />}
 
           <div className="flex flex-wrap items-center gap-2">
-            <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} />
+            <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} theme={theme} />
           </div>
 
           {/*
