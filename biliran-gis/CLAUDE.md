@@ -101,6 +101,21 @@ the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
 the Supabase session + RLS policies, not this check.
 
+**Admin sign-in toggle is copy only, also not a security gate.** The login
+card's logo becomes a button while `authState === 'needsLogin'` (gone
+entirely once signed in — no lingering control in the dashboard), toggling
+a `loginMode: 'user' | 'admin'` local state that only swaps the card's
+heading ("Sign in" ↔ "Welcome, Administrator"). The email/password fields
+and `handleSubmit` are unchanged either way — there's only one real auth
+mechanism (`supabase.auth.signInWithPassword`); actual admin authorization
+is still the existing post-login `access_level === 'admin'` check
+(`isAdmin` state, used elsewhere to gate the header profile button's
+"Admin panel" row). A non-admin account signing in via the admin-styled
+form just lands on the normal dashboard with no admin entry point, same as
+any other non-admin sign-in. `loginMode` always starts (and, on sign-out,
+resets to) `'user'` — plain `useState`, no persistence, so a page refresh
+always shows the regular login view regardless of what was last toggled.
+
 **Supabase clients are split by privilege** (`lib/supabase.ts` vs.
 `lib/supabaseAdmin.ts`): the anon/browser client is safe in client components;
 `supabaseAdmin` uses the service-role key and must only be used server-side
@@ -218,6 +233,7 @@ no longer just a self-validated guess.
 
 - Single merged page (map + login + dashboard as states of one component, not routes)
 - Daily login gate is UX, not security
+- Admin sign-in toggle (the login-screen logo button) is copy/branding only, also not a security gate — real admin authorization is always the post-login `access_level === 'admin'` check
 - Account creation is fully admin-controlled; no public signup
 - Invite codes are device-bound only at redemption
 - No AI/LLM features in the product

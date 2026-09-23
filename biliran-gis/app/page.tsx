@@ -36,6 +36,14 @@ import HeaderProfileButton from '@/components/HeaderProfileButton'
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
 
 type AuthState = 'checking' | 'needsLogin' | 'revealed'
+// Copy/branding only, never a security gate — the logo on the login
+// screen toggles this, swapping the login card's heading between the
+// regular and "administrator" framing. There's only one real auth
+// mechanism (supabase.auth.signInWithPassword) regardless of this value;
+// actual admin authorization is still the post-login access_level ===
+// 'admin' check (isAdmin state) that already exists elsewhere in this
+// file. Always resets to 'user' on mount — no persistence.
+type LoginMode = 'user' | 'admin'
 
 function prefersDark() {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -44,6 +52,7 @@ function prefersDark() {
 export default function HomePage() {
   const [authState, setAuthState] = useState<AuthState>('checking')
   const revealed = authState === 'revealed'
+  const [loginMode, setLoginMode] = useState<LoginMode>('user')
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (prefersDark() ? 'dark' : 'light'))
 
   const [email, setEmail] = useState('')
@@ -209,6 +218,7 @@ export default function HomePage() {
     setOffice(null)
     setShowProfile(false)
     setShowAdminPanel(false)
+    setLoginMode('user')
     setAuthState('needsLogin')
   }, [])
 
@@ -374,15 +384,41 @@ export default function HomePage() {
       <div className="bfw-card relative z-10 flex min-h-screen items-center justify-center px-6 py-16" data-revealed={revealed}>
         <div className="w-full max-w-sm rounded-2xl border p-8 shadow-2xl backdrop-blur-xl" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
           <div className="flex justify-center">
-            <img
-              src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
-              alt="Biliran Flood Watch"
-              className="h-16 w-auto select-none"
-              draggable={false}
-            />
+            {/*
+              Admin sign-in toggle, login screen only — not a security
+              gate, just swaps this card's copy (see LoginMode above).
+              Not a button while authState !== 'needsLogin': disappears
+              once signed in (revealed) rather than lingering as a dead
+              control, and there's nothing to toggle while still
+              'checking' either.
+            */}
+            {authState === 'needsLogin' ? (
+              <button
+                type="button"
+                onClick={() => setLoginMode((m) => (m === 'user' ? 'admin' : 'user'))}
+                aria-label={loginMode === 'user' ? 'Switch to administrator sign-in' : 'Switch to regular sign-in'}
+                className="rounded-md"
+              >
+                <img
+                  src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
+                  alt="Biliran Flood Watch"
+                  className="h-16 w-auto select-none"
+                  draggable={false}
+                />
+              </button>
+            ) : (
+              <img
+                src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
+                alt="Biliran Flood Watch"
+                className="h-16 w-auto select-none"
+                draggable={false}
+              />
+            )}
           </div>
 
-          <h2 className="mt-2 text-center text-xl font-semibold" style={{ color: 'var(--text-strong)' }}>Sign in</h2>
+          <h2 className="mt-2 text-center text-xl font-semibold" style={{ color: 'var(--text-strong)' }}>
+            {loginMode === 'admin' ? 'Welcome, Administrator' : 'Sign in'}
+          </h2>
           <p className="text-center mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Biliran Flood Watch</p>
 
           {activated && (
