@@ -393,12 +393,18 @@ most of the frame with it, not a small shape adrift in a lot of open sea.
 **`WeatherBadge` is a corner ribbon, not a rounded chip** — a deliberate
 departure from the `Legend`/back-button glass-chip look, because a pill
 shape reads as clickable (like the back button next to it) when this is a
-passive readout. `clip-path: polygon(24px 0, 100% 0, 100% 100%, 0 100%)`
+passive readout. `clip-path: polygon(0 0, 100% 0, 100% 100%, 24px 100%)`
 on a `right-0 top-0`-positioned div (flush, not inset) makes a
-right-trapezoid; the container's own `overflow-hidden` + `rounded-xl`
-clips the ribbon's outer corner to match the card's curve for free, so the
-ribbon itself needs no border-radius. A plain `border`/`box-shadow`
-doesn't follow a `clip-path`'d box correctly — depth comes from `filter:
+right-trapezoid — top edge fully flush with the map card's top edge, the
+diagonal tapering the ribbon's bottom-left corner instead (an earlier
+version had this backwards, `polygon(24px 0, 100% 0, 100% 100%, 0 100%)`,
+leaving a flush *bottom* and an indented *top* — a less correct read for a
+badge hanging from the top-right corner; fixed after a side-thread
+proposal flagged it and it was verified with a screenshot, not just
+trusted). The container's own `overflow-hidden` + `rounded-xl` clips the
+ribbon's outer corner to match the card's curve for free, so the ribbon
+itself needs no border-radius. A plain `border`/`box-shadow` doesn't
+follow a `clip-path`'d box correctly — depth comes from `filter:
 drop-shadow(...)` instead. The cloud+rain-drop markup itself lives in a
 shared `WeatherIconSVG` fragment (no wrapping `<svg>`/positioning), reused
 both by the ribbon and, scaled way down, by each municipality's own icon

@@ -1025,7 +1025,7 @@ function WeatherBadge({ crossing }: { crossing: Crossing }) {
       className="absolute right-0 top-0 flex items-center gap-2 py-2.5 pl-8 pr-4 backdrop-blur-md"
       style={{
         background: 'var(--card-bg)',
-        clipPath: 'polygon(24px 0, 100% 0, 100% 100%, 0 100%)',
+        clipPath: 'polygon(0 0, 100% 0, 100% 100%, 24px 100%)',
         filter: 'drop-shadow(0 3px 5px rgba(11,30,40,0.35))',
       }}
       title={title}
