@@ -35,6 +35,10 @@ import HeaderProfileButton from '@/components/HeaderProfileButton'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
 
+// Must stay comfortably longer than BarangayList's own DOUBLE_TAP_WINDOW_MS
+// — see selectBarangay below for why.
+const BARANGAY_SELECT_COMPACT_DELAY_MS = 450
+
 type AuthState = 'checking' | 'needsLogin' | 'revealed'
 // Copy/branding only, never a security gate — the logo on the login
 // screen toggles this, swapping the login card's heading between the
@@ -97,6 +101,35 @@ export default function HomePage() {
   // the mechanism that drives listScrolled, now that it's one-way).
   const [listScrolled, setListScrolled] = useState(false)
   const listScrollRef = useRef<HTMLDivElement>(null)
+
+  // Selecting a barangay — from the map, the list, or the LIVE UPDATE
+  // banner (all three funnel through here) — also compacts the map, same
+  // as scrolling the list past the row threshold does: reclaims the space
+  // for the list/FSI/hydrograph corners instead of leaving the barangay's
+  // detail panel pushed below the fold. Reuses listScrolled's existing
+  // one-way semantics (only an explicit tap on the compacted map expands
+  // it back out) rather than a separate flag.
+  //
+  // The compacting itself (setListScrolled) is deliberately delayed a
+  // beat rather than firing in the same tick as the selection: compacting
+  // moves the barangay list from below the map to beside it, a layout
+  // reflow big enough that — confirmed via Playwright — a fast double-tap
+  // on a list row would have its second physical tap land on a
+  // completely different row once the first tap's selection compacted the
+  // map out from under it, misfiring BarangayList's double-tap-to-filter
+  // against the wrong municipality. Delaying past BarangayList's own
+  // DOUBLE_TAP_WINDOW_MS keeps the row stationary for the whole window a
+  // double-tap needs, while still feeling instant for an ordinary single
+  // tap. selectedKey itself updates immediately either way — only the
+  // layout-shifting part is delayed.
+  const compactDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selectBarangay = useCallback((key: string) => {
+    setSelectedKey(key)
+    if (compactDelayRef.current) clearTimeout(compactDelayRef.current)
+    compactDelayRef.current = setTimeout(() => {
+      setListScrolled(true)
+    }, BARANGAY_SELECT_COMPACT_DELAY_MS)
+  }, [])
 
   // Keep theme in sync with system changes after the initial render above.
   useEffect(() => {
@@ -347,6 +380,19 @@ export default function HomePage() {
         .bfw-btn:hover:not(:disabled) { filter: brightness(1.08); }
         .bfw-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 4px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
         .bfw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        /*
+          The municipality filter <select> uses .bfw-btn for its closed
+          (collapsed) state, but its *open* option-list popup is rendered
+          by the OS, not this page — it ignores our gradient and always
+          shows a plain white/light dropdown, regardless of theme. Without
+          this, every unselected option inherited .bfw-btn's white
+          --btn-text on that white popup and was invisible (only the
+          browser's own blue selected-row highlight made the current
+          option readable). Force a plain dark-on-white pairing here
+          specifically, since it has to survive that OS-controlled
+          rendering rather than our own CSS.
+        */
+        select.bfw-btn option { color: #031716; background: #ffffff; }
 
         /*
           The one persistent map's wrapping box — fixed + viewport-relative,
@@ -424,7 +470,7 @@ export default function HomePage() {
             <BiliranMap
               barangays={barangays}
               selectedKey={selectedKey}
-              onSelect={(b) => setSelectedKey(b.key)}
+              onSelect={(b) => selectBarangay(b.key)}
               showChrome={revealed}
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
@@ -558,7 +604,7 @@ export default function HomePage() {
             barangays={barangays}
             loadError={mapLoadError}
             selectedKey={selectedKey}
-            onSelectKey={setSelectedKey}
+            onSelectKey={selectBarangay}
             municipality={focusedMunicipality}
             onMunicipalityChange={setFocusedMunicipality}
             mapSlotRef={mapSlotRef}

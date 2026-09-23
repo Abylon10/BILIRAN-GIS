@@ -134,6 +134,17 @@ row's Save) — not text-link-style actions (Cancel, Edit, Revoke, the
 which stay in their existing understated styles since gradient-pill
 styling would misrepresent them as primary actions.
 
+Because the `<select>`'s `color: var(--btn-text)` (a near-white tint,
+meant for the gradient-filled closed state) inherits down into its
+`<option>` children, and the OS-rendered *open* popup ignores `.bfw-btn`'s
+gradient and always shows a plain white/light background regardless of
+theme, every unselected option used to render white-on-white —
+effectively invisible except for the browser's own blue selected-row
+highlight. Fixed with a scoped override, `select.bfw-btn option { color:
+#031716; background: #ffffff; }`, right after `.bfw-btn:disabled` — the
+popup itself still can't take the gradient (same platform limit as
+above), but its text is now always readable.
+
 **Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
 title row and the `DashboardShell` content area are now two separate
 color panels — a `--header-bg` band with a `--separator`-colored
@@ -206,6 +217,54 @@ that space empty. `FSI` `Legend` itself can't move into that space — it's
 rendered inside `BiliranMap`'s own box, clipped by that box's
 `overflow: hidden` — so the list is just sized to sit beside the compact
 map+legend without overlapping it, not literally merged with it.
+
+**Selecting a barangay also compacts the map**, not just scrolling past
+the row threshold. `app/page.tsx`'s `selectBarangay(key)` is the one
+handler every selection source now funnels through — the map, the
+barangay list, and the LIVE UPDATE/Modeled-alert banner all call it
+(`BiliranMap`'s `onSelect`, `DashboardShell`'s `onSelectKey`) instead of
+setting `selectedKey` directly — and it sets both `selectedKey` and
+(after a delay, see below) `listScrolled`, reusing `listScrolled`'s
+existing one-way semantics rather than a second flag. This reclaims the
+same fill-the-middle layout above for the barangay's own detail panel,
+FSI corner, and hydrograph corner (below), instead of leaving the detail
+panel pushed below the fold on a non-compact first selection.
+
+The `listScrolled` half of `selectBarangay` is deliberately delayed
+(`BARANGAY_SELECT_COMPACT_DELAY_MS` = 450ms) rather than firing in the
+same tick as `selectedKey`. Compacting moves the barangay list from below
+the map to beside it — a big enough reflow that, confirmed via
+Playwright, a fast double-click on a list row would have its *second*
+physical click land on a completely different row once the first click's
+selection had already compacted the map out from under it, filtering by
+the wrong barangay's municipality. `BarangayList.tsx`'s own double-tap
+detection (below) is tracked by row **key**, not screen position, but
+that only helps if the same physical button is still there to be clicked
+twice — the page.tsx delay is what keeps it there for the whole window.
+`selectedKey` itself (and therefore the map's pan/zoom via
+`focusBarangay()`) still updates immediately; only the layout-shifting
+part waits.
+
+**Double-tap/double-click a barangay row filters the list to its
+municipality** (`BarangayList.tsx`) — same effect as picking it from the
+filter dropdown, driven by the existing `onMunicipalityChange` prop
+threaded down through `DashboardShell`'s new `onSelectMunicipality` prop.
+Detected manually (tracking `{ key, time }` of the last click in a ref,
+`DOUBLE_TAP_WINDOW_MS` = 350ms) rather than via the browser's native
+`onDoubleClick`, precisely because native `dblclick` is a *position*-based
+gesture and (see above) the first click's own selection can move the row
+out from under the second one; tracking by key sidesteps that as long as
+the row hasn't actually moved yet, which the paired page.tsx delay
+guarantees. A single tap still just selects+focuses the barangay as
+before. Not yet tested against real touch double-tap gesture recognition
+across mobile browsers — desktop double-click only.
+
+When a barangay outside the currently-focused municipality is selected
+(e.g. tapped from the severity-ranked list while a different municipality
+is in view), the map already auto-recenters/rescales to its own
+municipality context regardless of what was shown before — this was
+already true of `BiliranMap.tsx`'s `focusBarangay()` before this round,
+not new behavior.
 
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
@@ -305,6 +364,18 @@ with a staggered `transition-delay` (avatar width/height, then the tab's
 to verify CSS transitions are actually interpolating, not just present.
 Clicking it opens `components/ProfilePanel.tsx` — disabled (no click) while
 not revealed, since there's no profile to show yet.
+
+Both the avatar circle and the trapezoid tab use the same oval/gradient
+treatment as `.bfw-btn` (above) — `linear-gradient(145deg, var(--btn-from),
+var(--btn-to))` plus the matching inset-highlight/drop-shadow box-shadow —
+so they read as the same family of control as the day/night toggle they
+sit beside, rather than the plain `var(--card-bg)` fill they used before.
+Reuses `.bfw-btn`'s CSS variables directly rather than the class itself,
+since the tab needs its own `clip-path`/width transitions that `.bfw-btn`
+doesn't define; the name/office text switched from `var(--text-strong)`/
+`var(--text-soft)` to `var(--btn-text)` (office at `opacity: 0.85`) to
+stay readable against the now-gradient (rather than theme-following card)
+background.
 
 The tab's `max-width` (240px) is sized to comfortably fit
 `formatDisplayName()`'s worst case (`lib/profile.ts`'s
@@ -737,6 +808,18 @@ for:
 
 Add the corresponding fields to the pipeline's JSON output before building
 any of these.
+
+**Hydrograph corner is a labeled placeholder, not a chart.** Once the
+compact layout is active (`listScrolled`, see "Selecting a barangay also
+compacts the map" above), `DashboardShell.tsx` reserves the grid cell
+directly below the compact map spacer (column 1, row 2 — otherwise empty
+in that grid) for a small dashed-border, muted-opacity card reading
+"Hydrograph — No basin flow data available yet"
+(`HYDROGRAPH_UNAVAILABLE_LABEL`). This is a deliberate, honest "not yet
+modeled" placeholder — asked of and confirmed by the user rather than
+either fabricating a curve or silently omitting the corner — not a step
+toward a fake chart; it still needs the same pipeline data as the real
+"Hydrograph chart" bullet above before it can become one.
 
 **Theme**: the dashboard's post-login background is theme-aware, not one
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
