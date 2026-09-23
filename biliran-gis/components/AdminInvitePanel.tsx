@@ -180,6 +180,23 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Invitations" onClose={onClose}>
+      {/*
+        Entrance-only (a full expand/collapse height animation would fight
+        with this list's own overflow-y-auto scroll) — same easing family
+        as Modal/BiliranMap/HeaderProfileButton, just an @keyframes instead
+        of a two-phase transition since there's no exit state to animate
+        (the row swaps back to its display form immediately on cancel/save).
+      */}
+      <style>{`
+        @keyframes bfw-edit-row-enter {
+          from { opacity: 0; transform: scale(0.97); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .bfw-edit-row-enter { animation: bfw-edit-row-enter 250ms cubic-bezier(0.22,1,0.36,1); }
+        @media (prefers-reduced-motion: reduce) {
+          .bfw-edit-row-enter { animation: none; }
+        }
+      `}</style>
       <form onSubmit={handleSubmit} className="space-y-3">
         <label className="block">
           <span className="text-sm font-medium" style={{ color: 'var(--text-strong)' }}>Email</span>
@@ -237,7 +254,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
               const busy = rowBusyId === inv.id
               if (editingId === inv.id) {
                 return (
-                  <li key={inv.id} className="space-y-1.5 rounded-md border p-2" style={{ borderColor: 'var(--card-border)' }}>
+                  <li key={inv.id} className="bfw-edit-row-enter space-y-1.5 rounded-md border p-2" style={{ borderColor: 'var(--card-border)' }}>
                     <input
                       type="email"
                       value={editEmail}

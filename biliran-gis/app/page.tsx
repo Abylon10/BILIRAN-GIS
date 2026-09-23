@@ -87,6 +87,14 @@ export default function HomePage() {
   const mapSlotRef = useRef<HTMLDivElement>(null)
   const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
 
+  // Compact map on barangay-list scroll (DashboardShell.tsx owns the
+  // scroll listener/debounce and flips this; this ref is used both there,
+  // as the list's own scroll container, and here, to scroll it back to
+  // top when the compacted map is tapped — see BiliranMap.tsx's
+  // onCompactTap prop).
+  const [listScrolled, setListScrolled] = useState(false)
+  const listScrollRef = useRef<HTMLDivElement>(null)
+
   // Keep theme in sync with system changes after the initial render above.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -163,13 +171,16 @@ export default function HomePage() {
   }, [authState])
 
   // Measures where the map should sit: mapSlotRef's on-screen position when
-  // revealed (DashboardShell's empty spacer for it), or a full-bleed
-  // viewport rect otherwise — the same numbers get applied as inline
-  // top/left/width/height on the map's wrapping div below, CSS-transitioned,
-  // which is what actually produces the shared-element animation between
-  // the login backdrop and the boxed dashboard position. Re-measured on
-  // reveal, on resize, and once barangays data arrives (it can change the
-  // LIVE UPDATE banner's height above the map slot).
+  // revealed (DashboardShell's empty spacer for it — sized/positioned by
+  // DashboardShell itself based on listScrolled, so this measurement stays
+  // a single codepath for both the normal and compact map spots), or a
+  // full-bleed viewport rect otherwise — the same numbers get applied as
+  // inline top/left/width/height on the map's wrapping div below,
+  // CSS-transitioned, which is what actually produces the shared-element
+  // animation, both for the login→dashboard reveal and for compacting on
+  // scroll. Re-measured on reveal, on resize, once barangays data arrives
+  // (it can change the LIVE UPDATE banner's height above the map slot), and
+  // whenever listScrolled flips the spacer's own size.
   useLayoutEffect(() => {
     function measure() {
       if (revealed && mapSlotRef.current) {
@@ -186,7 +197,7 @@ export default function HomePage() {
       window.removeEventListener('resize', measure)
       cancelAnimationFrame(raf1)
     }
-  }, [revealed, barangays])
+  }, [revealed, barangays, listScrolled])
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -219,6 +230,7 @@ export default function HomePage() {
     setShowProfile(false)
     setShowAdminPanel(false)
     setLoginMode('user')
+    setListScrolled(false)
     setAuthState('needsLogin')
   }, [])
 
@@ -346,6 +358,8 @@ export default function HomePage() {
               showChrome={revealed}
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
+              compact={revealed && listScrolled}
+              onCompactTap={() => listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
             />
           )}
         </div>
@@ -466,6 +480,9 @@ export default function HomePage() {
             municipality={focusedMunicipality}
             onMunicipalityChange={setFocusedMunicipality}
             mapSlotRef={mapSlotRef}
+            listScrollRef={listScrollRef}
+            listScrolled={listScrolled}
+            onListScrolledChange={setListScrolled}
           />
         </div>
       </div>

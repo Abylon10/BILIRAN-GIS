@@ -348,6 +348,11 @@ export function Avatar({
   )
 }
 
+// Matches BiliranMap.tsx's zoom transform / HeaderProfileButton.tsx's
+// avatar-grow / app/page.tsx's map-shell easing family, so this reads
+// consistent with the rest of the app's motion rather than a flat default.
+const MODAL_TRANSITION_MS = 300
+
 export function Modal({
   title,
   onClose,
@@ -357,23 +362,58 @@ export function Modal({
   onClose: () => void
   children: React.ReactNode
 }) {
+  // Mounted/unmounted entirely by the caller's own conditional (e.g.
+  // `{showProfile && <ProfilePanel/>}` in app/page.tsx), so an exit
+  // transition needs its own beat before the real onClose actually
+  // unmounts this — `open` false-by-default then flipped true next frame
+  // drives the entrance; requestClose flips it back to false and defers
+  // the real onClose until the CSS transition has had time to run.
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  function requestClose() {
+    setOpen(false)
+    setTimeout(onClose, MODAL_TRANSITION_MS)
+  }
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
-      onClick={onClose}
+      className="bfw-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
+      data-open={open}
+      onClick={requestClose}
     >
+      <style>{`
+        .bfw-modal-backdrop {
+          opacity: 0;
+          transition: opacity ${MODAL_TRANSITION_MS}ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-modal-backdrop[data-open='true'] { opacity: 1; }
+        .bfw-modal-dialog {
+          opacity: 0;
+          transform: scale(0.95);
+          transition: opacity ${MODAL_TRANSITION_MS}ms cubic-bezier(0.22,1,0.36,1), transform ${MODAL_TRANSITION_MS}ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-modal-backdrop[data-open='true'] .bfw-modal-dialog { opacity: 1; transform: scale(1); }
+        @media (prefers-reduced-motion: reduce) {
+          .bfw-modal-backdrop, .bfw-modal-dialog { transition: none !important; }
+        }
+      `}</style>
       <div
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-2xl border p-6 shadow-2xl backdrop-blur-xl"
+        className="bfw-modal-dialog w-full max-w-sm rounded-2xl border p-6 shadow-2xl backdrop-blur-xl"
         style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>{title}</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Close"
             className="text-xl leading-none"
             style={{ color: 'var(--text-soft)' }}

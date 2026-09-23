@@ -8,10 +8,10 @@ Biliran Flood Watch — a flood early-warning web app for MDRRMO officials in
 Biliran province, Philippines. **Not public-facing**: access is restricted to
 MDRRMO personnel and barangay presidents across 7 of Biliran's 8 municipalities
 (Naval, Almeria, Biliran, Cabucgayan, Caibiran, Culaba, Kawayan — **Maripipi is
-excluded** for resource constraints and shown labeled "unmonitored," not
-hidden). Core design intent: tell officials how much time remains safe for
-evacuation before conditions become unsafe — a countdown, not just a static
-risk color.
+excluded** for resource constraints and does not appear on the map at all, no
+polygon data and no marker). Core design intent: tell officials how much time
+remains safe for evacuation before conditions become unsafe — a countdown, not
+just a static risk color.
 
 This repository (`biliran-gis/`) contains only the **Next.js/Supabase web
 app**. The Python/GDAL geospatial pipeline that computes flood susceptibility
@@ -85,12 +85,51 @@ early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
 
+**Compact map while the barangay list is scrolled.** Same `mapSlotRef`
+mechanism as above, reused rather than duplicated: `DashboardShell` owns a
+debounced scroll listener (`SCROLL_COMPACT_THRESHOLD_PX` = 50,
+`SCROLL_DEBOUNCE_MS` = 100 — the debounce is what keeps scrolling back and
+forth right at the threshold from flickering the map in and out) on the
+barangay list's own scroll container, and flips `listScrolled` (lifted to
+`app/page.tsx`, same shape as `revealed`) once the list has settled past
+it. `mapSlotRef` itself — the *same* spacer div, not a second one — just
+resizes from its normal `h-96`/`md:h-[70%]` box down to a small fixed
+160×120 box (still the first child of the flex column, so "docked
+top-left" falls out of ordinary flex flow rather than needing absolute
+positioning) when `listScrolled` is true; the list's own grid row is
+`flex-1`, so it grows into whatever height the spacer gives up. No
+transition on the spacer itself (it's invisible either way) — re-measuring
+it after it's already settled at its new size is what feeds `mapRect`,
+and `.bfw-map-shell`'s existing transition (above) is what actually
+animates the visible map smoothly between the two spots, same as the
+login→dashboard reveal. `LiveUpdateBanner` unmounts while `listScrolled`
+(reappears once scrolled back up) rather than shrinking in place.
+
+`BiliranMap`'s `compact` prop (default `false`) turns it into a passive
+thumbnail rather than a smaller version of the interactive map: the wheel
+listener and `handlePointerDown`'s drag-tracking both no-op when `compact`,
+and the `<svg>` gets an `onClickCapture` that calls the caller's
+`onCompactTap` and `stopPropagation()`s before the tap ever reaches
+`MunicipalityLayer`/`BarangayLayer`'s own per-polygon `onClick` — so
+tapping the thumbnail always means "expand," never "select." `onCompactTap`
+(`app/page.tsx`) just scrolls the list's own container back to `scrollTop:
+0`; since `listScrolled` is driven purely by scroll position, that alone
+un-flips it and the map animates back out — no separate override flag
+needed. `ZoomControls` and `WeatherBadge` are hidden outright when compact
+(`showChrome && !compact`) rather than shrunk, since their own gestures/
+clutter don't fit a passive thumbnail either. The reset button and
+`Legend` get their own smaller `compact` variants instead of hiding
+(`Legend`'s compact form drops text labels — a dots-only pill — since the
+full labeled pill overflows at this size); the reset button's `onClick`
+also `stopPropagation()`s when compact so resetting the view doesn't also
+read as the tap-to-expand gesture on the `<svg>` underneath it.
+
 **`BiliranMap`'s `showChrome` prop** (default `true`, passed as
 `showChrome={revealed}` at its one call site in `app/page.tsx`) hides
 overlays that only make sense once there's a dashboard around them: the
 zoom slider inside `ZoomControls` (its own `showSlider` prop — the `-`/`+`
-buttons stay either way), the Maripipi marker circle, and the
-`WeatherBadge` ribbon. As a pure decorative login backdrop these were just
+buttons stay either way) and the `WeatherBadge` ribbon. As a pure
+decorative login backdrop these were just
 clutter — the ribbon specifically used to collide with the theme-toggle
 button in that state (worked around earlier by pushing the toggle down),
 now moot since the ribbon simply doesn't render there; the toggle is back
@@ -191,6 +230,31 @@ silhouette SVG when neither is known (used by `HeaderProfileButton`
 pre-login, which has no `user` at all yet) — one implementation instead of
 duplicating fallback logic between the two call sites.
 
+`ProfilePanel.tsx` also exports the shared `Modal` (used by both
+`ProfilePanel` and `AdminInvitePanel`). It's mounted/unmounted entirely by
+the caller's own `{flag && <Panel/>}` conditional in `app/page.tsx`
+(`showProfile`/`showAdminPanel`), so an exit transition needs its own beat
+before the real unmount happens: `Modal` keeps an internal `open` boolean
+(false at mount, flipped true one `requestAnimationFrame` later to drive
+the entrance), and its own backdrop-click/×-button handlers call a local
+`requestClose()` that flips `open` back to `false` and only calls the
+caller's real `onClose` after `MODAL_TRANSITION_MS` (300ms) — same
+`cubic-bezier(0.22,1,0.36,1)` family as `BiliranMap.tsx`'s zoom transform,
+`HeaderProfileButton.tsx`'s avatar/tab grow, and `app/page.tsx`'s map-shell
+transition. Scoped entirely inside `Modal`; neither caller needed to
+change. Other close-adjacent actions (`onSignOut`, `onOpenAdmin` in
+`ProfilePanel`) call their own callbacks directly, not `requestClose` —
+intentionally out of scope for this pass, since those aren't "close the
+modal" affordances. `AdminInvitePanel.tsx`'s inline edit-row (swapping a
+row into an editable form, `editingId === inv.id`) gets a lighter
+`@keyframes` entrance-only animation (`.bfw-edit-row-enter`, same easing)
+on mount — not a two-phase state toggle like `Modal`, since there's no
+exit to animate (it swaps back to the display row immediately on
+cancel/save) and not a height animation (the list has its own
+`overflow-y-auto`, which would fight with animating height). Both respect
+`prefers-reduced-motion: reduce`, same as `HeaderProfileButton.tsx` and
+`app/page.tsx`'s map-shell.
+
 **Structured name fields** (`title`/`first_name`/`family_name` — not one
 combined name string) were added on `user_profiles` via
 `supabase/profile-name-fields-setup.sql` (same not-auto-applied pattern).
@@ -221,7 +285,8 @@ source-level double-UTF-8 bug ("Capiñahan," "Santo Niño") — see
 underlying `barangay_biliran.geojson` bug (outside this repo) is still open.
 
 `lib/municipalities.ts` maps each barangay's `pgc_prefix` to a municipality
-name, and gives Maripipi's centroid for its map marker. Confirmed against an
+name, and gives Maripipi's centroid (used only to keep it inside the map's
+`islandBounds` framing — Maripipi itself isn't shown). Confirmed against an
 official PSA/OCHA administrative-boundaries dataset (province/municipality/
 barangay names, PSGC codes, and centroids) supplied for this project —
 no longer just a self-validated guess.
@@ -373,12 +438,29 @@ within the focused municipality. Waterway opacity/stroke-width and the
 dimmed rest-of-island context outlines still interpolate continuously with
 `barangayOpacity`. Selecting a barangay (map or list) keeps both in sync —
 `focusBarangay()` frames that specific barangay's own bounds (35%
-padding), not just its municipality. Maripipi has no polygon data (see
-provenance below) and renders as a plain marker; tapping it shows a note
-that it isn't monitored, per the settled decision to label it rather than
-hide it. Zoomed-in barangay shapes also carry their own name labels
+padding) for its center, but **caps the resulting scale at the parent
+municipality's own `muniFocusByPrefix` scale**
+(`Math.min(barangayScale, muniFocus.scale)`) — selecting a barangay reveals
+it in context of its neighbors rather than zooming in tight and losing the
+surrounding municipality. The cap typically binds (a barangay's own tight
+frame is usually more zoomed-in than its municipality's), so it doesn't
+need special-casing in the crossfade above: the resulting scale still sits
+above `highThreshold`, so the barangay stays fully opaque/selected-styled
+rather than fading toward the overview look. Maripipi has no polygon data
+(see provenance below) and isn't shown on the map at all — its coordinates
+are only used to keep it inside `islandBounds` framing. Zoomed-in barangay
+shapes also carry their own name labels
 (`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow` pattern as
 the municipality labels).
+
+Wheel-zoom and drag-pan sensitivity are both tunable constants near the top
+of the file — `WHEEL_ZOOM_COEFFICIENT` (multiplies `deltaY` inside
+`Math.exp(-deltaY * coef)`) and `DRAG_DAMPING` (multiplies the pointer's
+translated screen distance before it's applied to `view`) — lowered from
+their original values (`0.0015`/`1.0`, effectively) because both felt too
+twitchy, especially wheel-zoom on a trackpad. Re-tune by feel/device
+testing, not by re-deriving from first principles — wheel deltas vary a lot
+by device/OS.
 
 **Two-way sync with the dashboard's municipality filter**
 (`DashboardShell.tsx`'s `<select>`, lifted to `app/page.tsx` as
