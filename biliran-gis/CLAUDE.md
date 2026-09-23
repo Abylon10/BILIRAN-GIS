@@ -191,6 +191,31 @@ silhouette SVG when neither is known (used by `HeaderProfileButton`
 pre-login, which has no `user` at all yet) — one implementation instead of
 duplicating fallback logic between the two call sites.
 
+`ProfilePanel.tsx` also exports the shared `Modal` (used by both
+`ProfilePanel` and `AdminInvitePanel`). It's mounted/unmounted entirely by
+the caller's own `{flag && <Panel/>}` conditional in `app/page.tsx`
+(`showProfile`/`showAdminPanel`), so an exit transition needs its own beat
+before the real unmount happens: `Modal` keeps an internal `open` boolean
+(false at mount, flipped true one `requestAnimationFrame` later to drive
+the entrance), and its own backdrop-click/×-button handlers call a local
+`requestClose()` that flips `open` back to `false` and only calls the
+caller's real `onClose` after `MODAL_TRANSITION_MS` (300ms) — same
+`cubic-bezier(0.22,1,0.36,1)` family as `BiliranMap.tsx`'s zoom transform,
+`HeaderProfileButton.tsx`'s avatar/tab grow, and `app/page.tsx`'s map-shell
+transition. Scoped entirely inside `Modal`; neither caller needed to
+change. Other close-adjacent actions (`onSignOut`, `onOpenAdmin` in
+`ProfilePanel`) call their own callbacks directly, not `requestClose` —
+intentionally out of scope for this pass, since those aren't "close the
+modal" affordances. `AdminInvitePanel.tsx`'s inline edit-row (swapping a
+row into an editable form, `editingId === inv.id`) gets a lighter
+`@keyframes` entrance-only animation (`.bfw-edit-row-enter`, same easing)
+on mount — not a two-phase state toggle like `Modal`, since there's no
+exit to animate (it swaps back to the display row immediately on
+cancel/save) and not a height animation (the list has its own
+`overflow-y-auto`, which would fight with animating height). Both respect
+`prefers-reduced-motion: reduce`, same as `HeaderProfileButton.tsx` and
+`app/page.tsx`'s map-shell.
+
 **Structured name fields** (`title`/`first_name`/`family_name` — not one
 combined name string) were added on `user_profiles` via
 `supabase/profile-name-fields-setup.sql` (same not-auto-applied pattern).
