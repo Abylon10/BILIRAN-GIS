@@ -181,6 +181,24 @@ click, `Escape`, window resize, or scroll (repositioning isn't tracked
 live — closing and requiring a re-open is simpler than keeping a fixed
 popover glued to a moving trigger).
 
+**The portaled panel can't use the app's `--card-bg`/`--card-border`/
+`--text-strong` CSS variables** — those are only defined under
+`.bfw-root[data-theme='light'/'dark']` in `app/page.tsx`, and
+`document.body` (the portal target) sits *outside* `.bfw-root`, so custom
+properties don't inherit across that boundary. A reported bug traced to
+exactly this: the panel and options originally used those variables
+anyway, silently resolving to invalid values everywhere it rendered —
+background fell back to transparent and text to the browser's default
+black in both themes, reading as "hard to read" over the light day scene
+and "not there at all" over the dark night one. Fixed by threading the
+app's `theme` state down as an explicit prop (`app/page.tsx` →
+`DashboardShell` → `MunicipalityFilterDropdown`) and using hardcoded
+**solid** colors per theme (`DAY_COLORS`/`NIGHT_COLORS` — solid white or
+solid `#032F30`, not the app's usual translucent `--card-bg`) instead of
+CSS variables, so the panel's contrast never depends on what's rendered
+behind it. Any future portaled-to-`document.body` UI in this app needs
+the same treatment — CSS variables won't reach it either.
+
 The panel has no `max-height`/scroll — deliberately: `MONITORED_MUNICIPALITIES`
 is a small, fixed, curated list (7 municipalities + "All"), so it's sized
 to show every option at once. Rows are smaller than `BarangayList`'s own

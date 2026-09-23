@@ -11,6 +11,21 @@
 // exactly like BarangayList's rows (rounded-lg border, amber selected-row
 // highlight), so picking a municipality here reads as the same design
 // language as picking one from the barangay list below it.
+//
+// The open panel is portaled to document.body (see below), which sits
+// OUTSIDE .bfw-root's [data-theme='light'/'dark'] selectors in
+// app/page.tsx that actually define --card-bg/--card-border/--text-strong
+// — those custom properties don't inherit across that boundary, so a
+// portaled element referencing var(--card-bg) gets an invalid value, not
+// the light/dark tint. Confirmed as the root cause of a reported bug:
+// panel background fell back to transparent and text to the browser's
+// default black in both themes, which read as "hard to read" over the
+// light day scene and "not there at all" over the dark night one. Fixed
+// by taking an explicit `theme` prop (threaded down from app/page.tsx's
+// own theme state, via DashboardShell) and using hardcoded solid colors
+// per theme instead of CSS variables — solid, not the app's usual
+// translucent --card-bg, so contrast never depends on what's rendered
+// behind the portal.
 
 'use client'
 
@@ -20,13 +35,19 @@ import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 
 const ALL_LABEL = 'All municipalities'
 
+const DAY_COLORS = { bg: '#FFFFFF', border: 'rgba(107, 163, 190, 0.5)', text: '#031716' }
+const NIGHT_COLORS = { bg: '#032F30', border: 'rgba(107, 163, 190, 0.35)', text: '#85B7CE' }
+
 export default function MunicipalityFilterDropdown({
   value,
   onChange,
+  theme,
 }: {
   value: string | null
   onChange: (name: string | null) => void
+  theme: 'light' | 'dark'
 }) {
+  const colors = theme === 'dark' ? NIGHT_COLORS : DAY_COLORS
   const [open, setOpen] = useState(false)
   // Where to portal the open panel — computed from the trigger's own
   // rect, not CSS `absolute` positioning. .bfw-dash (this component's
@@ -124,18 +145,18 @@ export default function MunicipalityFilterDropdown({
             // scroll to see the rest of them (the reported problem with
             // the native <select> this replaced, and still a problem even
             // in this custom version at the original text-sm/py-2 sizing).
-            className="fixed z-[1000] flex flex-col gap-1 rounded-xl border p-2 shadow-2xl backdrop-blur-xl"
+            className="fixed z-[1000] flex flex-col gap-1 rounded-xl border p-2 shadow-2xl"
             style={{
               top: panelRect.top,
               left: panelRect.left,
               width: panelRect.width,
-              background: 'var(--card-bg)',
-              borderColor: 'var(--card-border)',
+              background: colors.bg,
+              borderColor: colors.border,
             }}
           >
-            <MunicipalityOption label={ALL_LABEL} selected={value === null} onClick={() => select(null)} />
+            <MunicipalityOption label={ALL_LABEL} selected={value === null} onClick={() => select(null)} colors={colors} />
             {MONITORED_MUNICIPALITIES.map((m) => (
-              <MunicipalityOption key={m} label={m} selected={value === m} onClick={() => select(m)} />
+              <MunicipalityOption key={m} label={m} selected={value === m} onClick={() => select(m)} colors={colors} />
             ))}
           </ul>,
           document.body
@@ -148,10 +169,12 @@ function MunicipalityOption({
   label,
   selected,
   onClick,
+  colors,
 }: {
   label: string
   selected: boolean
   onClick: () => void
+  colors: { bg: string; border: string; text: string }
 }) {
   return (
     <li role="option" aria-selected={selected}>
@@ -164,9 +187,9 @@ function MunicipalityOption({
         // clearly separate, readable box, just a more compact one.
         className="w-full rounded-lg border px-3 py-1.5 text-left text-xs transition-colors"
         style={{
-          background: selected ? 'rgba(232, 163, 61, 0.28)' : 'var(--card-bg)',
-          borderColor: selected ? '#E8A33D' : 'var(--card-border)',
-          color: 'var(--text-strong)',
+          background: selected ? 'rgba(232, 163, 61, 0.28)' : colors.bg,
+          borderColor: selected ? '#E8A33D' : colors.border,
+          color: colors.text,
         }}
       >
         {label}
