@@ -373,12 +373,29 @@ within the focused municipality. Waterway opacity/stroke-width and the
 dimmed rest-of-island context outlines still interpolate continuously with
 `barangayOpacity`. Selecting a barangay (map or list) keeps both in sync —
 `focusBarangay()` frames that specific barangay's own bounds (35%
-padding), not just its municipality. Maripipi has no polygon data (see
-provenance below) and renders as a plain marker; tapping it shows a note
-that it isn't monitored, per the settled decision to label it rather than
-hide it. Zoomed-in barangay shapes also carry their own name labels
+padding) for its center, but **caps the resulting scale at the parent
+municipality's own `muniFocusByPrefix` scale**
+(`Math.min(barangayScale, muniFocus.scale)`) — selecting a barangay reveals
+it in context of its neighbors rather than zooming in tight and losing the
+surrounding municipality. The cap typically binds (a barangay's own tight
+frame is usually more zoomed-in than its municipality's), so it doesn't
+need special-casing in the crossfade above: the resulting scale still sits
+above `highThreshold`, so the barangay stays fully opaque/selected-styled
+rather than fading toward the overview look. Maripipi has no polygon data
+(see provenance below) and renders as a plain marker; tapping it shows a
+note that it isn't monitored, per the settled decision to label it rather
+than hide it. Zoomed-in barangay shapes also carry their own name labels
 (`BarangayLayer`, same `geometryCentroid()` + `#bfw-text-shadow` pattern as
 the municipality labels).
+
+Wheel-zoom and drag-pan sensitivity are both tunable constants near the top
+of the file — `WHEEL_ZOOM_COEFFICIENT` (multiplies `deltaY` inside
+`Math.exp(-deltaY * coef)`) and `DRAG_DAMPING` (multiplies the pointer's
+translated screen distance before it's applied to `view`) — lowered from
+their original values (`0.0015`/`1.0`, effectively) because both felt too
+twitchy, especially wheel-zoom on a trackpad. Re-tune by feel/device
+testing, not by re-deriving from first principles — wheel deltas vary a lot
+by device/OS.
 
 **Two-way sync with the dashboard's municipality filter**
 (`DashboardShell.tsx`'s `<select>`, lifted to `app/page.tsx` as

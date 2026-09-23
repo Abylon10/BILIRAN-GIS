@@ -58,6 +58,12 @@ interface View {
 // smallest municipalities without a hard-coded per-municipality lookup.
 const MAX_SCALE = 9
 
+// Tuned by feel against real trackpad/mouse-wheel input, not derived —
+// wheel deltas vary a lot by device/OS, so these are starting points to
+// keep adjusting if the map still feels too twitchy on a given device.
+const WHEEL_ZOOM_COEFFICIENT = 0.0008
+const DRAG_DAMPING = 0.7
+
 export default function BiliranMap({
   barangays,
   selectedKey,
@@ -145,7 +151,7 @@ export default function BiliranMap({
     function handleWheel(e: WheelEvent) {
       e.preventDefault()
       if (!svgRef.current) return
-      const zoomFactor = Math.exp(-e.deltaY * 0.0015)
+      const zoomFactor = Math.exp(-e.deltaY * WHEEL_ZOOM_COEFFICIENT)
 
       setInteracting(true)
       if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current)
@@ -206,7 +212,12 @@ export default function BiliranMap({
     const b = expandBounds(boundsOf([feature], project), 0.35)
     const islandW = bounds.maxX - bounds.minX
     const islandH = bounds.maxY - bounds.minY
-    const scale = Math.min(islandW / (b.maxX - b.minX), islandH / (b.maxY - b.minY))
+    const barangayScale = Math.min(islandW / (b.maxX - b.minX), islandH / (b.maxY - b.minY))
+    // Cap at the parent municipality's own "fill the frame" scale so
+    // selecting a barangay reveals it in context of its neighbors instead
+    // of zooming in tight and losing the surrounding municipality.
+    const muniFocus = muniFocusByPrefix[feature.properties.pgc_prefix]
+    const scale = muniFocus ? Math.min(barangayScale, muniFocus.scale) : barangayScale
     setInteracting(false)
     setView(clampView({ cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale }, bounds))
   }
@@ -365,8 +376,8 @@ export default function BiliranMap({
 
     const [startX, startY] = clientPointToSvgSpace(svgRef.current, drag.startClientX, drag.startClientY)
     const [curX, curY] = clientPointToSvgSpace(svgRef.current, e.clientX, e.clientY)
-    const deltaX = curX - startX
-    const deltaY = curY - startY
+    const deltaX = (curX - startX) * DRAG_DAMPING
+    const deltaY = (curY - startY) * DRAG_DAMPING
     setView(
       clampView(
         {
