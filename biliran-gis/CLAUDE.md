@@ -101,6 +101,21 @@ the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
 the Supabase session + RLS policies, not this check.
 
+**Admin sign-in toggle is copy only, also not a security gate.** The login
+card's logo becomes a button while `authState === 'needsLogin'` (gone
+entirely once signed in — no lingering control in the dashboard), toggling
+a `loginMode: 'user' | 'admin'` local state that only swaps the card's
+heading ("Sign in" ↔ "Welcome, Administrator"). The email/password fields
+and `handleSubmit` are unchanged either way — there's only one real auth
+mechanism (`supabase.auth.signInWithPassword`); actual admin authorization
+is still the existing post-login `access_level === 'admin'` check
+(`isAdmin` state, used elsewhere to gate the header profile button's
+"Admin panel" row). A non-admin account signing in via the admin-styled
+form just lands on the normal dashboard with no admin entry point, same as
+any other non-admin sign-in. `loginMode` always starts (and, on sign-out,
+resets to) `'user'` — plain `useState`, no persistence, so a page refresh
+always shows the regular login view regardless of what was last toggled.
+
 **Supabase clients are split by privilege** (`lib/supabase.ts` vs.
 `lib/supabaseAdmin.ts`): the anon/browser client is safe in client components;
 `supabaseAdmin` uses the service-role key and must only be used server-side
@@ -120,29 +135,77 @@ Invitation codes are created via `app/api/admin/invite/route.ts` (`GET` to
 list, `POST` to create) — admin-only, checked by decoding the caller's
 Supabase access token (`Authorization: Bearer <token>`, sent from the client
 after `supabase.auth.getSession()`) and requiring `user_profiles.access_level
-=== 'admin'`. Before this route existed, nothing in the app could actually
-produce an `invitation_codes` row, so `/activate` had no real way to be
-reached. Surfaced in the UI as "Invitations" in the hidden "+" menu, shown
-only to admins (`components/AdminInvitePanel.tsx`).
+=== 'admin'` via `lib/requireAdmin.ts` (shared by every admin route —
+extracted once a second admin endpoint needed the identical check, rather
+than duplicating it). Before this route existed, nothing in the app could
+actually produce an `invitation_codes` row, so `/activate` had no real way
+to be reached. Reached from the header profile button's panel now (see
+below), not a dedicated menu item of its own — "Admin panel" there opens
+`components/AdminInvitePanel.tsx`, admin-gated the same way.
 
-**Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
-which shows the signed-in user's email plus `office`/`access_level` fetched
-via `lib/profile.ts` (`fetchOwnProfile`, anon client — relies on a Supabase
-RLS policy letting a user read their own `user_profiles` row). It also has
-a photo, backed by a private Supabase Storage `avatars` bucket (see
-`supabase/avatars-storage-setup.sql`, **not auto-applied** — someone with
-Supabase dashboard/CLI access has to run it once): upload goes through
-`POST /api/profile/avatar-upload-url` (Bearer-token-authenticated, any
-signed-in user, no `access_level` check — mints a tokenized
-`createSignedUploadUrl` scoped to `{user.id}/avatar`), the client uploads
-directly to that URL via `supabase.storage.from('avatars').uploadToSignedUrl`,
-then `updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on
-the user's own `user_profiles` row (needs the new "update own row" RLS
-policy from that same SQL file — there wasn't one before). Display always
-goes through a freshly-signed read URL (`getAvatarUrl()`), never a public
-bucket URL — the bucket stays private. The photo also shows as a small
-circular thumbnail on the "+" menu trigger button in `app/page.tsx` once
-one exists, in place of the generic "+" icon.
+**Header profile button** (`components/HeaderProfileButton.tsx`) replaced
+the old hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
+Sign out) entirely — a persistent element next to the day/night toggle,
+both `data-revealed`-driven flex siblings in one shared right-anchored row
+in `app/page.tsx` (`absolute right-5 top-5 z-20 flex items-center gap-2`).
+The toggle "drifts left" for free as the profile button's own width grows
+on reveal — ordinary flexbox reflow, not manual position math. Two visual
+states: a small plain circle pre-login (the shared `Avatar` fallback —
+see below — with no url/label, so it renders a generic silhouette, since
+there's no signed-in user yet to take an initial from); once revealed, the
+circle grows and a reverse-trapezoid tab pops out to its left revealing
+`formatDisplayName()` (see below) + office — same clip-path technique as
+the weather ribbon (`components/BiliranMap.tsx`'s `WeatherBadge`), flush
+top edge with the diagonal tapering the far/outer (here, bottom-left)
+corner, for visual consistency between the two; its right edge tucks
+behind the circle (negative margin + DOM order) so only the tapered left
+edge is ever visible. The grow-then-reveal sequence is two CSS transitions
+with a staggered `transition-delay` (avatar width/height, then the tab's
+`max-width`/`opacity`) — confirmed via the same
+`getComputedStyle`-sampled-over-time technique this project already uses
+to verify CSS transitions are actually interpolating, not just present.
+Clicking it opens `components/ProfilePanel.tsx` — disabled (no click) while
+not revealed, since there's no profile to show yet.
+
+**Profile** (`components/ProfilePanel.tsx`): the signed-in user's email,
+editable `title`/`first_name`/`family_name`/`office` fields (`lib/profile.ts`'s
+`updateOwnProfileFields()`), read-only `access_level` (never user-editable —
+see the security fix below), a photo backed by a private Supabase Storage
+`avatars` bucket (see `supabase/avatars-storage-setup.sql`, **not
+auto-applied** — someone with Supabase dashboard/CLI access has to run it
+once): upload goes through `POST /api/profile/avatar-upload-url`
+(Bearer-token-authenticated, any signed-in user, no `access_level` check —
+mints a tokenized `createSignedUploadUrl` scoped to `{user.id}/avatar`),
+the client uploads directly to that URL via
+`supabase.storage.from('avatars').uploadToSignedUrl`, then
+`updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on the
+user's own `user_profiles` row. Display always goes through a
+freshly-signed read URL (`getAvatarUrl()`), never a public bucket URL —
+the bucket stays private. Also hosts, moved here from the old "+" menu, an
+"Admin panel" row (`isAdmin`-gated) and "Sign out".
+
+`ProfilePanel.tsx` exports a shared `Avatar({ url, label, sizeClassName })`
+— `label` (an initial letter) when a user is known but has no photo (used
+by `ProfilePanel`'s own avatar button, passed the user's email), a generic
+silhouette SVG when neither is known (used by `HeaderProfileButton`
+pre-login, which has no `user` at all yet) — one implementation instead of
+duplicating fallback logic between the two call sites.
+
+**Structured name fields** (`title`/`first_name`/`family_name` — not one
+combined name string) were added on `user_profiles` via
+`supabase/profile-name-fields-setup.sql` (same not-auto-applied pattern).
+`lib/profile.ts`'s `formatDisplayName()` picks `"title first_name
+family_name"` when it fits a max-length constant, else falls back to
+`"title family_name"` (e.g. "Mr. Dela Cruz") — kept structured specifically
+so this fallback is reliable rather than parsed from free text. That same
+SQL file also fixes a real gap found while adding these columns: the
+existing "update own row" RLS policy had no column restriction, so any
+signed-in user could `update user_profiles set access_level = 'admin'
+where user_id = auth.uid()` directly via the Supabase client — RLS
+restricts which *rows* a policy covers, not which *columns*, so the fix is
+a column-level `grant`/`revoke` (users can update their own `office`/
+`title`/`first_name`/`family_name`/`avatar_path`, explicitly not
+`access_level`), not another RLS policy.
 
 **Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
 — one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
@@ -170,10 +233,11 @@ no longer just a self-validated guess.
 
 - Single merged page (map + login + dashboard as states of one component, not routes)
 - Daily login gate is UX, not security
+- Admin sign-in toggle (the login-screen logo button) is copy/branding only, also not a security gate — real admin authorization is always the post-login `access_level === 'admin'` check
 - Account creation is fully admin-controlled; no public signup
 - Invite codes are device-bound only at redemption
 - No AI/LLM features in the product
-- Admin entry point is a hidden bottom-right "+" menu (Profile / Dashboard / Sign out)
+- Admin entry point is "Admin panel" inside the header profile button's panel (`components/HeaderProfileButton.tsx` → `ProfilePanel.tsx`), `isAdmin`-gated — not a separate menu (the old hidden bottom-right "+" FAB, with its Profile/Dashboard/Invitations/Sign out items, was removed; "Dashboard" was redundant with just being on the dashboard, "Invitations" moved into the admin panel)
 - Barangays are ranked by continuous `mean_fsi_score`, never by discrete FSI class (class-based ranking was tested and rejected — it collapses most barangays into one bucket)
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average
@@ -393,12 +457,18 @@ most of the frame with it, not a small shape adrift in a lot of open sea.
 **`WeatherBadge` is a corner ribbon, not a rounded chip** — a deliberate
 departure from the `Legend`/back-button glass-chip look, because a pill
 shape reads as clickable (like the back button next to it) when this is a
-passive readout. `clip-path: polygon(24px 0, 100% 0, 100% 100%, 0 100%)`
+passive readout. `clip-path: polygon(0 0, 100% 0, 100% 100%, 24px 100%)`
 on a `right-0 top-0`-positioned div (flush, not inset) makes a
-right-trapezoid; the container's own `overflow-hidden` + `rounded-xl`
-clips the ribbon's outer corner to match the card's curve for free, so the
-ribbon itself needs no border-radius. A plain `border`/`box-shadow`
-doesn't follow a `clip-path`'d box correctly — depth comes from `filter:
+right-trapezoid — top edge fully flush with the map card's top edge, the
+diagonal tapering the ribbon's bottom-left corner instead (an earlier
+version had this backwards, `polygon(24px 0, 100% 0, 100% 100%, 0 100%)`,
+leaving a flush *bottom* and an indented *top* — a less correct read for a
+badge hanging from the top-right corner; fixed after a side-thread
+proposal flagged it and it was verified with a screenshot, not just
+trusted). The container's own `overflow-hidden` + `rounded-xl` clips the
+ribbon's outer corner to match the card's curve for free, so the ribbon
+itself needs no border-radius. A plain `border`/`box-shadow` doesn't
+follow a `clip-path`'d box correctly — depth comes from `filter:
 drop-shadow(...)` instead. The cloud+rain-drop markup itself lives in a
 shared `WeatherIconSVG` fragment (no wrapping `<svg>`/positioning), reused
 both by the ribbon and, scaled way down, by each municipality's own icon

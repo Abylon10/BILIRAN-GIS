@@ -1,9 +1,11 @@
 // components/AdminInvitePanel.tsx
 //
-// Admin-only invitation code creation. Account creation is fully
+// Admin-only invitation code management. Account creation is fully
 // admin-controlled (settled decision, see CLAUDE.md) — before this, nothing
 // in the app could actually create an invitation_codes row, so /activate
-// had no way to ever be reached for a real user.
+// had no way to ever be reached for a real user. Started as create/list
+// only; edit and revoke (app/api/admin/invite/[id]/route.ts) came later,
+// both refusing to touch an already-redeemed invitation.
 
 'use client'
 
@@ -19,6 +21,11 @@ interface Invitation {
   redeemed: boolean
   expires_at: string | null
   redeemed_at: string | null
+}
+
+async function getToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token ?? null
 }
 
 async function fetchInvitations(token: string): Promise<Invitation[]> {
@@ -38,11 +45,28 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
   const [created, setCreated] = useState<Invitation | null>(null)
   const [invitations, setInvitations] = useState<Invitation[]>([])
 
+  // Inline edit state — at most one row editable at a time.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editEmail, setEditEmail] = useState('')
+  const [editOffice, setEditOffice] = useState('')
+  const [rowError, setRowError] = useState<string | null>(null)
+  const [rowBusyId, setRowBusyId] = useState<number | null>(null)
+
+  async function refresh() {
+    const token = await getToken()
+    if (token) setInvitations(await fetchInvitations(token))
+  }
+
+  // Not calling refresh() directly here — react-hooks flags a setState call
+  // reached via a directly-invoked named function as a cascading-render
+  // risk. Inlining the same fetch as a .then() chain (mirroring this
+  // component's original effect shape) avoids that without losing the
+  // cancelled-guard.
   useEffect(() => {
     let cancelled = false
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      fetchInvitations(session.access_token).then((data) => {
+    getToken().then((token) => {
+      if (!token) return
+      fetchInvitations(token).then((data) => {
         if (!cancelled) setInvitations(data)
       })
     })
@@ -57,8 +81,8 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
     setCreated(null)
     setLoading(true)
 
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
+    const token = await getToken()
+    if (!token) {
       setLoading(false)
       setError('Your session expired — sign in again.')
       return
@@ -68,7 +92,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ email, office }),
     })
@@ -83,7 +107,75 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
     setCreated(data.invitation)
     setEmail('')
     setOffice('')
-    setInvitations(await fetchInvitations(session.access_token))
+    await refresh()
+  }
+
+  function startEdit(inv: Invitation) {
+    setRowError(null)
+    setEditingId(inv.id)
+    setEditEmail(inv.email)
+    setEditOffice(inv.office)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+  }
+
+  async function saveEdit(id: number) {
+    setRowError(null)
+    setRowBusyId(id)
+
+    const token = await getToken()
+    if (!token) {
+      setRowBusyId(null)
+      setRowError('Your session expired — sign in again.')
+      return
+    }
+
+    const res = await fetch(`/api/admin/invite/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ email: editEmail, office: editOffice }),
+    })
+    const data = await res.json()
+    setRowBusyId(null)
+
+    if (!res.ok) {
+      setRowError(data.error ?? 'Could not update invitation.')
+      return
+    }
+
+    setEditingId(null)
+    await refresh()
+  }
+
+  async function revoke(id: number) {
+    setRowError(null)
+    setRowBusyId(id)
+
+    const token = await getToken()
+    if (!token) {
+      setRowBusyId(null)
+      setRowError('Your session expired — sign in again.')
+      return
+    }
+
+    const res = await fetch(`/api/admin/invite/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    setRowBusyId(null)
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setRowError(data.error ?? 'Could not revoke invitation.')
+      return
+    }
+
+    await refresh()
   }
 
   return (
@@ -134,14 +226,84 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
       </form>
 
       {invitations.length > 0 && (
-        <div className="mt-5 max-h-48 overflow-y-auto border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
-          <ul className="space-y-1.5 text-xs">
-            {invitations.map((inv) => (
-              <li key={inv.id} className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
-                <span className="truncate">{inv.email} · {inv.office}</span>
-                <span className="font-mono">{inv.redeemed ? 'redeemed' : inv.code}</span>
-              </li>
-            ))}
+        <div className="mt-5 max-h-64 overflow-y-auto border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+          {rowError && (
+            <p role="alert" className="mb-2 rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-xs text-[#8A4B12]">
+              {rowError}
+            </p>
+          )}
+          <ul className="space-y-2 text-xs">
+            {invitations.map((inv) => {
+              const busy = rowBusyId === inv.id
+              if (editingId === inv.id) {
+                return (
+                  <li key={inv.id} className="space-y-1.5 rounded-md border p-2" style={{ borderColor: 'var(--card-border)' }}>
+                    <input
+                      type="email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      className="w-full rounded border px-2 py-1 text-xs outline-none"
+                      style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+                    />
+                    <input
+                      type="text"
+                      value={editOffice}
+                      onChange={(e) => setEditOffice(e.target.value)}
+                      className="w-full rounded border px-2 py-1 text-xs outline-none"
+                      style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+                    />
+                    <div className="flex justify-end gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={busy}
+                        className="text-xs font-medium"
+                        style={{ color: 'var(--text-soft)' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveEdit(inv.id)}
+                        disabled={busy}
+                        className="rounded bg-[#E8A33D] px-2 py-1 text-xs font-semibold text-[#0B3654] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {busy ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </li>
+                )
+              }
+              return (
+                <li key={inv.id} className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
+                  <span className="truncate">{inv.email} · {inv.office}</span>
+                  {inv.redeemed ? (
+                    <span className="font-mono shrink-0">redeemed</span>
+                  ) : (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="font-mono">{inv.code}</span>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(inv)}
+                        disabled={busy}
+                        className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => revoke(inv.id)}
+                        disabled={busy}
+                        className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ color: '#C0392B' }}
+                      >
+                        {busy ? '…' : 'Revoke'}
+                      </button>
+                    </span>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
