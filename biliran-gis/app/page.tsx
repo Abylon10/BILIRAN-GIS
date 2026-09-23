@@ -139,20 +139,35 @@ export default function HomePage() {
       setUser(current)
       const profile = await fetchOwnProfile(current.id)
       if (cancelled) return
-      setIsAdmin(profile?.access_level === 'admin')
+      const admin = profile?.access_level === 'admin'
+      setIsAdmin(admin)
       setDisplayName(profile ? formatDisplayName(profile) : null)
       setOffice(profile?.office ?? null)
       if (profile?.avatar_path) {
         const url = await getAvatarUrl(profile.avatar_path)
         if (!cancelled) setAvatarUrl(url)
       }
+      // The only way into the admin panel now: signing in via the
+      // "Welcome, Administrator" login toggle AND actually being an admin
+      // (loginMode alone is copy/branding, never a security gate — see
+      // its own comment above). A non-admin who picks the admin-styled
+      // login form still just lands on the normal dashboard, same as
+      // before. This only ever fires right after an interactive sign-in
+      // (loginMode is local, unpersisted state, so it can't be 'admin' on
+      // a returning-session auto-reveal where the login card is skipped).
+      if (loginMode === 'admin' && admin) setShowAdminPanel(true)
     }
     loadUser()
 
     return () => {
       cancelled = true
     }
-  }, [authState])
+    // loginMode only actually changes while authState !== 'revealed' (the
+    // toggle button that flips it is only rendered pre-reveal), so this
+    // extra dependency can't cause a spurious re-fetch after sign-in —
+    // it just lets the effect read the loginMode that was current at the
+    // moment of the real 'revealed' transition, instead of a stale one.
+  }, [authState, loginMode])
 
   // Loaded as soon as the map can mount (authState !== 'checking', i.e.
   // during needsLogin too) rather than waiting for 'revealed' — it's static
@@ -278,7 +293,11 @@ export default function HomePage() {
           --sun-glow: rgba(39, 77, 96, 0.45); --sun-core: #6BA3BE;
           --cloud: rgba(39, 77, 96, 0.35);
           --card-bg: rgba(3, 23, 22, 0.65); --card-border: rgba(107, 163, 190, 0.18);
-          --text-strong: #6BA3BE; --text-soft: #508198; --field-line: rgba(107, 163, 190, 0.25);
+          /* Lightened a notch from the palette's raw #6BA3BE/#508198 — both
+             read a little dim against near-black backgrounds (--card-bg/
+             --body-bg), so numbers and secondary labels were harder to read
+             at a glance than the day theme's equivalent contrast. */
+          --text-strong: #85B7CE; --text-soft: #7098AD; --field-line: rgba(107, 163, 190, 0.25);
           --header-bg: rgba(3, 47, 48, 0.9); --body-bg: rgba(3, 23, 22, 0.3);
           --separator: #0C969C;
           /* Buttons: darker pairing in night mode. */
@@ -564,11 +583,6 @@ export default function HomePage() {
           onProfileFieldsChange={(fields) => {
             setDisplayName(formatDisplayName(fields))
             setOffice(fields.office)
-          }}
-          isAdmin={isAdmin}
-          onOpenAdmin={() => {
-            setShowProfile(false)
-            setShowAdminPanel(true)
           }}
           onSignOut={handleSignOut}
         />
