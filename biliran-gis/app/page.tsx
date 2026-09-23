@@ -25,12 +25,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { fetchOwnProfile, getAvatarUrl } from '@/lib/profile'
+import { fetchOwnProfile, formatDisplayName, getAvatarUrl } from '@/lib/profile'
 import { loadBarangays, type Barangay } from '@/lib/dashboardData'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
 import AdminInvitePanel from '@/components/AdminInvitePanel'
+import HeaderProfileButton from '@/components/HeaderProfileButton'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
 
@@ -44,7 +45,6 @@ export default function HomePage() {
   const [authState, setAuthState] = useState<AuthState>('checking')
   const revealed = authState === 'revealed'
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (prefersDark() ? 'dark' : 'light'))
-  const [menuOpen, setMenuOpen] = useState(false)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -55,8 +55,12 @@ export default function HomePage() {
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  // Shown in the header profile button's revealed tab — see
+  // HeaderProfileButton.tsx and lib/profile.ts's formatDisplayName.
+  const [displayName, setDisplayName] = useState<string | null>(null)
+  const [office, setOffice] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
-  const [showInvitations, setShowInvitations] = useState(false)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
 
   // Lifted up from DashboardShell so the one persistent <BiliranMap> below
   // (mounted here, not inside DashboardShell — see "one map, not two" in
@@ -116,6 +120,8 @@ export default function HomePage() {
       const profile = await fetchOwnProfile(current.id)
       if (cancelled) return
       setIsAdmin(profile?.access_level === 'admin')
+      setDisplayName(profile ? formatDisplayName(profile) : null)
+      setOffice(profile?.office ?? null)
       if (profile?.avatar_path) {
         const url = await getAvatarUrl(profile.avatar_path)
         if (!cancelled) setAvatarUrl(url)
@@ -198,6 +204,11 @@ export default function HomePage() {
     window.localStorage.removeItem(LAST_LOGIN_KEY)
     setUser(null)
     setIsAdmin(false)
+    setAvatarUrl(null)
+    setDisplayName(null)
+    setOffice(null)
+    setShowProfile(false)
+    setShowAdminPanel(false)
     setAuthState('needsLogin')
   }, [])
 
@@ -330,16 +341,34 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Theme toggle */}
-      <button
-        type="button"
-        onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-        aria-label="Toggle day and night"
-        className="absolute right-5 top-5 z-20 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-colors"
-        style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
-      >
-        {theme === 'light' ? '☀ Day' : '☾ Night'}
-      </button>
+      {/*
+        Header row: theme toggle + profile button, as flex siblings in one
+        shared right-anchored row rather than two independently absolutely-
+        positioned elements — the toggle "drifts left" for free as the
+        profile button's own width grows on reveal (see
+        HeaderProfileButton.tsx), via ordinary flexbox reflow, no manual
+        position math needed. Replaces the old hidden bottom-right "+" FAB
+        (Profile / Dashboard / Invitations / Sign out) entirely — reachable
+        here at all times, not just once revealed.
+      */}
+      <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+          aria-label="Toggle day and night"
+          className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-colors"
+          style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+        >
+          {theme === 'light' ? '☀ Day' : '☾ Night'}
+        </button>
+        <HeaderProfileButton
+          revealed={revealed}
+          avatarUrl={avatarUrl}
+          displayName={displayName}
+          office={office}
+          onClick={() => setShowProfile(true)}
+        />
+      </div>
 
       {/* Login card */}
       <div className="bfw-card relative z-10 flex min-h-screen items-center justify-center px-6 py-16" data-revealed={revealed}>
@@ -405,36 +434,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Bottom-right menu: Profile / Dashboard / Sign out — only relevant once logged in */}
-      {revealed && (
-        <div className="absolute bottom-5 right-5 z-20 flex flex-col items-end gap-2">
-          {menuOpen && (
-            <div className="mb-1 flex flex-col overflow-hidden rounded-2xl border shadow-lg backdrop-blur-xl" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-              <MenuItem label="Profile" onClick={() => { setShowProfile(true); setMenuOpen(false) }} />
-              <MenuItem label="Dashboard" onClick={() => setMenuOpen(false)} />
-              {isAdmin && (
-                <MenuItem label="Invitations" onClick={() => { setShowInvitations(true); setMenuOpen(false) }} />
-              )}
-              <MenuItem label="Sign out" onClick={handleSignOut} />
-            </div>
-          )}
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Open menu"
-            aria-expanded={menuOpen}
-            className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border shadow-lg backdrop-blur-xl transition-transform"
-            style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)', transform: menuOpen ? 'rotate(45deg)' : 'none' }}
-          >
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt="" className="h-full w-full object-cover" style={{ transform: menuOpen ? 'rotate(-45deg)' : 'none' }} />
-            ) : (
-              <span className="text-2xl leading-none">+</span>
-            )}
-          </button>
-        </div>
-      )}
-
       {/* Loading cover, hides the pre-resolved state flash */}
       <div
         className="bfw-loading-cover"
@@ -442,9 +441,23 @@ export default function HomePage() {
       />
 
       {showProfile && user && (
-        <ProfilePanel user={user} onClose={() => setShowProfile(false)} onAvatarChange={setAvatarUrl} />
+        <ProfilePanel
+          user={user}
+          onClose={() => setShowProfile(false)}
+          onAvatarChange={setAvatarUrl}
+          onProfileFieldsChange={(fields) => {
+            setDisplayName(formatDisplayName(fields))
+            setOffice(fields.office)
+          }}
+          isAdmin={isAdmin}
+          onOpenAdmin={() => {
+            setShowProfile(false)
+            setShowAdminPanel(true)
+          }}
+          onSignOut={handleSignOut}
+        />
       )}
-      {showInvitations && isAdmin && <AdminInvitePanel onClose={() => setShowInvitations(false)} />}
+      {showAdminPanel && isAdmin && <AdminInvitePanel onClose={() => setShowAdminPanel(false)} />}
     </div>
   )
 }
@@ -469,17 +482,5 @@ function Field({ label, type, value, onChange, valid }: { label: string; type: s
         />
       </div>
     </label>
-  )
-}
-
-function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="px-5 py-3 text-left text-sm font-medium hover:bg-black/5"
-      style={{ color: 'var(--text-strong)' }}
-    >
-      {label}
-    </button>
   )
 }

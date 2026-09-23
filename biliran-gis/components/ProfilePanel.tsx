@@ -1,18 +1,29 @@
 // components/ProfilePanel.tsx
 //
-// Profile view behind the hidden "+" menu: account email, office/
-// access_level from user_profiles, and a photo backed by a private
-// Supabase Storage bucket (see supabase/avatars-storage-setup.sql and
-// app/api/profile/avatar-upload-url/route.ts). The bucket stays private —
-// upload goes through a per-request signed upload URL, display through a
-// freshly-signed read URL, never a public bucket URL.
+// Profile view behind the header profile button (components/
+// HeaderProfileButton.tsx): account email, editable title/first/family
+// name + office (user_profiles — see supabase/profile-name-fields-setup.sql
+// for the columns and a related access_level RLS-column-grant fix),
+// access level (read-only, never user-editable), a photo backed by a
+// private Supabase Storage bucket (see supabase/avatars-storage-setup.sql
+// and app/api/profile/avatar-upload-url/route.ts — the bucket stays
+// private, upload goes through a per-request signed upload URL, display
+// through a freshly-signed read URL, never a public bucket URL), and,
+// moved here from the old bottom-right "+" menu, an admin-panel entry
+// point (isAdmin-gated) and Sign out.
 
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { fetchOwnProfile, getAvatarUrl, updateOwnAvatarPath, type Profile } from '@/lib/profile'
+import {
+  fetchOwnProfile,
+  getAvatarUrl,
+  updateOwnAvatarPath,
+  updateOwnProfileFields,
+  type Profile,
+} from '@/lib/profile'
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
@@ -20,10 +31,20 @@ export default function ProfilePanel({
   user,
   onClose,
   onAvatarChange,
+  onProfileFieldsChange,
+  isAdmin,
+  onOpenAdmin,
+  onSignOut,
 }: {
   user: User
   onClose: () => void
   onAvatarChange?: (url: string | null) => void
+  // Lets the header profile button update its own name/office display
+  // immediately after a save, without a second fetch.
+  onProfileFieldsChange?: (fields: Pick<Profile, 'title' | 'first_name' | 'family_name' | 'office'>) => void
+  isAdmin: boolean
+  onOpenAdmin: () => void
+  onSignOut: () => void
 }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,12 +53,26 @@ export default function ProfilePanel({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [title, setTitle] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [familyName, setFamilyName] = useState('')
+  const [office, setOffice] = useState('')
+  const [savingFields, setSavingFields] = useState(false)
+  const [fieldsError, setFieldsError] = useState<string | null>(null)
+  const [fieldsSaved, setFieldsSaved] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     fetchOwnProfile(user.id).then(async (p) => {
       if (cancelled) return
       setProfile(p)
       setLoading(false)
+      if (p) {
+        setTitle(p.title ?? '')
+        setFirstName(p.first_name ?? '')
+        setFamilyName(p.family_name ?? '')
+        setOffice(p.office ?? '')
+      }
       if (p?.avatar_path) {
         const url = await getAvatarUrl(p.avatar_path)
         if (!cancelled) setAvatarUrl(url)
@@ -108,6 +143,29 @@ export default function ProfilePanel({
     setUploadState('idle')
   }
 
+  async function handleSaveFields(e: React.FormEvent) {
+    e.preventDefault()
+    setSavingFields(true)
+    setFieldsError(null)
+    setFieldsSaved(false)
+
+    const fields = {
+      title: title.trim() || null,
+      first_name: firstName.trim() || null,
+      family_name: familyName.trim() || null,
+      office: office.trim() || null,
+    }
+    const ok = await updateOwnProfileFields(user.id, fields)
+    setSavingFields(false)
+
+    if (!ok) {
+      setFieldsError('Could not save changes.')
+      return
+    }
+    setFieldsSaved(true)
+    onProfileFieldsChange?.(fields)
+  }
+
   return (
     <Modal onClose={onClose} title="Profile">
       <div className="mb-5 flex items-center gap-4">
@@ -120,14 +178,7 @@ export default function ProfilePanel({
           aria-label="Change profile photo"
           title="Change profile photo"
         >
-          {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center text-lg font-semibold" style={{ color: 'var(--text-soft)' }}>
-              {(user.email ?? '?').charAt(0).toUpperCase()}
-            </span>
-          )}
+          <Avatar url={avatarUrl} label={user.email} sizeClassName="h-full w-full" />
           {uploadState === 'uploading' && (
             <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-medium text-white">
               Uploading…
@@ -161,12 +212,90 @@ export default function ProfilePanel({
         </p>
       )}
 
-      <dl className="space-y-3 text-sm">
-        <Row label="Email" value={user.email ?? '—'} />
-        <Row label="Office" value={loading ? 'Loading…' : profile?.office ?? '—'} />
+      <p className="mb-3 text-sm" style={{ color: 'var(--text-soft)' }}>
+        {user.email ?? '—'}
+      </p>
+
+      <form onSubmit={handleSaveFields} className="space-y-3">
+        <div className="grid grid-cols-[80px_1fr] gap-2">
+          <FieldInput label="Title" value={title} onChange={setTitle} placeholder="Mr./Mrs./Ms./Engr." disabled={loading} />
+          <FieldInput label="First name" value={firstName} onChange={setFirstName} disabled={loading} />
+        </div>
+        <FieldInput label="Family name" value={familyName} onChange={setFamilyName} disabled={loading} />
+        <FieldInput label="Office" value={office} onChange={setOffice} placeholder="e.g. MDRRMO Naval" disabled={loading} />
+
+        {fieldsError && (
+          <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
+            {fieldsError}
+          </p>
+        )}
+        {fieldsSaved && !fieldsError && (
+          <p className="rounded-md bg-[#E7F3E9] px-3 py-2 text-sm text-[#2C5F3E]">Saved.</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading || savingFields}
+          className="w-full rounded-md bg-[#E8A33D] py-2 text-sm font-semibold text-[#0B3654] transition-colors hover:bg-[#DB962E] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {savingFields ? 'Saving…' : 'Save changes'}
+        </button>
+      </form>
+
+      <dl className="mt-4 space-y-3 text-sm">
         <Row label="Access level" value={loading ? 'Loading…' : profile?.access_level ?? '—'} />
       </dl>
+
+      <div className="mt-5 space-y-2 border-t pt-4" style={{ borderColor: 'var(--card-border)' }}>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={onOpenAdmin}
+            className="w-full rounded-md border py-2 text-sm font-medium"
+            style={{ borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+          >
+            Admin panel
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="w-full rounded-md border py-2 text-sm font-medium"
+          style={{ borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+        >
+          Sign out
+        </button>
+      </div>
     </Modal>
+  )
+}
+
+function FieldInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  disabled?: boolean
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium" style={{ color: 'var(--text-soft)' }}>{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="mt-1 w-full rounded-md border px-3 py-2 text-sm outline-none disabled:opacity-50"
+        style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+      />
+    </label>
   )
 }
 
@@ -176,6 +305,46 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt style={{ color: 'var(--text-soft)' }}>{label}</dt>
       <dd className="font-medium" style={{ color: 'var(--text-strong)' }}>{value}</dd>
     </div>
+  )
+}
+
+// Shared avatar-with-fallback, used both here and by
+// components/HeaderProfileButton.tsx (which has no `user` yet pre-login,
+// so it never has a `label` — just the generic silhouette). `label` (an
+// email, initial extracted here) is for when a user IS known but has no
+// photo; the silhouette is for when neither is known.
+export function Avatar({
+  url,
+  label,
+  sizeClassName = 'h-10 w-10',
+}: {
+  url?: string | null
+  label?: string | null
+  sizeClassName?: string
+}) {
+  if (url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={url} alt="" className={`${sizeClassName} object-cover`} />
+    )
+  }
+  if (label) {
+    return (
+      <span
+        className={`flex ${sizeClassName} items-center justify-center text-lg font-semibold`}
+        style={{ color: 'var(--text-soft)' }}
+      >
+        {label.charAt(0).toUpperCase()}
+      </span>
+    )
+  }
+  return (
+    <span className={`flex ${sizeClassName} items-center justify-center`} style={{ color: 'var(--text-soft)' }}>
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-3/5 w-3/5" aria-hidden>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4.42 3.58-8 8-8s8 3.58 8 8" />
+      </svg>
+    </span>
   )
 }
 

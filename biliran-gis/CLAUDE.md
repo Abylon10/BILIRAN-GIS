@@ -124,27 +124,57 @@ after `supabase.auth.getSession()`) and requiring `user_profiles.access_level
 extracted once a second admin endpoint needed the identical check, rather
 than duplicating it). Before this route existed, nothing in the app could
 actually produce an `invitation_codes` row, so `/activate` had no real way
-to be reached. Surfaced in the UI as "Invitations" in the hidden "+" menu,
-shown only to admins (`components/AdminInvitePanel.tsx`).
+to be reached. Reached from the header profile button's panel now (see
+below), not a dedicated menu item of its own — "Admin panel" there opens
+`components/AdminInvitePanel.tsx`, admin-gated the same way.
 
-**Profile**: "Profile" in the "+" menu opens `components/ProfilePanel.tsx`,
-which shows the signed-in user's email plus `office`/`access_level` fetched
-via `lib/profile.ts` (`fetchOwnProfile`, anon client — relies on a Supabase
-RLS policy letting a user read their own `user_profiles` row). It also has
-a photo, backed by a private Supabase Storage `avatars` bucket (see
-`supabase/avatars-storage-setup.sql`, **not auto-applied** — someone with
-Supabase dashboard/CLI access has to run it once): upload goes through
-`POST /api/profile/avatar-upload-url` (Bearer-token-authenticated, any
-signed-in user, no `access_level` check — mints a tokenized
-`createSignedUploadUrl` scoped to `{user.id}/avatar`), the client uploads
-directly to that URL via `supabase.storage.from('avatars').uploadToSignedUrl`,
-then `updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on
-the user's own `user_profiles` row (needs the new "update own row" RLS
-policy from that same SQL file — there wasn't one before). Display always
-goes through a freshly-signed read URL (`getAvatarUrl()`), never a public
-bucket URL — the bucket stays private. The photo also shows as a small
-circular thumbnail on the "+" menu trigger button in `app/page.tsx` once
-one exists, in place of the generic "+" icon.
+**Header profile button** (`components/HeaderProfileButton.tsx`) replaced
+the old hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
+Sign out) entirely — a persistent element next to the day/night toggle,
+both `data-revealed`-driven flex siblings in one shared right-anchored row
+in `app/page.tsx` (`absolute right-5 top-5 z-20 flex items-center gap-2`).
+The toggle "drifts left" for free as the profile button's own width grows
+on reveal — ordinary flexbox reflow, not manual position math. Two visual
+states: a small plain circle pre-login (the shared `Avatar` fallback —
+see below — with no url/label, so it renders a generic silhouette, since
+there's no signed-in user yet to take an initial from); once revealed, the
+circle grows and a reverse-trapezoid tab pops out to its left revealing
+`formatDisplayName()` (see below) + office — same clip-path technique as
+the weather ribbon (`components/BiliranMap.tsx`'s `WeatherBadge`), flush
+top edge with the diagonal tapering the far/outer (here, bottom-left)
+corner, for visual consistency between the two; its right edge tucks
+behind the circle (negative margin + DOM order) so only the tapered left
+edge is ever visible. The grow-then-reveal sequence is two CSS transitions
+with a staggered `transition-delay` (avatar width/height, then the tab's
+`max-width`/`opacity`) — confirmed via the same
+`getComputedStyle`-sampled-over-time technique this project already uses
+to verify CSS transitions are actually interpolating, not just present.
+Clicking it opens `components/ProfilePanel.tsx` — disabled (no click) while
+not revealed, since there's no profile to show yet.
+
+**Profile** (`components/ProfilePanel.tsx`): the signed-in user's email,
+editable `title`/`first_name`/`family_name`/`office` fields (`lib/profile.ts`'s
+`updateOwnProfileFields()`), read-only `access_level` (never user-editable —
+see the security fix below), a photo backed by a private Supabase Storage
+`avatars` bucket (see `supabase/avatars-storage-setup.sql`, **not
+auto-applied** — someone with Supabase dashboard/CLI access has to run it
+once): upload goes through `POST /api/profile/avatar-upload-url`
+(Bearer-token-authenticated, any signed-in user, no `access_level` check —
+mints a tokenized `createSignedUploadUrl` scoped to `{user.id}/avatar`),
+the client uploads directly to that URL via
+`supabase.storage.from('avatars').uploadToSignedUrl`, then
+`updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on the
+user's own `user_profiles` row. Display always goes through a
+freshly-signed read URL (`getAvatarUrl()`), never a public bucket URL —
+the bucket stays private. Also hosts, moved here from the old "+" menu, an
+"Admin panel" row (`isAdmin`-gated) and "Sign out".
+
+`ProfilePanel.tsx` exports a shared `Avatar({ url, label, sizeClassName })`
+— `label` (an initial letter) when a user is known but has no photo (used
+by `ProfilePanel`'s own avatar button, passed the user's email), a generic
+silhouette SVG when neither is known (used by `HeaderProfileButton`
+pre-login, which has no `user` at all yet) — one implementation instead of
+duplicating fallback logic between the two call sites.
 
 **Structured name fields** (`title`/`first_name`/`family_name` — not one
 combined name string) were added on `user_profiles` via
@@ -191,7 +221,7 @@ no longer just a self-validated guess.
 - Account creation is fully admin-controlled; no public signup
 - Invite codes are device-bound only at redemption
 - No AI/LLM features in the product
-- Admin entry point is a hidden bottom-right "+" menu (Profile / Dashboard / Sign out)
+- Admin entry point is "Admin panel" inside the header profile button's panel (`components/HeaderProfileButton.tsx` → `ProfilePanel.tsx`), `isAdmin`-gated — not a separate menu (the old hidden bottom-right "+" FAB, with its Profile/Dashboard/Invitations/Sign out items, was removed; "Dashboard" was redundant with just being on the dashboard, "Invitations" moved into the admin panel)
 - Barangays are ranked by continuous `mean_fsi_score`, never by discrete FSI class (class-based ranking was tested and rejected — it collapses most barangays into one bucket)
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average
