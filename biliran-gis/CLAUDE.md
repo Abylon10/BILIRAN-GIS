@@ -102,6 +102,16 @@ a solid fill, not a full traverse. A few gradient stops (sky-bottom, sun
 core/glow, the pale card-bg tint) are tints mixed toward white from these
 anchors, since the source palette has no near-white tone to soften into.
 
+Dark mode's `--text-strong`/`--text-soft` are lightened tints of their
+raw palette anchors (`#6BA3BE` → `#85B7CE`, `#508198` → `#7098AD`), not
+the anchors themselves — the raw values read a little dim against the
+near-black `--card-bg`/`--body-bg`, since every number/label in
+`BarangayList.tsx`/`BarangayDetailPanel.tsx`/`LiveUpdateBanner.tsx`
+already routes through these two variables (nothing hardcoded to touch
+per-component), so this one change is what actually fixed legibility
+everywhere at once. Light mode's text colors are unchanged — the
+contrast issue was dark-mode-specific.
+
 New variables beyond the original `--card-bg`/`--card-border`/
 `--text-strong`/`--text-soft`/`--field-line` set: `--header-bg`/
 `--body-bg`/`--separator` (the dashboard's header band vs. content area,
@@ -113,12 +123,16 @@ reference's own day/night button guidance).
 button treatment — a diagonal `linear-gradient(145deg, var(--btn-from),
 var(--btn-to))` fill plus an inset top highlight and a soft drop shadow,
 replacing the old flat `var(--card-bg)` fill on primary buttons. Applied
-to buttons meant to read as CTAs/controls (theme toggle, sign-in, the
-map's zoom `−`/`+` and "All municipalities" reset, Save/Create in
-`ProfilePanel`/`AdminInvitePanel`) — not to text-link-style actions
-(Cancel, Edit, the `Modal` `×` close) or the avatar-photo button, which
-stay in their existing understated styles since gradient-pill styling
-would misrepresent them as primary actions.
+to buttons meant to read as CTAs/controls: theme toggle, sign-in, the
+map's zoom `−`/`+` and "All municipalities" reset, `DashboardShell`'s
+municipality filter `<select>` (its *closed* state only — the native
+option-list popup isn't stylable this way in most browsers, an accepted
+platform limit), and every primary action in `ProfilePanel`/
+`AdminInvitePanel` (Save changes, Admin panel, Sign out, Create
+invitation, the inline row's Save) — not text-link-style actions
+(Cancel, Edit, Revoke, the `Modal` `×` close, "Upload/Change photo") or
+the avatar-photo button, which stay in their existing understated styles
+since gradient-pill styling would misrepresent them as primary actions.
 
 **Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
 title row and the `DashboardShell` content area are now two separate
@@ -280,6 +294,16 @@ with a staggered `transition-delay` (avatar width/height, then the tab's
 to verify CSS transitions are actually interpolating, not just present.
 Clicking it opens `components/ProfilePanel.tsx` — disabled (no click) while
 not revealed, since there's no profile to show yet.
+
+The tab's `max-width` (240px) is sized to comfortably fit
+`formatDisplayName()`'s worst case (`lib/profile.ts`'s
+`MAX_FULL_NAME_CHARS` = 20, e.g. "Mr. Juan Dela Cruz") plus a realistic
+office line below it, with headroom to spare — an earlier value (180px)
+was tuned close to the name line's own width alone and both lines ended
+up truncating in practice. The tab itself is content-sized (not stretched
+to the cap), so this is a safety ceiling, not a fixed width — confirmed
+via `scrollWidth`/`clientWidth` comparison (no truncation) against a
+realistic long name + office pairing, not just a visual guess.
 
 **Profile** (`components/ProfilePanel.tsx`): the signed-in user's email,
 editable `title`/`first_name`/`family_name`/`office` fields (`lib/profile.ts`'s

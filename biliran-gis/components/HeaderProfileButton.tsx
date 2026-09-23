@@ -64,7 +64,16 @@ export default function HeaderProfileButton({
           transition: max-width 0.4s cubic-bezier(0.22,1,0.36,1), opacity 0.25s ease;
         }
         .bfw-header-profile[data-revealed='true'] .bfw-header-profile-tab {
-          max-width: 180px;
+          /*
+            Comfortably fits formatDisplayName()'s worst case (lib/profile.ts's
+            MAX_FULL_NAME_CHARS = 20, e.g. "Mr. Juan Dela Cruz") plus its own
+            padding, with headroom for a longer office line below it — the
+            previous 180px cap was tuned close to the name's own width but
+            didn't leave enough room, so both lines were truncating in
+            practice. Still capped (not max-content) so the max-width
+            transition below keeps animating smoothly.
+          */
+          max-width: 240px;
           opacity: 1;
           transition-delay: 0.15s, 0.2s;
         }

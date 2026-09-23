@@ -251,8 +251,7 @@ export default function ProfilePanel({
           <button
             type="button"
             onClick={onOpenAdmin}
-            className="w-full rounded-md border py-2 text-sm font-medium"
-            style={{ borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+            className="bfw-btn w-full rounded-md py-2 text-sm font-medium"
           >
             Admin panel
           </button>
@@ -260,8 +259,7 @@ export default function ProfilePanel({
         <button
           type="button"
           onClick={onSignOut}
-          className="w-full rounded-md border py-2 text-sm font-medium"
-          style={{ borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+          className="bfw-btn w-full rounded-md py-2 text-sm font-medium"
         >
           Sign out
         </button>

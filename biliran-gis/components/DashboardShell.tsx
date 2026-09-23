@@ -142,8 +142,7 @@ export default function DashboardShell({
             <select
               value={municipality ?? ''}
               onChange={(e) => onMunicipalityChange(e.target.value || null)}
-              className="rounded-md border px-3 py-2 text-sm outline-none"
-              style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+              className="bfw-btn rounded-full px-3 py-2 text-sm outline-none"
             >
               <option value="">All municipalities</option>
               {MONITORED_MUNICIPALITIES.map((m) => (
