@@ -128,11 +128,11 @@ map's zoom `−`/`+` and "All municipalities" reset, `DashboardShell`'s
 municipality filter `<select>` (its *closed* state only — the native
 option-list popup isn't stylable this way in most browsers, an accepted
 platform limit), and every primary action in `ProfilePanel`/
-`AdminInvitePanel` (Save changes, Admin panel, Sign out, Create
-invitation, the inline row's Save) — not text-link-style actions
-(Cancel, Edit, Revoke, the `Modal` `×` close, "Upload/Change photo") or
-the avatar-photo button, which stay in their existing understated styles
-since gradient-pill styling would misrepresent them as primary actions.
+`AdminInvitePanel` (Save changes, Sign out, Create invitation, the inline
+row's Save) — not text-link-style actions (Cancel, Edit, Revoke, the
+`Modal` `×` close, "Upload/Change photo") or the avatar-photo button,
+which stay in their existing understated styles since gradient-pill
+styling would misrepresent them as primary actions.
 
 **Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
 title row and the `DashboardShell` content area are now two separate
@@ -229,20 +229,29 @@ the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
 the Supabase session + RLS policies, not this check.
 
-**Admin sign-in toggle is copy only, also not a security gate.** The login
-card's logo becomes a button while `authState === 'needsLogin'` (gone
-entirely once signed in — no lingering control in the dashboard), toggling
-a `loginMode: 'user' | 'admin'` local state that only swaps the card's
-heading ("Sign in" ↔ "Welcome, Administrator"). The email/password fields
-and `handleSubmit` are unchanged either way — there's only one real auth
-mechanism (`supabase.auth.signInWithPassword`); actual admin authorization
-is still the existing post-login `access_level === 'admin'` check
-(`isAdmin` state, used elsewhere to gate the header profile button's
-"Admin panel" row). A non-admin account signing in via the admin-styled
-form just lands on the normal dashboard with no admin entry point, same as
-any other non-admin sign-in. `loginMode` always starts (and, on sign-out,
-resets to) `'user'` — plain `useState`, no persistence, so a page refresh
-always shows the regular login view regardless of what was last toggled.
+**Admin sign-in toggle drives the admin panel's only entry point, but is
+still not itself a security gate.** The login card's logo becomes a
+button while `authState === 'needsLogin'` (gone entirely once signed in —
+no lingering control in the dashboard), toggling a `loginMode: 'user' |
+'admin'` local state that swaps the card's heading ("Sign in" ↔ "Welcome,
+Administrator"). The email/password fields and `handleSubmit` are
+unchanged either way — there's only one real auth mechanism
+(`supabase.auth.signInWithPassword`); `loginMode` itself grants nothing.
+What it *does* do: `app/page.tsx`'s post-sign-in `loadUser()` effect
+(`[authState, loginMode]`) checks `loginMode === 'admin' && access_level
+=== 'admin'` once the profile loads, and only then calls
+`setShowAdminPanel(true)` — auto-opening `AdminInvitePanel` right after
+sign-in. Both conditions are required: a non-admin account signing in via
+the admin-styled form still just lands on the normal dashboard with no
+admin entry point at all (there's no other way in — see below), same as
+any other non-admin sign-in; and an actual admin who signs in via the
+*regular* form (`loginMode` still `'user'`) also just lands on the normal
+dashboard, since `loginMode` alone decides nothing. `loginMode` always
+starts (and, on sign-out, resets to) `'user'` — plain `useState`, no
+persistence — which is also why this can't misfire on a returning-session
+auto-reveal: the toggle button only renders pre-reveal, so `loginMode`
+can't be `'admin'` unless this exact browser tab's session just toggled
+it before an interactive sign-in.
 
 **Supabase clients are split by privilege** (`lib/supabase.ts` vs.
 `lib/supabaseAdmin.ts`): the anon/browser client is safe in client components;
@@ -267,9 +276,11 @@ after `supabase.auth.getSession()`) and requiring `user_profiles.access_level
 extracted once a second admin endpoint needed the identical check, rather
 than duplicating it). Before this route existed, nothing in the app could
 actually produce an `invitation_codes` row, so `/activate` had no real way
-to be reached. Reached from the header profile button's panel now (see
-below), not a dedicated menu item of its own — "Admin panel" there opens
-`components/AdminInvitePanel.tsx`, admin-gated the same way.
+to be reached. Reached by signing in via the login screen's "Welcome,
+Administrator" toggle as an actual admin (`app/page.tsx` auto-opens
+`components/AdminInvitePanel.tsx` right after sign-in when both are
+true) — not via the header profile button's panel, which has no
+admin-panel entry point (see below and "Key architectural decisions").
 
 **Header profile button** (`components/HeaderProfileButton.tsx`) replaced
 the old hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
@@ -319,8 +330,11 @@ the client uploads directly to that URL via
 `updateOwnAvatarPath()` in `lib/profile.ts` saves the object path on the
 user's own `user_profiles` row. Display always goes through a
 freshly-signed read URL (`getAvatarUrl()`), never a public bucket URL —
-the bucket stays private. Also hosts, moved here from the old "+" menu, an
-"Admin panel" row (`isAdmin`-gated) and "Sign out".
+the bucket stays private. Also hosts a "Sign out" row, moved here from
+the old "+" menu — no admin-panel row (see "Key architectural
+decisions"): an earlier version had one here, `isAdmin`-gated, but it was
+removed once the login-toggle auto-open became the sole admin entry
+point, so `ProfilePanel` no longer needs to know `isAdmin` at all.
 
 `ProfilePanel.tsx` exports a shared `Avatar({ url, label, sizeClassName })`
 — `label` (an initial letter) when a user is known but has no photo (used
@@ -341,10 +355,10 @@ caller's real `onClose` after `MODAL_TRANSITION_MS` (300ms) — same
 `cubic-bezier(0.22,1,0.36,1)` family as `BiliranMap.tsx`'s zoom transform,
 `HeaderProfileButton.tsx`'s avatar/tab grow, and `app/page.tsx`'s map-shell
 transition. Scoped entirely inside `Modal`; neither caller needed to
-change. Other close-adjacent actions (`onSignOut`, `onOpenAdmin` in
-`ProfilePanel`) call their own callbacks directly, not `requestClose` —
-intentionally out of scope for this pass, since those aren't "close the
-modal" affordances. `AdminInvitePanel.tsx`'s inline edit-row (swapping a
+change. Other close-adjacent actions (`onSignOut` in `ProfilePanel`) call
+their own callback directly, not `requestClose` — intentionally out of
+scope for this pass, since that isn't a "close the modal" affordance.
+`AdminInvitePanel.tsx`'s inline edit-row (swapping a
 row into an editable form, `editingId === inv.id`) gets a lighter
 `@keyframes` entrance-only animation (`.bfw-edit-row-enter`, same easing)
 on mount — not a two-phase state toggle like `Modal`, since there's no
@@ -397,11 +411,11 @@ no longer just a self-validated guess.
 
 - Single merged page (map + login + dashboard as states of one component, not routes)
 - Daily login gate is UX, not security
-- Admin sign-in toggle (the login-screen logo button) is copy/branding only, also not a security gate — real admin authorization is always the post-login `access_level === 'admin'` check
+- Admin sign-in toggle (the login-screen logo button) grants nothing by itself, never a security gate on its own — real admin authorization is always the post-login `access_level === 'admin'` check; the toggle only decides whether a *successful, actually-admin* sign-in auto-opens the admin panel (see below)
 - Account creation is fully admin-controlled; no public signup
 - Invite codes are device-bound only at redemption
 - No AI/LLM features in the product
-- Admin entry point is "Admin panel" inside the header profile button's panel (`components/HeaderProfileButton.tsx` → `ProfilePanel.tsx`), `isAdmin`-gated — not a separate menu (the old hidden bottom-right "+" FAB, with its Profile/Dashboard/Invitations/Sign out items, was removed; "Dashboard" was redundant with just being on the dashboard, "Invitations" moved into the admin panel)
+- Admin entry point is signing in via the login screen's "Welcome, Administrator" toggle, as an actual admin — `app/page.tsx` auto-opens `AdminInvitePanel` right after sign-in when both are true. There is no other way in: `ProfilePanel.tsx` has no admin-panel row anymore (an earlier version put it there, `isAdmin`-gated, alongside the old hidden bottom-right "+" FAB's Profile/Dashboard/Invitations/Sign out items being removed entirely — "Dashboard" was redundant with just being on the dashboard, "Invitations" moved into the admin panel — but the admin-panel row itself was later moved out of Profile too, to keep the login-toggle path the sole entry point)
 - Barangays are ranked by continuous `mean_fsi_score`, never by discrete FSI class (class-based ranking was tested and rejected — it collapses most barangays into one bucket)
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average

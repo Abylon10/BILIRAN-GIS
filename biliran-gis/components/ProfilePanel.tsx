@@ -8,9 +8,11 @@
 // private Supabase Storage bucket (see supabase/avatars-storage-setup.sql
 // and app/api/profile/avatar-upload-url/route.ts — the bucket stays
 // private, upload goes through a per-request signed upload URL, display
-// through a freshly-signed read URL, never a public bucket URL), and,
-// moved here from the old bottom-right "+" menu, an admin-panel entry
-// point (isAdmin-gated) and Sign out.
+// through a freshly-signed read URL, never a public bucket URL), and a
+// Sign out row (moved here from the old bottom-right "+" menu). No admin
+// entry point here anymore — see app/page.tsx: signing in via the login
+// screen's "Welcome, Administrator" toggle, as an actual admin, opens the
+// admin panel directly instead.
 
 'use client'
 
@@ -32,8 +34,6 @@ export default function ProfilePanel({
   onClose,
   onAvatarChange,
   onProfileFieldsChange,
-  isAdmin,
-  onOpenAdmin,
   onSignOut,
 }: {
   user: User
@@ -42,8 +42,6 @@ export default function ProfilePanel({
   // Lets the header profile button update its own name/office display
   // immediately after a save, without a second fetch.
   onProfileFieldsChange?: (fields: Pick<Profile, 'title' | 'first_name' | 'family_name' | 'office'>) => void
-  isAdmin: boolean
-  onOpenAdmin: () => void
   onSignOut: () => void
 }) {
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -247,15 +245,6 @@ export default function ProfilePanel({
       </dl>
 
       <div className="mt-5 space-y-2 border-t pt-4" style={{ borderColor: 'var(--card-border)' }}>
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={onOpenAdmin}
-            className="bfw-btn w-full rounded-md py-2 text-sm font-medium"
-          >
-            Admin panel
-          </button>
-        )}
         <button
           type="button"
           onClick={onSignOut}
