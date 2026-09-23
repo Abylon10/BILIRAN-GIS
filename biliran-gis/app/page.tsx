@@ -65,6 +65,15 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null)
   const [activated, setActivated] = useState(false)
 
+  // Login card's "Forgot password?" flow — swaps the card's form, doesn't
+  // navigate away. Shares `email` with the sign-in form above (whatever
+  // the user already typed there carries over) rather than a separate
+  // field. See handleForgotPassword below for what "send" actually does.
+  const [authMode, setAuthMode] = useState<'signin' | 'forgotPassword'>('signin')
+  const [resetSent, setResetSent] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -87,6 +96,12 @@ export default function HomePage() {
   // DashboardShell's municipality filter dropdown — picking one there
   // moves the map to it, same shape as selectedKey's barangay sync above.
   const [focusedMunicipality, setFocusedMunicipality] = useState<string | null>(null)
+  // Bumped on sign-out (handleSignOut below) so BiliranMap's view resets
+  // to the default whole-island framing even if the user got there by
+  // raw wheel/drag rather than picking a municipality — see resetToken's
+  // own doc comment in BiliranMap.tsx for why clearing selectedKey/
+  // focusedMunicipality alone isn't enough to guarantee that.
+  const [mapResetToken, setMapResetToken] = useState(0)
 
   const mapSlotRef = useRef<HTMLDivElement>(null)
   const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
@@ -270,6 +285,35 @@ export default function HomePage() {
     [email, password]
   )
 
+  // "Forgot password?" — entirely self-service, no admin/manual step.
+  // supabase.auth.resetPasswordForEmail sends the verification email
+  // itself (Supabase's own transactional email, not something this repo
+  // sends); redirectTo points at app/reset-password/page.tsx, which reads
+  // the recovery token the email link carries in its URL fragment.
+  // Supabase deliberately doesn't reveal whether the address has an
+  // account (avoids leaking which emails are registered), so this always
+  // resolves the same way regardless — the confirmation message below is
+  // worded to match that.
+  const handleForgotPassword = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault()
+      setResetError(null)
+      setResetLoading(true)
+
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      })
+      setResetLoading(false)
+
+      if (resetErr) {
+        setResetError('Could not send the reset email — try again.')
+        return
+      }
+      setResetSent(true)
+    },
+    [email]
+  )
+
   const handleSignOut = useCallback(async () => {
     await supabase.auth.signOut()
     window.localStorage.removeItem(LAST_LOGIN_KEY)
@@ -282,6 +326,12 @@ export default function HomePage() {
     setShowAdminPanel(false)
     setLoginMode('user')
     setListScrolled(false)
+    setSelectedKey(null)
+    setFocusedMunicipality(null)
+    setMapResetToken((t) => t + 1)
+    setAuthMode('signin')
+    setResetSent(false)
+    setResetError(null)
     setAuthState('needsLogin')
   }, [])
 
@@ -466,6 +516,7 @@ export default function HomePage() {
                 setListScrolled(false)
                 listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
               }}
+              resetToken={mapResetToken}
             />
           )}
         </div>
@@ -536,30 +587,96 @@ export default function HomePage() {
           </div>
 
           <h2 className="mt-2 text-center text-xl font-semibold" style={{ color: 'var(--text-strong)' }}>
-            {loginMode === 'admin' ? 'Welcome, Administrator' : 'Sign in'}
+            {authMode === 'forgotPassword'
+              ? 'Reset your password'
+              : loginMode === 'admin'
+                ? 'Welcome, Administrator'
+                : 'Sign in'}
           </h2>
           <p className="text-center mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Biliran Flood Watch</p>
 
-          {activated && (
+          {activated && authMode === 'signin' && (
             <p className="mt-4 rounded-md bg-[#E7F3E9] px-3 py-2 text-center text-sm text-[#2C5F3E]">
               Account activated — sign in below.
             </p>
           )}
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-            <Field label="Email" type="email" value={email} onChange={setEmail} valid={email.length > 0 && emailValid} />
-            <Field label="Password" type="password" value={password} onChange={setPassword} valid={password.length > 0 && passwordValid} />
+          {authMode === 'signin' ? (
+            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+              <Field label="Email" type="email" value={email} onChange={setEmail} valid={email.length > 0 && emailValid} />
+              <Field label="Password" type="password" value={password} onChange={setPassword} valid={password.length > 0 && passwordValid} />
 
-            {error && <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">{error}</p>}
+              {error && <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">{error}</p>}
 
-            <button
-              type="submit"
-              disabled={loading || !emailValid || !passwordValid}
-              className="bfw-btn w-full rounded-md py-2.5 text-sm font-semibold"
-            >
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={loading || !emailValid || !passwordValid}
+                className="bfw-btn w-full rounded-md py-2.5 text-sm font-semibold"
+              >
+                {loading ? 'Signing in…' : 'Sign in'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('forgotPassword')
+                  setResetError(null)
+                  setResetSent(false)
+                }}
+                className="block w-full text-center text-xs underline decoration-dotted underline-offset-2"
+                style={{ color: 'var(--text-soft)' }}
+              >
+                Forgot password?
+              </button>
+            </form>
+          ) : resetSent ? (
+            <div className="mt-6 space-y-5">
+              <p
+                className="rounded-md px-3 py-2.5 text-center text-sm"
+                style={{ background: 'rgba(10, 112, 117, 0.15)', color: 'var(--text-strong)' }}
+              >
+                If an account exists for <span className="font-medium">{email}</span>, a password reset
+                link is on its way — check your inbox and follow it to set a new password.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAuthMode('signin')}
+                className="bfw-btn w-full rounded-md py-2.5 text-sm font-semibold"
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="mt-6 space-y-5">
+              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>
+                Enter your account email — we&apos;ll send you a link to reset your password.
+              </p>
+              <Field label="Email" type="email" value={email} onChange={setEmail} valid={email.length > 0 && emailValid} />
+
+              {resetError && (
+                <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
+                  {resetError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={resetLoading || !emailValid}
+                className="bfw-btn w-full rounded-md py-2.5 text-sm font-semibold"
+              >
+                {resetLoading ? 'Sending…' : 'Send reset link'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuthMode('signin')}
+                className="block w-full text-center text-xs underline decoration-dotted underline-offset-2"
+                style={{ color: 'var(--text-soft)' }}
+              >
+                Back to sign in
+              </button>
+            </form>
+          )}
         </div>
       </div>
 
