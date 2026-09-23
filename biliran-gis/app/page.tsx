@@ -247,25 +247,54 @@ export default function HomePage() {
       className="bfw-root relative min-h-screen w-full overflow-hidden"
     >
       <style>{`
+        /*
+          Palette: a single 6-tone teal/slate family (design reference:
+          "Ashraf Works" color combo), used everywhere — the sky/sea/sun
+          backdrop, card chrome, and buttons — rather than the old separate
+          warm-sun/blue-sky scheme. Named by role below so the anchors
+          (#031716 darkest -> #6BA3BE lightest) stay traceable:
+            --p-darkest:  #031716   --p-dark:     #032F30
+            --p-mid-dark: #0A7075   --p-mid:      #0C969C
+            --p-light:    #6BA3BE  --p-slate:    #274D60
+          A few gradient stops (sky-bottom, sun core/glow) are tints mixed
+          toward white/transparent from these anchors, since the source
+          palette has no near-white tone of its own to soften into.
+        */
         .bfw-root[data-theme='light'] {
-          --sky-top: #6EC6E8; --sky-bottom: #DCEFF5;
-          --sea-top: #0B5C78; --sea-bottom: #2FA6B8;
-          --sun-glow: rgba(253, 200, 90, 0.55); --sun-core: #FFD873;
-          --cloud: rgba(255, 255, 255, 0.9);
-          --card-bg: rgba(255, 255, 255, 0.72); --card-border: rgba(255, 255, 255, 0.5);
-          --text-strong: #0B3654; --text-soft: #3E6664; --field-line: #C9DEDA;
+          --sky-top: #0C969C; --sky-bottom: #CFE4EC;
+          --sea-top: #0C969C; --sea-bottom: #6BA3BE;
+          --sun-glow: rgba(107, 163, 190, 0.5); --sun-core: #E7F1F5;
+          --cloud: rgba(231, 241, 245, 0.9);
+          --card-bg: rgba(231, 241, 245, 0.75); --card-border: rgba(107, 163, 190, 0.5);
+          --text-strong: #031716; --text-soft: #274D60; --field-line: #B7D2DE;
+          --header-bg: rgba(10, 112, 117, 0.85); --body-bg: rgba(231, 241, 245, 0.35);
+          --separator: #0C969C;
+          /* Buttons: lighter pairing in day mode (per the reference: day = lighter, night = darker). */
+          --btn-from: #6BA3BE; --btn-to: #0C969C; --btn-text: #FBFEFF;
         }
         .bfw-root[data-theme='dark'] {
-          --sky-top: #0B1830; --sky-bottom: #1B2C46;
-          --sea-top: #051E28; --sea-bottom: #0D3D48;
-          --sun-glow: rgba(230, 235, 255, 0.18); --sun-core: #EDEFF7;
-          --cloud: rgba(210, 220, 235, 0.35);
-          --card-bg: rgba(11, 24, 40, 0.6); --card-border: rgba(255, 255, 255, 0.12);
-          --text-strong: #F2F6F5; --text-soft: #A9C0C6; --field-line: rgba(255, 255, 255, 0.2);
+          --sky-top: #032F30; --sky-bottom: #031716;
+          --sea-top: #031716; --sea-bottom: #032F30;
+          --sun-glow: rgba(39, 77, 96, 0.45); --sun-core: #6BA3BE;
+          --cloud: rgba(39, 77, 96, 0.35);
+          --card-bg: rgba(3, 23, 22, 0.65); --card-border: rgba(107, 163, 190, 0.18);
+          --text-strong: #6BA3BE; --text-soft: #508198; --field-line: rgba(107, 163, 190, 0.25);
+          --header-bg: rgba(3, 47, 48, 0.9); --body-bg: rgba(3, 23, 22, 0.3);
+          --separator: #0C969C;
+          /* Buttons: darker pairing in night mode. */
+          --btn-from: #274D60; --btn-to: #031716; --btn-text: #FBFEFF;
         }
-        /* Revealed state darkens the sky toward a rainy mood — still theme-aware, so night mode stays dark and day mode stays an overcast daytime gray rather than collapsing to one fixed look. */
-        .bfw-root[data-theme='light'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #5C7A8C, #8FA6AE) !important; }
-        .bfw-root[data-theme='dark'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #3B5368, #223244) !important; }
+        /*
+          Day and night now live in two non-overlapping brightness bands
+          (day: mid-teal -> pale tint; night: near-black -> very-dark teal)
+          rather than sharing a middle tone, so the two themes stay clearly
+          distinct regardless of gradient angle/stop position — an earlier
+          version had night's sea-bottom equal to day's sea-top, which made
+          most of the visible gradient read as the same color in both
+          themes. Revealed state still darkens further toward a rainy mood.
+        */
+        .bfw-root[data-theme='light'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #274D60, #0A7075) !important; }
+        .bfw-root[data-theme='dark'][data-revealed='true'] .bfw-sky { background: linear-gradient(to bottom, #032F30, #031716) !important; }
         .bfw-root[data-revealed='true'] .bfw-sun { opacity: 0; }
         .bfw-root[data-revealed='true'] .bfw-rain { opacity: 1; }
 
@@ -279,7 +308,26 @@ export default function HomePage() {
         .bfw-dash { opacity: 0; transition: opacity 0.8s ease 0.4s; pointer-events: none; }
         .bfw-root[data-revealed='true'] .bfw-dash { opacity: 1; pointer-events: auto; }
 
-        .bfw-loading-cover { position: absolute; inset: 0; background: var(--sky-bottom, #DCEFF5); z-index: 50; transition: opacity 0.3s ease; }
+        .bfw-loading-cover { position: absolute; inset: 0; background: var(--sky-bottom, #CFE4EC); z-index: 50; transition: opacity 0.3s ease; }
+
+        /*
+          Shared "oval, not flat" button treatment (design reference: the
+          embossed pill swatches) — a diagonal light-to-dark gradient plus
+          an inset top highlight and a soft drop shadow for depth, instead
+          of the old flat var(--card-bg) fill. --btn-from/--btn-to swap
+          per theme (day lighter, night darker; see above), so the same
+          class reads correctly in both without a separate dark variant.
+        */
+        .bfw-btn {
+          background: linear-gradient(145deg, var(--btn-from), var(--btn-to));
+          color: var(--btn-text);
+          box-shadow: 0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25);
+          border: none;
+          transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+        }
+        .bfw-btn:hover:not(:disabled) { filter: brightness(1.08); }
+        .bfw-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 4px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+        .bfw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /*
           The one persistent map's wrapping box — fixed + viewport-relative,
@@ -386,8 +434,7 @@ export default function HomePage() {
           type="button"
           onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
           aria-label="Toggle day and night"
-          className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-colors"
-          style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+          className="bfw-btn shrink-0 rounded-full px-3 py-1.5 text-xs font-medium"
         >
           {theme === 'light' ? '☀ Day' : '☾ Night'}
         </button>
@@ -456,7 +503,7 @@ export default function HomePage() {
             <button
               type="submit"
               disabled={loading || !emailValid || !passwordValid}
-              className="w-full rounded-md bg-[#E8A33D] py-2.5 text-sm font-semibold text-[#0B3654] transition-colors hover:bg-[#DB962E] disabled:cursor-not-allowed disabled:opacity-50"
+              className="bfw-btn w-full rounded-md py-2.5 text-sm font-semibold"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
@@ -472,12 +519,22 @@ export default function HomePage() {
         layout position for the map-shell transition above even before
         sign-in.
       */}
-      <div className="bfw-dash absolute inset-0 z-10 flex flex-col p-6" data-revealed={revealed}>
-        <div className="mb-4">
-          <h1 className="text-lg font-semibold text-[#F2F6F5]">Biliran — flood risk dashboard</h1>
-          <p className="text-sm text-[#CFE0DD]">MDRRMO / barangay flood early-warning conditions</p>
+      <div className="bfw-dash absolute inset-0 z-10 flex flex-col" data-revealed={revealed}>
+        {/*
+          Header and body are two distinct color panels now, not one
+          uniformly-padded column — a solid header-bg band (border-bottom
+          in --separator marks the split) sitting above a separate
+          body-bg wash the dashboard content scrolls within. Both
+          per-theme (see the --header-bg/--body-bg/--separator variables
+          above); the header's own text stays a fixed light tint rather
+          than var(--text-strong), since --header-bg is deliberately dark
+          in both themes (a branded band, not a theme-following surface).
+        */}
+        <div className="shrink-0 border-b-2 px-6 py-4" style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)' }}>
+          <h1 className="text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
+          <p className="text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 p-6" style={{ background: 'var(--body-bg)' }}>
           <DashboardShell
             barangays={barangays}
             loadError={mapLoadError}

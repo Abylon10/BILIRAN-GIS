@@ -236,7 +236,7 @@ export default function ProfilePanel({
         <button
           type="submit"
           disabled={loading || savingFields}
-          className="w-full rounded-md bg-[#E8A33D] py-2 text-sm font-semibold text-[#0B3654] transition-colors hover:bg-[#DB962E] disabled:cursor-not-allowed disabled:opacity-50"
+          className="bfw-btn w-full rounded-md py-2 text-sm font-semibold"
         >
           {savingFields ? 'Saving…' : 'Save changes'}
         </button>

@@ -85,6 +85,51 @@ early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
 
+**Color system: one teal/slate palette, day/night as two brightness
+bands within it** (`app/page.tsx`, the `.bfw-root[data-theme='light'/
+'dark']` CSS custom-property blocks). Both the decorative sky/sea/sun/
+cloud backdrop and the "chrome" (card/button/text colors) are built from
+the same six anchors (design reference: a teal color-combo swatch) —
+`#031716`/`#032F30` (near-black/very-dark teal), `#0A7075`/`#0C969C`
+(dark-medium/medium-bright teal), `#6BA3BE` (light blue-teal), `#274D60`
+(slate blue) — rather than the app's old separate warm-sun/sky-blue
+scheme. Day and night are kept in **non-overlapping brightness bands**
+(day: `#0C969C` → pale tint; night: near-black → `#032F30`) rather than
+sharing a middle tone — an earlier pass had night's `--sea-bottom` equal
+to day's `--sea-top`, which made most of the visible gradient read as
+the same color in both themes since a 2-stop gradient's later portion is
+a solid fill, not a full traverse. A few gradient stops (sky-bottom, sun
+core/glow, the pale card-bg tint) are tints mixed toward white from these
+anchors, since the source palette has no near-white tone to soften into.
+
+New variables beyond the original `--card-bg`/`--card-border`/
+`--text-strong`/`--text-soft`/`--field-line` set: `--header-bg`/
+`--body-bg`/`--separator` (the dashboard's header band vs. content area,
+below), and `--btn-from`/`--btn-to`/`--btn-text` (the shared button
+gradient — lighter pairing in day mode, darker in night, per the design
+reference's own day/night button guidance).
+
+**`.bfw-btn`** (same `<style>` block) is the shared "oval, not flat"
+button treatment — a diagonal `linear-gradient(145deg, var(--btn-from),
+var(--btn-to))` fill plus an inset top highlight and a soft drop shadow,
+replacing the old flat `var(--card-bg)` fill on primary buttons. Applied
+to buttons meant to read as CTAs/controls (theme toggle, sign-in, the
+map's zoom `−`/`+` and "All municipalities" reset, Save/Create in
+`ProfilePanel`/`AdminInvitePanel`) — not to text-link-style actions
+(Cancel, Edit, the `Modal` `×` close) or the avatar-photo button, which
+stay in their existing understated styles since gradient-pill styling
+would misrepresent them as primary actions.
+
+**Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
+title row and the `DashboardShell` content area are now two separate
+color panels — a `--header-bg` band with a `--separator`-colored
+`border-b-2`, then a `--body-bg` wash beneath it — rather than one
+uniformly-padded column with no background of its own. The header's own
+title/subtitle text stays a fixed light tint (not `var(--text-strong)`),
+since `--header-bg` is deliberately dark in both themes (a branded band,
+not a theme-following surface) — using the theme-following text color
+would fail contrast in light mode, where `--text-strong` is near-black.
+
 **Compact map while the barangay list is scrolled.** Same `mapSlotRef`
 mechanism as above, reused rather than duplicated: `DashboardShell` owns a
 scroll listener on the barangay list's own scroll container that flips
