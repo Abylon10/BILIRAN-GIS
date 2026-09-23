@@ -85,6 +85,28 @@ early-fetch tradeoff as the map's own geojson — it's static public JSON,
 no auth needed) so the persistent map and `DashboardShell`'s list/detail
 panel share one fetch and one selection instead of each owning a copy.
 
+**Map resets to the default whole-island view on sign-out**
+(`handleSignOut` in `app/page.tsx`), not left wherever the previous
+session's pan/zoom happened to leave it. `handleSignOut` clears
+`selectedKey`/`focusedMunicipality` to `null` (both already lifted state)
+and bumps a new `mapResetToken` counter, passed to `<BiliranMap>` as
+`resetToken`. Clearing those two alone isn't sufficient on its own:
+`BiliranMap`'s `selectedKey`-sync block only calls `focusBarangay` when
+the new value is truthy (nothing to focus when it goes to `null`, so the
+view doesn't move), and its `focusedMunicipality`-sync block only resets
+the view on a non-null-to-null *transition* — a raw wheel-zoom/drag-pan
+never touches `focusedMunicipality` at all, so if the user got the map
+into some arbitrary zoomed state by hand rather than by picking a
+municipality, neither prop change would catch it. `resetToken` is a
+monotonically incrementing number rather than a boolean specifically so
+"reset" can fire again even if the map is already sitting wherever the
+*previous* sign-out already left it (a boolean flip back to the same
+value wouldn't register as a change); `BiliranMap` watches it with the
+same "sync-during-render, compare against previous value" pattern already
+used for `selectedKey`/`focusedMunicipality`, and unconditionally sets
+`view` back to the island-centered, `scale: 1` framing on change,
+regardless of current state.
+
 **Color system: one teal/slate palette, day/night as two brightness
 bands within it** (`app/page.tsx`, the `.bfw-root[data-theme='light'/
 'dark']` CSS custom-property blocks). Both the decorative sky/sea/sun/
@@ -158,6 +180,15 @@ escapes that stacking context entirely. The panel closes on outside
 click, `Escape`, window resize, or scroll (repositioning isn't tracked
 live — closing and requiring a re-open is simpler than keeping a fixed
 popover glued to a moving trigger).
+
+The panel has no `max-height`/scroll — deliberately: `MONITORED_MUNICIPALITIES`
+is a small, fixed, curated list (7 municipalities + "All"), so it's sized
+to show every option at once. Rows are smaller than `BarangayList`'s own
+(`text-xs`/`py-1.5` here vs. `text-sm`/`py-2.5` there) specifically so all
+8 fit on-screen without needing to scroll to see the rest — confirmed via
+Playwright that the panel's `scrollHeight` equals its `clientHeight` at
+this sizing. The border around each row still gives clear separation
+between options at the smaller size, just a more compact box.
 
 **Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
 title row and the `DashboardShell` content area are now two separate
@@ -301,6 +332,39 @@ disappear outright when compact.
 the login card reappears if the last successful login (tracked via
 `localStorage['bfw_last_login_date']`) wasn't today. Real access control is
 the Supabase session + RLS policies, not this check.
+
+**Forgot password is entirely self-service** — no admin/manual step
+anywhere in the flow. The login card's "Forgot password?" link swaps its
+form (`authMode: 'signin' | 'forgotPassword'` in `app/page.tsx`, sharing
+the same `email` state as the sign-in form) to an email-only form whose
+submit (`handleForgotPassword`) calls
+`supabase.auth.resetPasswordForEmail(email, { redirectTo:
+`${origin}/reset-password` })`. Supabase sends the verification email
+itself (its own transactional email, nothing this repo sends or
+templates) and deliberately doesn't reveal whether the address has an
+account, to avoid leaking which emails are registered — so the
+confirmation shown (`resetSent`) is worded to match that ambiguity
+("If an account exists for `<email>`…") rather than asserting success.
+
+The email's link lands on `app/reset-password/page.tsx`, a standalone
+route outside the login/dashboard state machine (deliberately simple: one
+fixed light palette, no day/night theming, same spirit as
+`app/activate/page.tsx`'s own standalone simplicity — though unlike that
+page's `/api/activate` server route, there's no server-side token
+handling here at all). The link's URL fragment carries a recovery token
+that `lib/supabase.ts`'s browser client parses and exchanges for a
+session automatically (`createClient`'s `detectSessionInUrl` defaults to
+`true`) before this page's own code runs; the page just calls
+`supabase.auth.getSession()` on mount; a session existing means the token
+was valid, going to a `'ready'` status. From there,
+`supabase.auth.updateUser({ password })` sets the new password, then the
+page immediately signs out — a recovery session isn't the app's normal
+signed-in state (no `bfw_last_login_date` set on this device for today),
+so signing out lets `/` fall through to its own ordinary login card
+rather than half-reusing this session as if the user had just signed in
+there. Landing on the page without a valid token (missing, already used,
+or expired) shows a "Link expired" state pointing back to `/` instead of
+a broken form.
 
 **Admin sign-in toggle drives the admin panel's only entry point, but is
 still not itself a security gate.** The login card's logo becomes a

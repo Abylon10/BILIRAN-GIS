@@ -74,6 +74,7 @@ export default function BiliranMap({
   onFocusMunicipality,
   compact = false,
   onCompactTap,
+  resetToken = 0,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -101,6 +102,19 @@ export default function BiliranMap({
   // next to it, and avoids trying to support precise pan/zoom at ~50% size.
   compact?: boolean
   onCompactTap?: () => void
+  // Forces the view back to the default whole-island framing, regardless
+  // of the current selectedKey/focusedMunicipality — a monotonically
+  // incrementing token (not a boolean) since app/page.tsx's handleSignOut
+  // needs "reset" to fire again even if the map is already sitting
+  // wherever the *previous* sign-out already left it. Neither of the
+  // selectedKey/focusedMunicipality sync blocks below does this on their
+  // own: a barangay selection changing to null doesn't call focusBarangay
+  // at all (nothing to focus), and focusedMunicipality only resets the
+  // view on a non-null-to-null *transition* — a raw wheel/drag pan never
+  // touches focusedMunicipality in the first place, so if the user zoomed
+  // by hand rather than by picking a municipality, neither prop change
+  // would catch it.
+  resetToken?: number
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -275,6 +289,22 @@ export default function BiliranMap({
         scale: 1,
       })
     }
+  }
+
+  // See resetToken's doc comment above — unconditionally forces the view
+  // back to the default whole-island framing on change, independent of
+  // selectedKey/focusedMunicipality (both of which app/page.tsx's
+  // handleSignOut also resets to null, but neither of those prop changes
+  // alone is guaranteed to reset the view — see why in that comment).
+  const [prevResetToken, setPrevResetToken] = useState(resetToken)
+  if (resetToken !== prevResetToken && islandBounds) {
+    setPrevResetToken(resetToken)
+    setInteracting(false)
+    setView({
+      cx: (islandBounds.minX + islandBounds.maxX) / 2,
+      cy: (islandBounds.minY + islandBounds.maxY) / 2,
+      scale: 1,
+    })
   }
 
   if (loadError) {

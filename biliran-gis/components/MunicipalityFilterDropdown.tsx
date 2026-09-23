@@ -117,7 +117,14 @@ export default function MunicipalityFilterDropdown({
           <ul
             ref={panelRef}
             role="listbox"
-            className="fixed z-[1000] flex max-h-72 flex-col gap-1.5 overflow-y-auto rounded-xl border p-2 shadow-2xl backdrop-blur-xl"
+            // No max-height/scroll — MONITORED_MUNICIPALITIES is a small,
+            // fixed, curated list (7 municipalities + "All", confirmed
+            // against lib/municipalities.ts), so the whole panel is sized
+            // to always show every option at once rather than requiring a
+            // scroll to see the rest of them (the reported problem with
+            // the native <select> this replaced, and still a problem even
+            // in this custom version at the original text-sm/py-2 sizing).
+            className="fixed z-[1000] flex flex-col gap-1 rounded-xl border p-2 shadow-2xl backdrop-blur-xl"
             style={{
               top: panelRect.top,
               left: panelRect.left,
@@ -151,7 +158,11 @@ function MunicipalityOption({
       <button
         type="button"
         onClick={onClick}
-        className="w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+        // Smaller than BarangayList's own rows (text-xs/py-1.5 here vs.
+        // text-sm/py-2.5 there) specifically so all 8 options are visible
+        // at once without scrolling — the border still gives each row a
+        // clearly separate, readable box, just a more compact one.
+        className="w-full rounded-lg border px-3 py-1.5 text-left text-xs transition-colors"
         style={{
           background: selected ? 'rgba(232, 163, 61, 0.28)' : 'var(--card-bg)',
           borderColor: selected ? '#E8A33D' : 'var(--card-border)',
