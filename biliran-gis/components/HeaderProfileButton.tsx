@@ -59,8 +59,13 @@ export default function HeaderProfileButton({
           margin-right: -14px;
           padding: 8px 22px 8px 12px;
           clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%);
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
+          /* Same oval/gradient treatment as .bfw-btn (app/page.tsx) — reuses
+             its --btn-from/--btn-to/--btn-text variables directly rather
+             than the class itself, since this tab needs its own clip-path
+             and width transitions .bfw-btn doesn't define. */
+          background: linear-gradient(145deg, var(--btn-from), var(--btn-to));
+          box-shadow: 0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25);
+          border: none;
           transition: max-width 0.4s cubic-bezier(0.22,1,0.36,1), opacity 0.25s ease;
         }
         .bfw-header-profile[data-revealed='true'] .bfw-header-profile-tab {
@@ -80,6 +85,8 @@ export default function HeaderProfileButton({
         .bfw-header-profile-avatar {
           width: 32px;
           height: 32px;
+          background: linear-gradient(145deg, var(--btn-from), var(--btn-to));
+          box-shadow: 0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25);
           transition: width 0.35s cubic-bezier(0.22,1,0.36,1), height 0.35s cubic-bezier(0.22,1,0.36,1);
         }
         .bfw-header-profile[data-revealed='true'] .bfw-header-profile-avatar {
@@ -92,20 +99,17 @@ export default function HeaderProfileButton({
       `}</style>
 
       <span className="bfw-header-profile-tab text-left">
-        <span className="block truncate text-xs font-semibold leading-tight" style={{ color: 'var(--text-strong)' }}>
+        <span className="block truncate text-xs font-semibold leading-tight" style={{ color: 'var(--btn-text)' }}>
           {displayName ?? 'Profile'}
         </span>
         {office && (
-          <span className="block truncate text-[10px] leading-tight" style={{ color: 'var(--text-soft)' }}>
+          <span className="block truncate text-[10px] leading-tight" style={{ color: 'var(--btn-text)', opacity: 0.85 }}>
             {office}
           </span>
         )}
       </span>
 
-      <span
-        className="bfw-header-profile-avatar relative shrink-0 overflow-hidden rounded-full border-2 shadow-lg backdrop-blur-md"
-        style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)' }}
-      >
+      <span className="bfw-header-profile-avatar relative shrink-0 overflow-hidden rounded-full">
         <Avatar url={avatarUrl} sizeClassName="h-full w-full" />
       </span>
     </button>

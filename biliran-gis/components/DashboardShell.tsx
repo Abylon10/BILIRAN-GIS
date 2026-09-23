@@ -3,11 +3,14 @@
 // Replaces the .bfw-dash placeholder in app/page.tsx. Built from what
 // barangay_dashboard_data.json + public/data/geo/*.geojson actually contain
 // (see lib/dashboardData.ts, lib/geo.ts, CLAUDE.md). Still deliberately does
-// NOT include a hydrograph chart or FSI factor breakdown — those need
+// NOT include a real hydrograph chart or FSI factor breakdown — those need
 // per-basin time-series/factor data that isn't part of this repo's data.
 // Building fake versions of those would mislead the officials this app is
-// for. The map, though, is real: actual barangay/municipality polygons, not
-// a placeholder — see BiliranMap.tsx.
+// for. The compact layout below does reserve a labeled hydrograph corner
+// (HYDROGRAPH_UNAVAILABLE_LABEL) so the spot exists and reads honestly as
+// "not yet modeled" rather than either fabricating a curve or looking
+// broken/missing. The map, though, is real: actual barangay/municipality
+// polygons, not a placeholder — see BiliranMap.tsx.
 //
 // The map defaults to the whole-island view, unzoomed — it never
 // auto-focuses a municipality or barangay on load, even though the LIVE
@@ -48,6 +51,11 @@ const SCROLL_DEBOUNCE_MS = 100
 // against the real layout, not a pixel-perfect spec.
 const COMPACT_MAP_WIDTH = 192
 const COMPACT_MAP_HEIGHT = 144
+
+// Not a chart — see the file header comment. This corner exists so the
+// compact layout has a labeled, honest placeholder instead of either a
+// fabricated curve or an empty gap where a hydrograph would eventually go.
+const HYDROGRAPH_UNAVAILABLE_LABEL = 'No basin flow data available yet'
 
 export default function DashboardShell({
   barangays,
@@ -203,6 +211,32 @@ export default function DashboardShell({
                 ...(listScrolled ? { gridColumn: 1, gridRow: 1 } : {}),
               }}
             />
+
+            {/*
+              Directly below the compact map (and its FSI legend, which
+              lives inside the map's own box) — the grid cell at column 1,
+              row 2 is otherwise empty once compact. Deliberately NOT a
+              chart (see the file header comment) — dashed border + muted
+              text mark it as a reserved-but-unavailable feature, not a
+              broken one.
+            */}
+            {listScrolled && (
+              <div
+                className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-2 py-1 text-center"
+                style={{
+                  gridColumn: 1,
+                  gridRow: 2,
+                  width: COMPACT_MAP_WIDTH,
+                  borderColor: 'var(--card-border)',
+                  color: 'var(--text-soft)',
+                  opacity: 0.75,
+                }}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide">Hydrograph</span>
+                <span className="text-[10px] leading-tight">{HYDROGRAPH_UNAVAILABLE_LABEL}</span>
+              </div>
+            )}
+
             <div
               className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_320px]"
               style={listScrolled ? { gridColumn: 2, gridRow: '1 / span 2' } : undefined}
@@ -211,7 +245,12 @@ export default function DashboardShell({
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
                   Barangays by flood susceptibility, highest first
                 </h3>
-                <BarangayList barangays={filtered} selectedKey={selectedKey} onSelect={(b) => onSelectKey(b.key)} />
+                <BarangayList
+                  barangays={filtered}
+                  selectedKey={selectedKey}
+                  onSelect={(b) => onSelectKey(b.key)}
+                  onSelectMunicipality={onMunicipalityChange}
+                />
               </div>
               <div className="hidden md:block">
                 <BarangayDetailPanel barangay={selected} />
