@@ -960,16 +960,25 @@ function Legend({ compact = false }: { compact?: boolean }) {
     )
   }
 
+  // Left edge, vertically centered (was bottom-left corner) — stacked in
+  // a column rather than the old horizontal row, since a row at this
+  // size wouldn't fit the map's width. Dots are ~400% of the old 8px
+  // size; text is a smaller, deliberate bump (10px -> 14px, not a
+  // literal 400-500%) so labels stay legible/proportionate next to the
+  // map rather than dominating it. rounded-2xl (not rounded-full, unlike
+  // the compact pill above) since a giant pill around a tall column of
+  // varying-width rows reads oddly — a large rounded rectangle matches
+  // this app's other enlarged card-style chrome instead.
   return (
     <div
-      className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      className="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col items-start gap-4 rounded-2xl border px-5 py-4 text-sm shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
     >
       {stops.map(([label, score]) => (
-        <span key={label} className="flex items-center gap-1">
+        <span key={label} className="flex items-center gap-3">
           <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ background: fsiScoreColor(score), boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
+            className="inline-block h-8 w-8 shrink-0 rounded-full"
+            style={{ background: fsiScoreColor(score), boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }}
             aria-hidden
           />
           {label}

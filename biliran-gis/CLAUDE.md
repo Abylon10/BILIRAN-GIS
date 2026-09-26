@@ -264,6 +264,29 @@ size variant, and its `onClick` `stopPropagation()`s when compact so
 resetting the view doesn't also read as the tap-to-expand gesture on the
 `<svg>` underneath it.
 
+**Legend (full-size variant) is left-edge, vertically centered, and
+~4x larger** — moved off the bottom-left corner because it read as too
+small/hard to parse there. `absolute left-3 top-1/2 -translate-y-1/2`,
+`flex flex-col` (a vertical stack of the five severity rows) instead of
+the old horizontal `flex items-center` row, since a row at this size
+wouldn't fit the map's width. Dots grew from `h-2 w-2` (8px) to `h-8 w-8`
+(32px, ~400%); text grew from `text-[10px]` to `text-sm` (14px) —
+deliberately a much smaller bump than the dots', so labels stay legible
+next to the map rather than a literal 4-5x blow-up (which would put
+~45px-tall labels next to a mid-sized map and dominate it). `rounded-2xl`
+now, not `rounded-full` — a giant pill wrapped around a tall column of
+varying-width rows read oddly, unlike the compact variant's small dot row
+where a pill still makes sense. The `compact` (dots-only, tiny thumbnail)
+variant is untouched — still `absolute bottom-1.5 left-1.5`, still tiny —
+there's no room for anything close to this size in the 192×144px compact
+map box, and it wasn't asked for. No collision-avoidance logic added for
+the taller stack against the top-left reset button/top-right
+`WeatherBadge`/bottom-right `ZoomControls` — confirmed via screenshot
+there's a comfortable gap at typical map heights, since each of those
+overlays is independently `absolute`-positioned into its own corner-ish
+region (see the `compact` prop paragraph above) rather than sharing a
+layout that would need to shrink around the enlarged legend.
+
 **Fill-the-middle layout, once compact.** As soon as `listScrolled` is
 true — no separate gesture required (an earlier version gated this
 behind a swipe-down pointer gesture; dropped because it only armed on
@@ -591,6 +614,7 @@ no longer just a self-validated guess.
 - Barangays are ranked by continuous `mean_fsi_score`, never by discrete FSI class (class-based ranking was tested and rejected — it collapses most barangays into one bucket)
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average
+- Severity colors for Moderate/High were relightened/reddened (`#D9B23C`/`#E8A33D` → `#F2D24D`/`#E8592D`) for readability — changed in the one shared pair of functions (`urgencyTierColor()` and `fsiScoreColor()`'s `SCORE_COLOR_STOPS`, both `lib/dashboardData.ts`) that colors the map polygons, the `Legend`, and the `BarangayList`/`BarangayDetailPanel` severity dots, so all four stay in sync rather than the legend silently drifting from what's actually drawn on the map
 
 ## Dashboard UI
 
@@ -958,6 +982,6 @@ known open bug is source-level UTF-8 double-encoding in
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
 - Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
-- The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
+- The "Invitations" admin panel now has create/list/edit/revoke (`AdminInvitePanel.tsx`, `app/api/admin/invite/[id]/route.ts`'s `PATCH`/`DELETE`) — this line previously said create/list only, which went stale once edit+revoke shipped without updating it. The one still-missing piece is **expire-early**: an invite's `expires_at` can only be set at creation (`expiresInDays`), not shortened afterward. Broader admin-panel direction (user management for already-activated accounts, an audit log of admin actions) is an open discussion, not yet designed.
 - None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
 - The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.
