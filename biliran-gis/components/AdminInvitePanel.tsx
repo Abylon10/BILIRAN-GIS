@@ -5,7 +5,11 @@
 // in the app could actually create an invitation_codes row, so /activate
 // had no way to ever be reached for a real user. Started as create/list
 // only; edit and revoke (app/api/admin/invite/[id]/route.ts) came later,
-// both refusing to touch an already-redeemed invitation.
+// both refusing to touch an already-redeemed invitation. The edit-row's
+// expiry field (added later still) lets an admin set/shorten/extend/clear
+// an existing unredeemed invite's expires_at — app/api/activate/route.ts's
+// existing expiry check (a plain Date comparison) needs no changes to
+// honor whatever this sets.
 
 'use client'
 
@@ -21,6 +25,20 @@ interface Invitation {
   redeemed: boolean
   expires_at: string | null
   redeemed_at: string | null
+}
+
+// Supabase returns expires_at as an ISO 8601 UTC string, but
+// <input type="datetime-local"> needs local "YYYY-MM-DDTHH:mm" — these
+// convert between the two. Empty string <-> null, both meaning "no
+// expiry."
+function toDatetimeLocalValue(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function fromDatetimeLocalValue(value: string): string | null {
+  return value ? new Date(value).toISOString() : null
 }
 
 async function getToken(): Promise<string | null> {
@@ -49,6 +67,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editEmail, setEditEmail] = useState('')
   const [editOffice, setEditOffice] = useState('')
+  const [editExpiresAt, setEditExpiresAt] = useState('')
   const [rowError, setRowError] = useState<string | null>(null)
   const [rowBusyId, setRowBusyId] = useState<number | null>(null)
 
@@ -115,6 +134,7 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
     setEditingId(inv.id)
     setEditEmail(inv.email)
     setEditOffice(inv.office)
+    setEditExpiresAt(toDatetimeLocalValue(inv.expires_at))
   }
 
   function cancelEdit() {
@@ -138,7 +158,11 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ email: editEmail, office: editOffice }),
+      body: JSON.stringify({
+        email: editEmail,
+        office: editOffice,
+        expires_at: fromDatetimeLocalValue(editExpiresAt),
+      }),
     })
     const data = await res.json()
     setRowBusyId(null)
@@ -269,6 +293,28 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
                       className="w-full rounded border px-2 py-1 text-xs outline-none"
                       style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
                     />
+                    <label className="block">
+                      <span className="text-[10px]" style={{ color: 'var(--text-soft)' }}>Expires</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="datetime-local"
+                          value={editExpiresAt}
+                          onChange={(e) => setEditExpiresAt(e.target.value)}
+                          className="w-full rounded border px-2 py-1 text-xs outline-none"
+                          style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+                        />
+                        {editExpiresAt && (
+                          <button
+                            type="button"
+                            onClick={() => setEditExpiresAt('')}
+                            className="shrink-0 text-[10px] underline decoration-dotted underline-offset-2"
+                            style={{ color: 'var(--text-soft)' }}
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </label>
                     <div className="flex justify-end gap-2 pt-0.5">
                       <button
                         type="button"
@@ -292,31 +338,38 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
                 )
               }
               return (
-                <li key={inv.id} className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
-                  <span className="truncate">{inv.email} · {inv.office}</span>
-                  {inv.redeemed ? (
-                    <span className="font-mono shrink-0">redeemed</span>
-                  ) : (
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="font-mono">{inv.code}</span>
-                      <button
-                        type="button"
-                        onClick={() => startEdit(inv)}
-                        disabled={busy}
-                        className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => revoke(inv.id)}
-                        disabled={busy}
-                        className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        style={{ color: '#C0392B' }}
-                      >
-                        {busy ? '…' : 'Revoke'}
-                      </button>
-                    </span>
+                <li key={inv.id} className="space-y-0.5">
+                  <div className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
+                    <span className="truncate">{inv.email} · {inv.office}</span>
+                    {inv.redeemed ? (
+                      <span className="font-mono shrink-0">redeemed</span>
+                    ) : (
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="font-mono">{inv.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(inv)}
+                          disabled={busy}
+                          className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => revoke(inv.id)}
+                          disabled={busy}
+                          className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          style={{ color: '#C0392B' }}
+                        >
+                          {busy ? '…' : 'Revoke'}
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  {!inv.redeemed && (
+                    <div className="text-[10px]" style={{ color: 'var(--text-soft)', opacity: 0.75 }}>
+                      {inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleString()}` : 'No expiry'}
+                    </div>
                   )}
                 </li>
               )

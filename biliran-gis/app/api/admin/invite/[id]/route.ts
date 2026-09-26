@@ -3,10 +3,18 @@
 // Admin-only: edit or revoke a single invitation code. Sibling to
 // app/api/admin/invite/route.ts (create/list) — split out because these
 // two operate on one row by id rather than the collection. Both refuse to
-// touch a redeemed invitation: editing a used code's email/office after
-// the fact would misrepresent what was actually redeemed, and revoking
-// (deleting) one would erase real redemption history. An unredeemed code
-// has no such history yet, so both are safe there.
+// touch a redeemed invitation: editing a used code's email/office/expiry
+// after the fact would misrepresent what was actually redeemed, and
+// revoking (deleting) one would erase real redemption history. An
+// unredeemed code has no such history yet, so both are safe there.
+//
+// PATCH's expires_at can be set to any value (including extending it, or
+// clearing it back to no-expiry) — not restricted to only shortening.
+// The admin already has full edit/revoke control over unredeemed rows,
+// so an arbitrary editable expiry isn't a meaningful new privilege.
+// app/api/activate/route.ts's existing expiry check (a plain Date
+// comparison against expires_at) needs no changes to honor whatever this
+// sets.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
@@ -40,14 +48,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: guard.error }, { status: guard.status })
   }
 
-  const { email, office } = await req.json()
+  const { email, office, expires_at } = await req.json()
   if (!email || !office) {
     return NextResponse.json({ error: 'Email and office are required.' }, { status: 400 })
   }
+  // expires_at: an ISO string to set/shorten/extend it, or null to clear
+  // it (no expiry) — the client always sends one or the other explicitly
+  // (see AdminInvitePanel.tsx). Any other value falls back to null
+  // rather than erroring, same lenient style as expiresInDays in the
+  // sibling create route.
+  const nextExpiresAt = typeof expires_at === 'string' ? expires_at : null
 
   const { data, error } = await supabaseAdmin
     .from('invitation_codes')
-    .update({ email, office })
+    .update({ email, office, expires_at: nextExpiresAt })
     .eq('id', id)
     .select('id, code, email, office, expires_at')
     .single()
