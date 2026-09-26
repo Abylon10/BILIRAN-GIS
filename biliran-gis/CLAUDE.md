@@ -922,8 +922,6 @@ asked why they're missing.
 **Deliberately still not built**, because the data honestly doesn't exist in
 this repo — building fake versions would mislead the officials this app is
 for:
-- **HAND/TWI/LC factor breakdown**: only the combined `mean_fsi_score` is in
-  the data, not the individual factor contributions.
 - **"Precipitation Overview" hyetograph**: no rainfall time series is
   surfaced per-barangay in the UI yet (the raw `rainfall_mm_hr` array is
   in `public/data/basin_hydrographs.json` per basin — see below — but
@@ -999,6 +997,67 @@ own FSI block, not the map's `Legend` chip, so a placeholder sitting
 beside the map rather than below the barangay's actual FSI info wasn't
 read as satisfying the request at all.
 
+**HAND/TWI/LC/rainfall factor breakdown is real now too.**
+`components/BarangayDetailPanel.tsx` lazily fetches
+`public/data/fsi_factors.json` (via `lib/fsiFactorData.ts`) and renders a
+four-row bar breakdown (HAND inverted, TWI, LCLU runoff score, 6-hour
+rainfall forecast, each 0-1) below the hydrograph. Unlike the hydrograph,
+there's no dedicated placeholder for missing data here — it's purely
+additive UI that only appears once fetched, matching this file's
+"supplementary, not a replacement" framing for `fsi_recomputed`.
+
+**Provenance and how this was built** (from the same Google Drive project
+the user shared, a separate, earlier — Sept 7-11 — single-watershed FSI
+pipeline than the Sept 19-21 island-wide hydrograph one above):
+`compute_fsi.py`'s own real formula (confirmed by reading it directly) is
+exactly this repo's already-documented `FSI = 0.30·HAND(inverted) +
+0.30·TWI + 0.20·LCLU + 0.20·Rainfall`, each factor min-max normalized
+**globally across the island**, not per-barangay. `fsi_factors.json` was
+built by recomputing that same normalization from the four aligned input
+rasters and reprojected barangay polygons (Python + `rasterio`/`shapely`/
+`pyproj`, one-off, not checked into this repo), then zonal-averaging each
+normalized layer per barangay.
+
+**Two inputs couldn't be downloaded at their canonical size** (the
+Drive MCP connector used to fetch them hard-fails above ~6MB; both the
+canonical `twi_aligned.tif` and `rainfall_aligned.tif` are ~7MB and
+never transferred, retried repeatedly) **and were reconstructed instead**:
+- **Rainfall**: `fetch_rainfall.py`'s own source confirms
+  `rainfall_aligned.tif` is nothing but a 7-point (one per monitored
+  municipality, Maripipi excluded) inverse-distance-weighted
+  interpolation of a 6-hour forecast total, read from the tiny (14KB)
+  `rainfall_timeseries.json`. Recomputing this IDW surface directly from
+  that JSON (same formula, same municipality coordinates) needed no
+  raster download at all.
+- **TWI**: `compute_twi.py` needs flow accumulation (`drain_cell.tif`,
+  16.7MB, also undownloadable) and slope (`slope_aligned.tif`, ~7MB).
+  Substituted **`flow_accum_aligned.tif`** (2.3MB, confirmed identical
+  grid/transform/CRS to the reference `hand_aligned.tif`) for
+  `drain_cell.tif` — this is an **older (Sept 8) artifact than the
+  pipeline's actual Sept 10 `drain_cell.tif`**, so it may not be
+  bit-identical to the canonical flow accumulation, though both come from
+  the same `r.watershed` run on the same DEM. Slope was rebuilt by
+  reprojecting the original, smaller (4.15MB) `slope_utm51n.tif` (EPSG:4326)
+  onto the reference grid with bilinear resampling — the exact same
+  operation `align_fsi_inputs.py`'s `warp_raster()` does to produce the
+  real `slope_aligned.tif`, just run here instead of read pre-built.
+
+**Validated, not just assumed**: the recomputed per-barangay
+`fsi_recomputed` (the weighted recombination of the four factor means)
+was cross-checked against the 115 barangays' authoritative
+`mean_fsi_score` in `barangay_dashboard_data.json` — **correlation 0.85,
+mean signed difference −0.0003 (unbiased), mean absolute difference
+0.038** on the 0-1 scale, largest single outlier +0.23 (San Roque,
+Naval). That level of agreement is consistent with the known
+approximations above (stale flow-accumulation raster, IDW-reconstructed
+rainfall, possibly a different `all_touched` rasterization rule than the
+original pipeline used) rather than a broken join — but it means
+`fsi_factors.json`'s numbers are a good-faith approximation, not a
+byte-for-byte match to whatever the original pipeline would have
+produced with its own canonical rasters. `mean_fsi_score` remains the
+one authoritative score everywhere else in this app; nothing here
+changes it.
+
 **Theme**: the dashboard's post-login background is theme-aware, not one
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
@@ -1032,7 +1091,7 @@ names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`) — FSI factor breakdown, a dedicated precipitation/hyetograph view, interactive Simulation Mode, and full per-basin FSI recompute are still blocked/not built — see "Deliberately still not built" above.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), and the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above) — a dedicated precipitation/hyetograph view, interactive Simulation Mode, and full per-basin FSI recompute are still not built — see "Deliberately still not built" above.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
