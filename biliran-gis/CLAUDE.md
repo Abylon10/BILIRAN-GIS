@@ -922,31 +922,74 @@ asked why they're missing.
 **Deliberately still not built**, because the data honestly doesn't exist in
 this repo — building fake versions would mislead the officials this app is
 for:
-- **Hydrograph chart** (`time_hours` vs. `Q`): needs a Q-vs-time series per
-  basin; only single crossing-time scalars exist per barangay.
 - **HAND/TWI/LC factor breakdown**: only the combined `mean_fsi_score` is in
   the data, not the individual factor contributions.
-- **"Contributing Basins" tiles / per-basin curves**: `basin_ids` is just a
-  list of numeric IDs, no names or curves.
-- **"Precipitation Overview" hyetograph**: no rainfall time series in this
-  data.
+- **"Precipitation Overview" hyetograph**: no rainfall time series is
+  surfaced per-barangay in the UI yet (the raw `rainfall_mm_hr` array is
+  in `public/data/basin_hydrographs.json` per basin — see below — but
+  nothing renders it as its own chart).
+- **Interactive Simulation Mode** (admin-adjustable min/max rain + storm
+  duration, live recompute): the exact formula and hyetograph-shaping
+  logic (see `hydrographForBarangay`/pipeline notes below) are simple
+  enough to reimplement client-side, but no UI for it exists yet.
+- **Full per-basin FSI recompute** (rainfall + HAND/TWI/LC combined) is
+  still blocked on raster-to-barangay aggregation and the original design
+  storm's rainfall baseline; `mean_fsi_score` stays a static pipeline
+  output.
 
-Add the corresponding fields to the pipeline's JSON output before building
-any of these.
+Add the corresponding fields/UI before building any of these.
 
-**Hydrograph corner is a labeled placeholder, not a chart.**
-`components/BarangayDetailPanel.tsx` renders a small dashed-border,
-muted-opacity card reading "Hydrograph — No basin flow data available
-yet" directly below the FSI block (dot + susceptibility label + score) —
-"below the FSI corner," matching the same wording used for the existing
-FSI block. This is a deliberate, honest "not yet modeled" placeholder —
-asked of and confirmed by the user rather than either fabricating a curve
-or silently omitting the corner — not a step toward a fake chart; it
-still needs the same pipeline data as the real "Hydrograph chart" bullet
-above before it can become one. Since `BarangayDetailPanel` is the one
-component used for both the sidebar (`hidden md:block`) and the inline
-mobile (`md:hidden`) detail views, this single placeholder covers both
-without extra wiring.
+**Hydrograph corner is a real chart now, for 113 of 115 barangays.**
+`components/BarangayDetailPanel.tsx` lazily fetches
+`public/data/basin_hydrographs.json` (via `lib/hydrographData.ts`'s
+`loadBasinHydrographs()`/`hydrographForBarangay()`) and renders a
+hand-rolled inline SVG polyline chart of basin discharge (`Q`, m³/s) vs.
+time for the selected barangay's largest-overlap-area basin — a barangay
+can touch several basins (up to 36 island-wide); showing only the
+primary one is a documented simplification, not hidden data. The chart is
+labeled with the basin id, its peak discharge, and the real storm
+assumption (`Modeled from a single synthetic {duration}-hour design
+storm, {peak}mm/hr peak.`, pulled from the data's own `storm_params`, not
+hardcoded).
+
+The other 2 of the 115 official barangays — **Kawayan/Burabod** and
+**Kawayan/Poblacion** — keep the original dashed-border, muted-opacity
+"Hydrograph — No basin flow data available for this barangay" placeholder,
+unchanged. This is not a data gap: real polygon-to-raster overlap found
+**zero** pixel intersection between either barangay and any basin (see
+`corrections_applied` in the source JSON below), so there's honestly no
+river-risk curve to show for them — the placeholder is the correct,
+honest state, same as it always was for every barangay before this data
+existed. Since `BarangayDetailPanel` is the one component used for both
+the sidebar (`hidden md:block`) and the inline mobile (`md:hidden`)
+detail views, this covers both without extra wiring.
+
+**Provenance of `public/data/basin_hydrographs.json`**: built (one-off,
+not checked into this repo as a script) from three files the user
+generated and shared via Google Drive — island-wide `r.watershed` basin
+delineation at `threshold=200` (2,235 raw basins), Kirpich (1940)
+time-of-concentration per basin (`A = 1/Tc`, slope converted from degrees
+via `tan()`, not used directly — an earlier, ~4-5x version of this had a
+unit-conversion bug), and each of the 115 official barangays matched to
+its overlapping basin(s) by actual polygon-to-raster overlap (not
+centroids or name-matching). Only **434 of 2,235** delineated basins
+actually overlap a barangay and have a valid positive reservoir
+coefficient; those are the ones embedded in this file, each with a full
+72-point (`0h`→`~5.9h`, 5-minute step) hydrograph from a single symmetric
+triangular design storm (`peak_mm_hr: 50`, `duration_hours: 2`).
+
+**Hard constraint for future re-imports**: the Drive folder has **two
+non-identical basin delineation runs** whose `basin_id` numbers collide
+but represent different geometries (confirmed by direct value comparison
+— e.g. basin 864 is `A=2.5021` in one run, `A=4.0809` in the other). Only
+the `island_wide_output` folder's files (`island_barangay_basin_map_FIXED
+.json`, `island_basin_runoff.json`, `island_basin_runoff_summary.json` —
+all dated 2026-09-21, explicitly `_FIXED`-suffixed, carrying their own
+`corrections_applied` field) are canonical. The older, top-level
+`island_barangay_basin_map_2235_CORRECT.json` is a superseded draft
+despite its name — it's actually a mislabeled per-basin scalar summary
+with no barangay linkage at all, not a barangay map. Never re-import
+from the older set.
 
 An earlier version of this placeholder lived in `DashboardShell.tsx`'s
 compact-map grid instead (the cell directly below the compact map
@@ -968,16 +1011,28 @@ provenance or oddities, not for changes here: GDAL+numpy2.x incompatible
 (pin `numpy<2`); `numba`/`pysheds`/`rasterio` blocked by Windows Smart App
 Control on the dev machine (GRASS via QGIS Processing used instead);
 `r.watershed`'s "basin" output is small local sub-catchments, not a true
-cumulative watershed; explicit-Euler numerical schemes need `A > 2/dt` to
-stay stable (the project switched to the exact analytical formula
-`Q2 = Q1·e^(-AΔt) + R·(1-e^(-AΔt))` for this reason — a ~3-5% shift down
-from earlier Euler-computed peak Q values for the 6 named rivers); a
-known open bug is source-level UTF-8 double-encoding in
-`barangay_biliran.geojson` (affects names like "Capiñahan," "Santo Niño").
+cumulative watershed — reused island-wide (at `threshold=200`, 2,235
+basins) for the per-basin hydrograph data described above, the opposite
+of its original rejected use for finding one big river; explicit-Euler
+numerical schemes need `A > 2/dt` to stay stable (the project switched to
+the exact analytical formula `Q2 = Q1·e^(-AΔt) + R·(1-e^(-AΔt))` for this
+reason — first found as a ~3-5% shift down from earlier Euler-computed
+peak Q values for the original 6 named rivers, then found to be load-
+bearing rather than cosmetic once the same pipeline was extended
+island-wide: the Euler approximation produced physically impossible
+peak-Q values, exceeding the input storm's own peak, for 354 of the 2,235
+basins); other bugs found and fixed during that same island-wide
+expansion: a fake "basin" that was actually unassigned NoData pixels
+misread as real, a barangay-name collision that silently dropped 5
+barangays from an earlier join attempt, and three files at one point
+built from two incompatible basin rasters (see the hard constraint on
+`_FIXED` vs. `_2235_CORRECT` files above); a known open bug is
+source-level UTF-8 double-encoding in `barangay_biliran.geojson` (affects
+names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart, FSI factor breakdown, and precipitation view are blocked on pipeline data this repo doesn't have — see "Deliberately still not built" above.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`) — FSI factor breakdown, a dedicated precipitation/hyetograph view, interactive Simulation Mode, and full per-basin FSI recompute are still blocked/not built — see "Deliberately still not built" above.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
