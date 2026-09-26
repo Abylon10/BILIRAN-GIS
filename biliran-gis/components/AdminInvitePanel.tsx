@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Modal } from '@/components/ProfilePanel'
+import UserDashboardModal from '@/components/UserDashboardModal'
 
 interface Invitation {
   id: number
@@ -55,12 +56,19 @@ async function fetchInvitations(token: string): Promise<Invitation[]> {
   return data.invitations ?? []
 }
 
-export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
+export default function AdminInvitePanel({
+  onClose,
+  theme,
+}: {
+  onClose: () => void
+  theme: 'light' | 'dark'
+}) {
   const [email, setEmail] = useState('')
   const [office, setOffice] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<Invitation | null>(null)
+  const [showUserDashboard, setShowUserDashboard] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
 
   // Inline edit state — at most one row editable at a time.
@@ -203,7 +211,16 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
+    <>
     <Modal title="Invitations" onClose={onClose}>
+      <button
+        type="button"
+        className="bfw-btn mb-4 w-full rounded-md py-2 text-sm font-semibold"
+        onClick={() => setShowUserDashboard(true)}
+      >
+        Open User Dashboard
+      </button>
+
       {/*
         Entrance-only (a full expand/collapse height animation would fight
         with this list's own overflow-y-auto scroll) — same easing family
@@ -378,5 +395,9 @@ export default function AdminInvitePanel({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+    {showUserDashboard && (
+      <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
+    )}
+    </>
   )
 }

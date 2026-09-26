@@ -331,10 +331,13 @@ export function Modal({
   title,
   onClose,
   children,
+  maxWidthClassName = 'max-w-sm',
 }: {
   title: string
   onClose: () => void
   children: React.ReactNode
+  /** Defaults to this modal's original width — pass a wider class (e.g. "max-w-4xl") for content that needs more room. */
+  maxWidthClassName?: string
 }) {
   // Mounted/unmounted entirely by the caller's own conditional (e.g.
   // `{showProfile && <ProfilePanel/>}` in app/page.tsx), so an exit
@@ -380,7 +383,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className="bfw-modal-dialog w-full max-w-sm rounded-2xl border p-6 shadow-2xl backdrop-blur-xl"
+        className={`bfw-modal-dialog w-full ${maxWidthClassName} rounded-2xl border p-6 shadow-2xl backdrop-blur-xl`}
         style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
       >
         <div className="mb-4 flex items-center justify-between">

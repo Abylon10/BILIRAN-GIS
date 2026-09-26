@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react'
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
 import { loadFsiFactors, factorsForBarangay, type BarangayFactors } from '@/lib/fsiFactorData'
+import DischargeChart from '@/components/DischargeChart'
 
 interface HydrographEntry {
   key: string
@@ -116,7 +117,13 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
       </div>
 
       {isCurrent && entry?.hydrograph ? (
-        <HydrographChart hydrograph={entry.hydrograph} stormParams={entry.stormParams} />
+        <DischargeChart
+          timeHours={entry.hydrograph.timeHours}
+          q={entry.hydrograph.q}
+          title="Hydrograph"
+          metaLabel={`basin ${entry.hydrograph.basinId} · peak ${Math.max(...entry.hydrograph.q, 0.001).toFixed(1)} m³/s`}
+          captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
+        />
       ) : (
         <div
           className="flex items-center gap-3 rounded-lg border border-dashed px-3 py-2"
@@ -153,73 +160,6 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
         Times are hours into a modeled design storm, not a live countdown — see the
         banner above for the honesty note on this.
       </p>
-    </div>
-  )
-}
-
-function HydrographChart({
-  hydrograph,
-  stormParams,
-}: {
-  hydrograph: PrimaryHydrograph
-  stormParams: StormParams
-}) {
-  const width = 280
-  const height = 90
-  const padLeft = 28
-  const padBottom = 14
-  const padTop = 6
-  const plotW = width - padLeft
-  const plotH = height - padBottom - padTop
-
-  const maxTime = hydrograph.timeHours[hydrograph.timeHours.length - 1] || 1
-  const maxQ = Math.max(...hydrograph.q, 0.001)
-
-  const points = hydrograph.timeHours
-    .map((t, i) => {
-      const x = padLeft + (t / maxTime) * plotW
-      const y = padTop + plotH - (hydrograph.q[i] / maxQ) * plotH
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-
-  const peakQ = maxQ.toFixed(1)
-
-  return (
-    <div
-      className="flex flex-col gap-2 rounded-lg border px-3 py-2"
-      style={{ borderColor: 'var(--card-border)' }}
-    >
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-          Hydrograph
-        </div>
-        <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
-          basin {hydrograph.basinId} · peak {peakQ} m³/s
-        </div>
-      </div>
-
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} role="img" aria-label="Basin discharge over time">
-        <line x1={padLeft} y1={padTop} x2={padLeft} y2={padTop + plotH} stroke="var(--card-border)" strokeWidth={1} />
-        <line x1={padLeft} y1={padTop + plotH} x2={width} y2={padTop + plotH} stroke="var(--card-border)" strokeWidth={1} />
-        <polyline points={points} fill="none" stroke="#3B82C4" strokeWidth={1.5} />
-        <text x={0} y={padTop + 5} fontSize={8} fill="var(--text-soft)">
-          {maxQ.toFixed(0)}
-        </text>
-        <text x={0} y={padTop + plotH + 4} fontSize={8} fill="var(--text-soft)">
-          0
-        </text>
-        <text x={padLeft} y={height} fontSize={8} fill="var(--text-soft)">
-          0h
-        </text>
-        <text x={width - 16} y={height} fontSize={8} fill="var(--text-soft)">
-          {maxTime.toFixed(1)}h
-        </text>
-      </svg>
-
-      <div className="text-[10px]" style={{ color: 'var(--text-soft)' }}>
-        {`Modeled from a single synthetic ${stormParams.duration_hours}-hour design storm, ${stormParams.peak_mm_hr}mm/hr peak.`}
-      </div>
     </div>
   )
 }

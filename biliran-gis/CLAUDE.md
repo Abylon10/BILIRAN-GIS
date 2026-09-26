@@ -926,10 +926,6 @@ for:
   surfaced per-barangay in the UI yet (the raw `rainfall_mm_hr` array is
   in `public/data/basin_hydrographs.json` per basin — see below — but
   nothing renders it as its own chart).
-- **Interactive Simulation Mode** (admin-adjustable min/max rain + storm
-  duration, live recompute): the exact formula and hyetograph-shaping
-  logic (see `hydrographForBarangay`/pipeline notes below) are simple
-  enough to reimplement client-side, but no UI for it exists yet.
 - **Full per-basin FSI recompute** (rainfall + HAND/TWI/LC combined) is
   still blocked on raster-to-barangay aggregation and the original design
   storm's rainfall baseline; `mean_fsi_score` stays a static pipeline
@@ -1062,6 +1058,71 @@ changes it.
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
 
+**Simulation Mode is real now too — admin-launched, client-side, ephemeral.**
+`AdminInvitePanel.tsx` has an "Open User Dashboard" button that mounts
+`components/UserDashboardModal.tsx`: a self-contained snapshot of the real
+dashboard (map + barangay list + detail panel, including the real
+hydrograph and factor breakdown, via the same `BarangayList`/
+`BarangayDetailPanel` components the live dashboard uses, reused as-is)
+plus a "Simulation Mode" button that opens
+`components/SimulationModePanel.tsx` for whichever barangay is selected in
+that modal's own list. There an admin types a min/max rain rate (mm/hr)
+and a storm duration (hours) and clicks "Run simulation" to get a
+client-side-recomputed discharge curve — clearly banner-labeled
+`SIMULATED — not real data`, in a distinct amber color and using a
+distinct chart stroke color (`#D97706`, vs. the real chart's `#3B82C4`),
+rendered via the shared `components/DischargeChart.tsx` (extracted from
+what used to be a local `HydrographChart` function inside
+`BarangayDetailPanel.tsx`, so the real and simulated curves are pixel-for-
+pixel the same chart shape and directly comparable).
+
+**The recompute reuses the real basin and the real formula, not a new
+one.** `lib/simulationMode.ts`'s `simulateForBarangay()` calls the exact
+same `hydrographForBarangay()` used for the real chart (same largest-
+overlap-basin selection, so a simulation always targets the identical
+basin the real chart shows for that barangay), then feeds that basin's
+own `A` (now exposed on `PrimaryHydrograph` — previously loaded but
+dropped on the way out) through the exact same analytical recurrence
+documented above: `Q[t+1] = Q[t]·e^(-AΔt) + R[t+1]·(1-e^(-AΔt))`, `Q[0] =
+0`. The only new thing is the rainfall series fed into it: a **raised**
+triangular hyetograph (`buildRaisedTriangularHyetograph()`) — ramps from
+the admin's `minRate` up to `maxRate` over half the duration, back down to
+`minRate` over the other half, then holds at `minRate` (a background
+rate, not a fabricated drop to zero) for the rest of a fixed 6-hour
+display window (same window/step as the real storm, so both charts share
+an x-axis). This is a literal generalization of the real pipeline's
+single-peak `0 → peak → 0` triangle, not an invented shape — setting
+`minRate = 0` reproduces it exactly.
+
+**Sanity-checked, not just written and shipped**: running a simulation
+with `minRate=5, maxRate=50, duration=2h` for Esperanza (Cabucgayan)
+against its real basin 866 produced a peak of 42.5 m³/s, versus the real
+static hydrograph's 43.3 m³/s for the same basin — close, as expected
+given the floor-vs-zero-tail and narrower-ramp-range differences, not
+suspiciously identical or wildly off. Confirms the basin/`A`/formula
+plumbing is correct end to end.
+
+**Why a second map component (`components/StaticIslandMap.tsx`) doesn't
+reopen the "one persistent map" decision** (see below): it is a
+genuinely separate, read-only renderer — no pan/zoom/pointer handlers, no
+`view`/`resetToken` state, not a mode or prop on `BiliranMap` — that
+fetches the same `/data/geo/barangays.geojson` and reuses the same
+`lib/geo.ts` projection helpers `BiliranMap.tsx` already uses, just to
+color barangay polygons by `mean_fsi_score` inside the modal. The one
+real, interactive, persistent `<BiliranMap>` still only ever mounts once,
+in `app/page.tsx`.
+
+**Two-modals-are-siblings, not nested — this bit once.** `UserDashboardModal`
+is rendered as a JSX *sibling* of the outer `Modal` in `AdminInvitePanel.tsx`
+(both wrapped in a fragment), not as a child placed inside the Invitations
+`Modal`'s own children. Nesting it inside would put its `fixed inset-0`
+backdrop inside an ancestor that has `backdrop-blur-xl` — `backdrop-filter`
+(like `transform`) establishes a new containing block for `position: fixed`
+descendants, so the inner modal would end up positioned relative to the
+outer dialog's small `max-w-sm` box instead of the viewport, squashing all
+its content into a tiny area (found and fixed via Playwright — list rows
+were rendering "outside the viewport" until this was corrected).
+
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
 These affect the data pipeline that produces `barangay_dashboard_data.json`,
@@ -1091,7 +1152,7 @@ names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), and the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above) — a dedicated precipitation/hyetograph view, interactive Simulation Mode, and full per-basin FSI recompute are still not built — see "Deliberately still not built" above.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), and interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above) — a dedicated precipitation/hyetograph view and full per-basin FSI recompute are still not built — see "Deliberately still not built" above.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.

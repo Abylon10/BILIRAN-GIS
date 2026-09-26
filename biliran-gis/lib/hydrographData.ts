@@ -54,6 +54,8 @@ export interface PrimaryHydrograph {
   basinId: number
   overlapAreaKm2: number
   areaKm2: number
+  /** Reservoir coefficient (1/hour) — exposed so Simulation Mode can recompute this same basin's curve for arbitrary rainfall inputs. */
+  A: number
   timeHours: number[]
   q: number[]
   rainfallMmHr: number[]
@@ -106,6 +108,7 @@ export function hydrographForBarangay(
     basinId: primary.basin_id,
     overlapAreaKm2: primary.overlap_area_km2,
     areaKm2: basin.area_km2,
+    A: basin.A,
     timeHours: basin.hydrograph.time_hours,
     q: basin.hydrograph.Q,
     rainfallMmHr: basin.hydrograph.rainfall_mm_hr,
