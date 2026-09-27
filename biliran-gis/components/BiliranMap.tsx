@@ -37,6 +37,8 @@ import {
   type Barangay,
 } from '@/lib/dashboardData'
 import { MARIPIPI, municipalityForPrefix } from '@/lib/municipalities'
+import { MUNICIPALITY_COORDS } from '@/lib/municipalityCoords'
+import { loadWeather, conditionForWeatherCode, type WeatherBucket } from '@/lib/liveWeather'
 
 interface MuniProps {
   pgc_prefix: string
@@ -224,9 +226,43 @@ export default function BiliranMap({
     return map
   }, [barangays])
 
-  // Drives the weather badge's condition — the same underlying signal as
-  // the LIVE UPDATE banner above the map, not a separate/fabricated one.
+  // Still drives the weather badge's tooltip/countdown TEXT (the modeled
+  // Alert/Danger crossing) — but no longer its icon/condition, see
+  // weatherByMunicipality below.
   const urgentCrossing = useMemo(() => mostUrgentCrossing(barangays), [barangays])
+
+  // Real weather per monitored municipality (Open-Meteo, via
+  // app/api/weather — see lib/liveWeather.ts), fetched once on mount and
+  // refreshed periodically. This is this app's first live external data:
+  // drives the map's weather icon/ribbon, decoupled from the modeled
+  // flood-risk crossing above (see CLAUDE.md for why that decoupling is
+  // a deliberate honesty improvement, not an accident). A municipality
+  // absent from this map (still loading, or the fetch failed) simply
+  // doesn't render an icon yet — no placeholder/fake condition invented.
+  const [weatherByMunicipality, setWeatherByMunicipality] = useState<Record<string, WeatherCondition | null>>({})
+
+  useEffect(() => {
+    let cancelled = false
+
+    function refresh() {
+      for (const name of Object.keys(MUNICIPALITY_COORDS)) {
+        loadWeather(name).then((data) => {
+          if (cancelled) return
+          setWeatherByMunicipality((prev) => ({
+            ...prev,
+            [name]: data ? weatherConditionForBucket(conditionForWeatherCode(data.weatherCode)) : null,
+          }))
+        })
+      }
+    }
+
+    refresh()
+    const interval = setInterval(refresh, 15 * 60 * 1000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
 
   function clampView(next: View, bounds: Bounds): View {
     const scale = Math.min(MAX_SCALE, Math.max(1, next.scale))
@@ -611,6 +647,7 @@ export default function BiliranMap({
             onSelect={focusMuni}
             nearestPrefix={nearestPrefix}
             barangayOpacity={barangayOpacity}
+            weatherByMunicipality={weatherByMunicipality}
           />
           <g
             style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }}
@@ -651,7 +688,12 @@ export default function BiliranMap({
 
       {showChrome && !compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
 
-      {showChrome && !compact && <WeatherBadge crossing={urgentCrossing} />}
+      {showChrome && !compact && (
+        <WeatherBadge
+          crossing={urgentCrossing}
+          condition={urgentCrossing ? weatherByMunicipality[urgentCrossing.barangay.municipality] ?? null : null}
+        />
+      )}
       {/*
         showChrome-gated (hidden pre-login, like the rest of this chrome),
         but NOT !compact-gated — unlike ZoomControls/WeatherBadge, Legend
@@ -716,6 +758,7 @@ function MunicipalityLayer({
   onSelect,
   nearestPrefix,
   barangayOpacity,
+  weatherByMunicipality,
 }: {
   municipalities: GeoFeatureCollection<MuniProps>
   barangays: Barangay[]
@@ -727,6 +770,7 @@ function MunicipalityLayer({
   // level, not just from the full-island overview.
   nearestPrefix: string | null
   barangayOpacity: number
+  weatherByMunicipality: Record<string, WeatherCondition | null>
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   const bounds = useMemo(() => boundsOf(municipalities.features, project), [municipalities, project])
@@ -765,14 +809,16 @@ function MunicipalityLayer({
       </g>
       {/*
         Each municipality gets its own weather icon, not just the one
-        global corner ribbon — condition is that municipality's own
-        mostUrgentCrossing() (its barangays only), the exact same function
-        the ribbon and the LIVE UPDATE banner already use, just pre-filtered.
+        global corner ribbon — real current conditions from Open-Meteo
+        (see weatherByMunicipality in the parent component), NOT derived
+        from modeled flood-risk data anymore. A municipality still
+        loading (or whose fetch failed) simply renders no icon this pass,
+        rather than a fake/placeholder condition.
       */}
       <WeatherIconStyles />
       {municipalities.features.map((f) => {
-        const muniBarangays = barangays.filter((b) => b.municipality === f.properties.municipality)
-        const condition = weatherConditionFor(mostUrgentCrossing(muniBarangays))
+        const condition = weatherByMunicipality[f.properties.municipality]
+        if (!condition) return null
         const [lon, lat] = geometryCentroid(f.geometry)
         const [cx, cy] = project(lon, lat)
         return (
@@ -999,29 +1045,24 @@ interface WeatherCondition {
 }
 
 /**
- * Same underlying signal as the LIVE UPDATE banner above the map (the
- * single most urgent upcoming Alert/Danger crossing, from mostUrgentCrossing
- * in lib/dashboardData.ts) — not a separately fabricated "weather" value.
- * Still a modeled-storm scalar, not a live feed; the icon reflects how
- * close that one number is, nothing more.
+ * Real weather now (Open-Meteo, via lib/liveWeather.ts's WeatherBucket) —
+ * NOT derived from the modeled flood-risk crossing anymore. Reuses the
+ * exact same cloud-color palettes/dropCount/duration values this app
+ * already had per severity level, just re-keyed by real condition.
  */
-function weatherConditionFor(crossing: Crossing): WeatherCondition {
-  // Darker/more saturated at every tier than the first pass — the pale
-  // near-white grays used before blended straight into the light theme's
-  // near-white --card-bg and were effectively invisible at a glance.
-  if (!crossing) {
-    return { label: 'Calm', cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
+function weatherConditionForBucket(bucket: WeatherBucket): WeatherCondition {
+  switch (bucket) {
+    case 'Heavy rain':
+      return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65 }
+    case 'Rain':
+      return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1 }
+    case 'Light rain':
+      return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6 }
+    case 'Calm':
+    case 'Cloudy':
+    default:
+      return { label: bucket, cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
   }
-  if (crossing.tier === 'Danger') {
-    return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65 }
-  }
-  if (crossing.hours < 0.5) {
-    return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1 }
-  }
-  if (crossing.hours < 1) {
-    return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6 }
-  }
-  return { label: 'Cloudy', cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
 }
 
 function dropX(count: number, index: number): number {
@@ -1088,10 +1129,12 @@ function WeatherIconStyles() {
 }
 
 /**
- * Cloud/rain badge whose condition tracks the same signal as the LIVE
- * UPDATE banner — not a separate or fabricated weather feed. Still a
- * modeled-storm scalar, not live rainfall; see the banner above the map
- * for that distinction in words.
+ * Cloud/rain badge — now shows REAL current weather (Open-Meteo) for
+ * whichever municipality the modeled Alert/Danger crossing below belongs
+ * to, decoupled from that crossing's own severity (previously the same
+ * scalar drove both the icon and the text — see CLAUDE.md for why they
+ * were split). The tooltip is careful to name both signals separately so
+ * neither implies the other.
  *
  * Shaped as a corner ribbon (clip-path right-trapezoid), not a rounded
  * pill, deliberately — a pill/chip reads as clickable, like the back
@@ -1102,11 +1145,12 @@ function WeatherIconStyles() {
  * border/box-shadow doesn't follow a clip-path'd box correctly, so depth
  * comes from `filter: drop-shadow(...)` instead.
  */
-function WeatherBadge({ crossing }: { crossing: Crossing }) {
-  const condition = weatherConditionFor(crossing)
+function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: WeatherCondition | null }) {
+  if (!condition) return null
+
   const title = crossing
-    ? `${condition.label} — ${crossing.barangay.barangay} (${crossing.barangay.municipality}) reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
-    : 'No modeled crossings in range'
+    ? `${condition.label} (real current weather) in ${crossing.barangay.municipality} — separately, ${crossing.barangay.barangay} reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
+    : `${condition.label} (real current weather) — no modeled crossings in range`
 
   return (
     <div

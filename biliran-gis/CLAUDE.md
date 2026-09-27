@@ -1134,6 +1134,69 @@ outer dialog's small `max-w-sm` box instead of the viewport, squashing all
 its content into a tiny area (found and fixed via Playwright — list rows
 were rendering "outside the viewport" until this was corrected).
 
+**Real, live weather is connected now — this app's first live external
+API call.** Everything else in this app is static JSON or Supabase;
+`app/api/weather/route.ts` is the one exception, proxying Open-Meteo's
+free, no-key forecast API (the same one the external pipeline's
+`fetch_rainfall.py` already used) server-side, cached ~15 minutes via
+Next's `fetch(..., { next: { revalidate: 900 } })`. `lib/liveWeather.ts`
+fetches it client-side (`loadWeather(municipality)`, with its own short
+client-side cache) and maps Open-Meteo's WMO weather code onto this app's
+existing 5-bucket icon system (`conditionForWeatherCode` — a documented
+judgment call, not an exact standard mapping, same spirit as
+`align_fsi_inputs.py`'s own documented LULC-runoff-score judgment calls).
+Coordinates for the 7 monitored municipalities live in the new
+`lib/municipalityCoords.ts` — **not invented**: the exact same 7 points
+already read directly from the external pipeline's own
+`rainfall_timeseries.json` during the FSI factor breakdown work earlier
+this session (Maripipi intentionally absent, same exclusion as
+everywhere else in this app).
+
+**The map's weather icon changed meaning — a deliberate, discussed
+decision, not an accident.** Before this, `BiliranMap.tsx`'s per-
+municipality icon and corner ribbon were driven by
+`weatherConditionFor(crossing)` — the *modeled flood-risk crossing time*,
+explicitly documented as "not a separately fabricated weather value."
+That function is gone; `weatherConditionForBucket()` replaces it, driven
+by real Open-Meteo data instead (fetched once for all 7 municipalities on
+mount, refreshed every ~15 minutes, via a `weatherByMunicipality` state in
+the main `BiliranMap` component). The modeled Alert/Danger countdown text
+(`LiveUpdateBanner.tsx`, `WeatherBadge`'s tooltip) stays exactly as it
+was — the two signals were decoupled on purpose (confirmed with the
+user, who chose this over adding a second parallel weather element) so
+the icon stops silently proxying flood risk as weather; `WeatherBadge`'s
+tooltip now names both signals separately so neither implies the other.
+A municipality whose weather hasn't loaded yet (or whose fetch failed)
+simply shows no icon that pass — no placeholder/fake condition invented.
+
+**Simulation Mode's "Use today's forecast"** (`SimulationModePanel.tsx`)
+is the one other place this touches: a button that prefills `minRate`/
+`maxRate` from the real hourly precipitation range for the selected
+barangay's municipality — still fully editable afterward, still feeding
+the same client-side "what if" recompute. This is the only real data
+Simulation Mode touches; its SIMULATED banner and output are unaffected.
+
+**Known limitation of this session's own verification**: this sandbox's
+outbound network policy blocks `api.open-meteo.com` (confirmed via the
+proxy's own diagnostic as an organization-policy 403, not a bug —
+per its own guidance, not something to retry). Everything above was
+verified end-to-end against **mocked** `/api/weather` responses via
+Playwright (icon rendering, the decoupling, the Simulation Mode prefill,
+all confirmed working) — but live connectivity to the real Open-Meteo
+endpoint from *this* environment couldn't be exercised. The code follows
+Open-Meteo's actual documented response shape and this app's own
+external pipeline's prior successful use of the same API, and should work
+unmodified in the real deployed environment, which has no such
+restriction — but a real end-to-end pass (hit `/api/weather?municipality=
+Naval` from a real deployment) is still worth doing once one exists.
+
+**A planned research pass didn't happen this session, for the same
+reason**: comparing real Open-Meteo data against `fsi_factors.json`'s
+stored rainfall values, to help answer the still-blocked full-FSI-
+recompute rainfall-baseline question (see "Deliberately still not built"
+above), needed the same blocked network access. Still open — worth
+revisiting from an environment that can actually reach Open-Meteo.
+
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
 These affect the data pipeline that produces `barangay_dashboard_data.json`,
@@ -1163,7 +1226,7 @@ names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), and interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above) — full per-basin FSI recompute is still not built — see "Deliberately still not built" above. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared; full per-basin FSI recompute (item 2) needs its own scoped investigation into aggregation method + rainfall baseline first; the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, see above) instead of proxying modeled flood risk — full per-basin FSI recompute is still not built — see "Deliberately still not built" above. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared; full per-basin FSI recompute (item 2) needs its own scoped investigation into aggregation method + rainfall baseline first — the planned Open-Meteo-vs-`fsi_factors.json` research pass toward that is still outstanding too, blocked on this session's own sandboxed network access (see above); the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.

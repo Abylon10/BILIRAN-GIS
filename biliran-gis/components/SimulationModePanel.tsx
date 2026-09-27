@@ -6,6 +6,13 @@
 // selection and same exact analytical formula the real static
 // hydrographs use), and render it next to (never instead of) the real
 // data. Purely client-side and ephemeral — nothing here is persisted.
+//
+// "Use today's forecast" prefills minRate/maxRate from a REAL Open-Meteo
+// forecast (lib/liveWeather.ts) for the barangay's municipality — it only
+// fills the inputs, still fully editable, still feeding the same
+// client-side "what if" recompute below. This is the one spot in
+// Simulation Mode that touches real data; it doesn't change what the
+// SIMULATED banner/output represent.
 
 'use client'
 
@@ -13,6 +20,7 @@ import { useEffect, useState } from 'react'
 import type { Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographData'
 import { simulateForBarangay, type SimulatedHydrograph } from '@/lib/simulationMode'
+import { loadWeather } from '@/lib/liveWeather'
 import DischargeChart from '@/components/DischargeChart'
 
 const DEFAULT_MIN_RATE = 5
@@ -40,6 +48,7 @@ export default function SimulationModePanel({ barangay }: { barangay: Barangay |
   // the effect (see the same pattern in BarangayDetailPanel.tsx).
   const [basinCheck, setBasinCheck] = useState<BasinCheckEntry | null>(null)
   const [result, setResult] = useState<ResultEntry | null>(null)
+  const [forecastStatus, setForecastStatus] = useState<'idle' | 'loading' | 'error'>('idle')
 
   useEffect(() => {
     if (!barangay) return
@@ -70,6 +79,22 @@ export default function SimulationModePanel({ barangay }: { barangay: Barangay |
     })
   }
 
+  function useTodaysForecast() {
+    if (!barangay) return
+    setForecastStatus('loading')
+    loadWeather(barangay.municipality).then((data) => {
+      if (!data || data.hourlyPrecipitationMm.length === 0) {
+        setForecastStatus('error')
+        return
+      }
+      const min = Math.round(Math.min(...data.hourlyPrecipitationMm) * 10) / 10
+      const max = Math.round(Math.max(...data.hourlyPrecipitationMm) * 10) / 10
+      setMinRate(min)
+      setMaxRate(Math.max(max, min))
+      setForecastStatus('idle')
+    })
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
       <div
@@ -90,6 +115,23 @@ export default function SimulationModePanel({ barangay }: { barangay: Barangay |
             <NumberField label="Min rain (mm/hr)" value={minRate} onChange={setMinRate} />
             <NumberField label="Max rain (mm/hr)" value={maxRate} onChange={setMaxRate} />
             <NumberField label="Duration (hr)" value={durationHours} onChange={setDurationHours} step={0.5} />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="text-xs underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ color: 'var(--text-soft)' }}
+              onClick={useTodaysForecast}
+              disabled={forecastStatus === 'loading'}
+            >
+              {forecastStatus === 'loading' ? 'Loading today’s forecast…' : "Use today's forecast"}
+            </button>
+            {forecastStatus === 'error' && (
+              <span className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                Could not load a real forecast for {barangay.municipality}.
+              </span>
+            )}
           </div>
 
           <button
