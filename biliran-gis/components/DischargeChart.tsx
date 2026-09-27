@@ -13,6 +13,7 @@ export default function DischargeChart({
   metaLabel,
   captionText,
   color = '#3B82C4',
+  ariaLabel = 'Basin discharge over time',
 }: {
   timeHours: number[]
   q: number[]
@@ -20,6 +21,7 @@ export default function DischargeChart({
   metaLabel: string
   captionText: string
   color?: string
+  ariaLabel?: string
 }) {
   const width = 280
   const height = 90
@@ -51,7 +53,7 @@ export default function DischargeChart({
         </div>
       </div>
 
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} role="img" aria-label="Basin discharge over time">
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} role="img" aria-label={ariaLabel}>
         <line x1={padLeft} y1={padTop} x2={padLeft} y2={padTop + plotH} stroke="var(--card-border)" strokeWidth={1} />
         <line x1={padLeft} y1={padTop + plotH} x2={width} y2={padTop + plotH} stroke="var(--card-border)" strokeWidth={1} />
         <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} />

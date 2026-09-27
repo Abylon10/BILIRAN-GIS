@@ -117,13 +117,24 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
       </div>
 
       {isCurrent && entry?.hydrograph ? (
-        <DischargeChart
-          timeHours={entry.hydrograph.timeHours}
-          q={entry.hydrograph.q}
-          title="Hydrograph"
-          metaLabel={`basin ${entry.hydrograph.basinId} · peak ${Math.max(...entry.hydrograph.q, 0.001).toFixed(1)} m³/s`}
-          captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
-        />
+        <>
+          <DischargeChart
+            timeHours={entry.hydrograph.timeHours}
+            q={entry.hydrograph.q}
+            title="Hydrograph"
+            metaLabel={`basin ${entry.hydrograph.basinId} · peak ${Math.max(...entry.hydrograph.q, 0.001).toFixed(1)} m³/s`}
+            captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
+          />
+          <DischargeChart
+            timeHours={entry.hydrograph.timeHours}
+            q={entry.hydrograph.rainfallMmHr}
+            title="Precipitation"
+            metaLabel={`peak ${Math.max(...entry.hydrograph.rainfallMmHr, 0.001).toFixed(0)} mm/hr`}
+            captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
+            color="#0891B2"
+            ariaLabel="Rainfall over time"
+          />
+        </>
       ) : (
         <div
           className="flex items-center gap-3 rounded-lg border border-dashed px-3 py-2"

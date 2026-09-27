@@ -922,10 +922,6 @@ asked why they're missing.
 **Deliberately still not built**, because the data honestly doesn't exist in
 this repo — building fake versions would mislead the officials this app is
 for:
-- **"Precipitation Overview" hyetograph**: no rainfall time series is
-  surfaced per-barangay in the UI yet (the raw `rainfall_mm_hr` array is
-  in `public/data/basin_hydrographs.json` per basin — see below — but
-  nothing renders it as its own chart).
 - **Full per-basin FSI recompute** (rainfall + HAND/TWI/LC combined) is
   still blocked on raster-to-barangay aggregation and the original design
   storm's rainfall baseline; `mean_fsi_score` stays a static pipeline
@@ -957,6 +953,21 @@ honest state, same as it always was for every barangay before this data
 existed. Since `BarangayDetailPanel` is the one component used for both
 the sidebar (`hidden md:block`) and the inline mobile (`md:hidden`)
 detail views, this covers both without extra wiring.
+
+**Precipitation chart is real too now, gated identically to the
+hydrograph.** A second `DischargeChart` right below the first renders
+`entry.hydrograph.rainfallMmHr` against the same `timeHours` — both
+already present on `PrimaryHydrograph` from the same
+`basin_hydrographs.json` fetch, so this needed no new data, no new fetch,
+and no new loading state: it appears/disappears together with the
+hydrograph (same 113-of-115 coverage, same honest absence for the 2
+FSI-only barangays). `DischargeChart` (`components/DischargeChart.tsx`)
+picked up an optional `ariaLabel` prop for this (defaulting to the exact
+original hardcoded text, so the real hydrograph and Simulation Mode's
+simulated chart are unaffected) and is given a distinct cyan
+(`#0891B2`) so the two series read as clearly different at a glance —
+distinct from both the hydrograph's blue (`#3B82C4`) and Simulation
+Mode's amber (`#D97706`).
 
 **Provenance of `public/data/basin_hydrographs.json`**: built (one-off,
 not checked into this repo as a script) from three files the user
@@ -1152,7 +1163,7 @@ names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), and interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above) — a dedicated precipitation/hyetograph view and full per-basin FSI recompute are still not built — see "Deliberately still not built" above.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), and interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above) — full per-basin FSI recompute is still not built — see "Deliberately still not built" above. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared; full per-basin FSI recompute (item 2) needs its own scoped investigation into aggregation method + rainfall baseline first; the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
