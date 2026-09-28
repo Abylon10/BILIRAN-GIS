@@ -10,6 +10,7 @@
 export interface WeatherData {
   weatherCode: number | null
   temperatureC: number | null
+  precipitationProbability: number | null
   hourlyPrecipitationMm: number[]
 }
 
@@ -35,6 +36,7 @@ export async function loadWeather(municipality: string): Promise<WeatherData | n
     .then((json): WeatherData => ({
       weatherCode: json.current?.weatherCode ?? null,
       temperatureC: json.current?.temperatureC ?? null,
+      precipitationProbability: json.current?.precipitationProbability ?? null,
       hourlyPrecipitationMm: json.hourly?.precipitationMm ?? [],
     }))
     .then((data) => {

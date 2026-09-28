@@ -250,7 +250,9 @@ export default function BiliranMap({
           if (cancelled) return
           setWeatherByMunicipality((prev) => ({
             ...prev,
-            [name]: data ? weatherConditionForBucket(conditionForWeatherCode(data.weatherCode)) : null,
+            [name]: data
+              ? weatherConditionForBucket(conditionForWeatherCode(data.weatherCode), data.precipitationProbability)
+              : null,
           }))
         })
       }
@@ -1042,6 +1044,12 @@ interface WeatherCondition {
   dropColor: string
   dropCount: number
   duration: number
+  // Open-Meteo's hourly chance-of-rain for the current hour, 0-100 —
+  // shown alongside the icon purely as a readout. The modeled Alert/Danger
+  // crossing below never consults this: that's computed entirely from the
+  // static hydrograph/FSI pipeline ("if it rains, here's how risky it
+  // is"), independent of any real forecast. Null while loading/unavailable.
+  precipitationProbability: number | null
 }
 
 /**
@@ -1050,18 +1058,18 @@ interface WeatherCondition {
  * exact same cloud-color palettes/dropCount/duration values this app
  * already had per severity level, just re-keyed by real condition.
  */
-function weatherConditionForBucket(bucket: WeatherBucket): WeatherCondition {
+function weatherConditionForBucket(bucket: WeatherBucket, precipitationProbability: number | null): WeatherCondition {
   switch (bucket) {
     case 'Heavy rain':
-      return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65 }
+      return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65, precipitationProbability }
     case 'Rain':
-      return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1 }
+      return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1, precipitationProbability }
     case 'Light rain':
-      return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6 }
+      return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6, precipitationProbability }
     case 'Calm':
     case 'Cloudy':
     default:
-      return { label: bucket, cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6 }
+      return { label: bucket, cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6, precipitationProbability }
   }
 }
 
@@ -1148,9 +1156,17 @@ function WeatherIconStyles() {
 function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: WeatherCondition | null }) {
   if (!condition) return null
 
+  const chance = condition.precipitationProbability
+  // Shown purely as a readout of the real forecast — the modeled
+  // Alert/Danger countdown text never factors this in (it's computed
+  // entirely from the static hydrograph/FSI pipeline: "if it rains, here's
+  // how risky it is", regardless of whether it actually will), so the
+  // title makes clear this chance is a separate, real-forecast number.
+  const chanceText = chance !== null ? `${Math.round(chance)}% chance of rain` : null
+
   const title = crossing
-    ? `${condition.label} (real current weather) in ${crossing.barangay.municipality} — separately, ${crossing.barangay.barangay} reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
-    : `${condition.label} (real current weather) — no modeled crossings in range`
+    ? `${condition.label}${chanceText ? ` (${chanceText})` : ''} (real current weather) in ${crossing.barangay.municipality} — separately, ${crossing.barangay.barangay} reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
+    : `${condition.label}${chanceText ? ` (${chanceText})` : ''} (real current weather) — no modeled crossings in range`
 
   return (
     <div
@@ -1166,8 +1182,15 @@ function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: 
       <svg width="34" height="28" viewBox="0 0 44 36" aria-hidden>
         <WeatherIconSVG condition={condition} />
       </svg>
-      <span className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
-        {condition.label}
+      <span className="flex flex-col leading-tight">
+        <span className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
+          {condition.label}
+        </span>
+        {chance !== null && (
+          <span className="text-[10px] font-medium" style={{ color: 'var(--text-soft)' }}>
+            {Math.round(chance)}% rain
+          </span>
+        )}
       </span>
     </div>
   )

@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('latitude', String(coords.lat))
   url.searchParams.set('longitude', String(coords.lon))
   url.searchParams.set('current_weather', 'true')
-  url.searchParams.set('hourly', 'precipitation,weathercode')
+  url.searchParams.set('hourly', 'precipitation,precipitation_probability,weathercode')
   url.searchParams.set('forecast_days', '1')
   url.searchParams.set('timezone', 'Asia/Manila')
 
@@ -54,15 +54,26 @@ export async function GET(req: NextRequest) {
 
   const data = await upstream.json()
 
+  // Open-Meteo's `current_weather` block doesn't carry a precipitation
+  // chance itself (only temperature/windspeed/weathercode) — that only
+  // exists in the hourly series, so the "current" chance shown on the map
+  // is the hourly value for whichever hour current_weather.time falls in.
+  const hourlyTimes: string[] = data.hourly?.time ?? []
+  const currentHourIndex = hourlyTimes.indexOf(data.current_weather?.time ?? '')
+  const currentPrecipitationProbability =
+    currentHourIndex >= 0 ? data.hourly?.precipitation_probability?.[currentHourIndex] ?? null : null
+
   return NextResponse.json({
     municipality,
     current: {
       weatherCode: data.current_weather?.weathercode ?? null,
       temperatureC: data.current_weather?.temperature ?? null,
+      precipitationProbability: currentPrecipitationProbability,
     },
     hourly: {
       time: data.hourly?.time ?? [],
       precipitationMm: data.hourly?.precipitation ?? [],
+      precipitationProbability: data.hourly?.precipitation_probability ?? [],
       weatherCode: data.hourly?.weathercode ?? [],
     },
   })

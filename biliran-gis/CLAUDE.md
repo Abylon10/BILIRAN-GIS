@@ -1197,6 +1197,26 @@ recompute rainfall-baseline question (see "Deliberately still not built"
 above), needed the same blocked network access. Still open — worth
 revisiting from an environment that can actually reach Open-Meteo.
 
+**`WeatherBadge` now also shows Open-Meteo's hourly chance-of-rain** (the
+`%` under the condition label, e.g. "Rain" / "62% rain") — purely a
+readout, requested explicitly even though the modeled Alert/Danger
+countdown never consults it (that's computed entirely from the static
+hydrograph/FSI pipeline — "if it rains, here's how risky it is",
+independent of whether a real forecast says it will). `current_weather`
+itself has no precipitation-chance field; `app/api/weather/route.ts` now
+also requests `hourly=precipitation_probability` and picks out the value
+for whichever hour matches `current_weather.time`, exposed as
+`current.precipitationProbability`. `lib/liveWeather.ts`'s `WeatherData`
+and `BiliranMap.tsx`'s `WeatherCondition` both carry the field through;
+null (hidden, no "0%" shown) while loading or if Open-Meteo omits it. Not
+added to the per-municipality map icons (`MunicipalityLayer`) — those are
+small icon-only glyphs with no room for text, and the user's request was
+specifically about the corner ribbon. Verified via `npm run lint`/
+`npm run build` (type-checked end to end) and by tracing the data path
+manually; not exercised against a live browser render in this session —
+same blocked-network limitation as the rest of this section, and no
+mocked-auth Playwright harness was set up for this small an addition.
+
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
 These affect the data pipeline that produces `barangay_dashboard_data.json`,
