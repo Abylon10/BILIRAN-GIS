@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { requireAdmin } from '@/lib/requireAdmin'
+import { sendInvitationEmail } from '@/lib/email'
 
 function generateCode(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('invitation_codes')
-    .select('id, code, email, office, redeemed, expires_at, redeemed_at')
+    .select('id, code, email, office, invitee_name, redeemed, expires_at, redeemed_at')
     .order('id', { ascending: false })
     .limit(100)
 
@@ -38,11 +39,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Admin access required.' }, { status: 403 })
   }
 
-  const { email, office, expiresInDays } = await req.json()
+  const { email, office, expiresInDays, invitee_name } = await req.json()
 
   if (!email || !office) {
     return NextResponse.json({ error: 'Email and office are required.' }, { status: 400 })
   }
+
+  const name = typeof invitee_name === 'string' && invitee_name.trim() ? invitee_name.trim() : null
 
   const expires_at =
     typeof expiresInDays === 'number' && expiresInDays > 0
@@ -51,13 +54,26 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('invitation_codes')
-    .insert({ code: generateCode(), email, office, redeemed: false, expires_at })
-    .select('id, code, email, office, expires_at')
+    .insert({ code: generateCode(), email, office, invitee_name: name, redeemed: false, expires_at })
+    .select('id, code, email, office, invitee_name, expires_at')
     .single()
 
   if (error) {
     return NextResponse.json({ error: 'Could not create invitation code.' }, { status: 500 })
   }
 
-  return NextResponse.json({ invitation: data })
+  const activateUrl = `${req.nextUrl.origin}/activate?code=${data.code}`
+  const emailResult = await sendInvitationEmail({
+    to: data.email,
+    name: data.invitee_name,
+    office: data.office,
+    code: data.code,
+    activateUrl,
+  })
+
+  return NextResponse.json({
+    invitation: data,
+    emailSent: emailResult.ok,
+    emailError: emailResult.ok ? null : emailResult.error,
+  })
 }

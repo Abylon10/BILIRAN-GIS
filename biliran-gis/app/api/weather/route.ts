@@ -9,10 +9,12 @@
 // in app/api/*) — this only reads public weather data, no user data
 // involved, so there's nothing to gate behind requireAdmin.
 //
-// One response covers both real uses of this data: `current` drives the
-// map's weather icon (components/BiliranMap.tsx), `hourly` drives
-// Simulation Mode's "Use today's forecast" prefill
-// (components/SimulationModePanel.tsx) — no need for two endpoints.
+// `current` drives the map's weather icon (components/BiliranMap.tsx).
+// `hourly` isn't consumed by any component right now (Simulation Mode's
+// "Use today's forecast" prefill, its one past consumer, was removed —
+// see CLAUDE.md) but stays in the response since it's already part of
+// the same upstream call current needs; no cost to leaving it available
+// for a future real-forecast feature.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { MUNICIPALITY_COORDS } from '@/lib/municipalityCoords'

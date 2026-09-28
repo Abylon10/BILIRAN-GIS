@@ -1,18 +1,17 @@
 // components/SimulationModePanel.tsx
 //
-// Admin-only "what if" tool: pick min/max rain rate + storm duration for
-// the currently selected barangay, recompute its primary basin's
-// discharge curve client-side (lib/simulationMode.ts — same basin
-// selection and same exact analytical formula the real static
-// hydrographs use), and render it next to (never instead of) the real
-// data. Purely client-side and ephemeral — nothing here is persisted.
+// Admin-only "what if" tool, rendered inside UserDashboardModal's
+// slide-out sidebar: pick min/max rain rate + storm duration (capped at
+// 12 hours) for the currently selected barangay, recompute its primary
+// basin's discharge curve client-side (lib/simulationMode.ts — same
+// basin selection and same exact analytical formula the real static
+// hydrographs use). Purely client-side and ephemeral — nothing here is
+// persisted.
 //
-// "Use today's forecast" prefills minRate/maxRate from a REAL Open-Meteo
-// forecast (lib/liveWeather.ts) for the barangay's municipality — it only
-// fills the inputs, still fully editable, still feeding the same
-// client-side "what if" recompute below. This is the one spot in
-// Simulation Mode that touches real data; it doesn't change what the
-// SIMULATED banner/output represent.
+// Doesn't render its own output chart — "Start simulation" hands the
+// result up via onSimulate() instead, so the caller can show it
+// alongside the real hydrograph in BarangayDetailPanel and auto-close
+// this sidebar. "Exit" closes without running anything.
 
 'use client'
 
@@ -20,12 +19,11 @@ import { useEffect, useState } from 'react'
 import type { Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographData'
 import { simulateForBarangay, type SimulatedHydrograph } from '@/lib/simulationMode'
-import { loadWeather } from '@/lib/liveWeather'
-import DischargeChart from '@/components/DischargeChart'
 
 const DEFAULT_MIN_RATE = 5
 const DEFAULT_MAX_RATE = 50
 const DEFAULT_DURATION_HOURS = 2
+const MAX_DURATION_HOURS = 12
 const TOTAL_WINDOW_HOURS = 6
 const DT_HOURS = 1 / 12 // 5 minutes — matches the real storm's step, so axes line up
 
@@ -34,21 +32,30 @@ interface BasinCheckEntry {
   hasBasin: boolean
 }
 
-interface ResultEntry {
-  key: string
-  sim: SimulatedHydrograph | null
+export interface SimulationRunResult {
+  minRate: number
+  maxRate: number
+  durationHours: number
+  sim: SimulatedHydrograph
 }
 
-export default function SimulationModePanel({ barangay }: { barangay: Barangay | null }) {
+export default function SimulationModePanel({
+  barangay,
+  onExit,
+  onSimulate,
+}: {
+  barangay: Barangay | null
+  onExit: () => void
+  onSimulate: (result: SimulationRunResult) => void
+}) {
   const [minRate, setMinRate] = useState(DEFAULT_MIN_RATE)
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
   const [durationHours, setDurationHours] = useState(DEFAULT_DURATION_HOURS)
-  // Both keyed by barangay.key rather than reset-on-effect-entry, so
-  // switching barangays never needs a synchronous setState at the top of
-  // the effect (see the same pattern in BarangayDetailPanel.tsx).
+  // Keyed by barangay.key rather than reset-on-effect-entry, so switching
+  // barangays never needs a synchronous setState at the top of the effect
+  // (see the same pattern in BarangayDetailPanel.tsx).
   const [basinCheck, setBasinCheck] = useState<BasinCheckEntry | null>(null)
-  const [result, setResult] = useState<ResultEntry | null>(null)
-  const [forecastStatus, setForecastStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [running, setRunning] = useState(false)
 
   useEffect(() => {
     if (!barangay) return
@@ -70,39 +77,42 @@ export default function SimulationModePanel({ barangay }: { barangay: Barangay |
 
   const isCurrent = basinCheck?.key === barangay.key
   const hasBasin = isCurrent ? basinCheck.hasBasin : null
-  const shownResult = result?.key === barangay.key ? result.sim : null
 
   function runSimulation() {
     if (!barangay) return
+    setRunning(true)
     loadBasinHydrographs().then((data) => {
-      setResult({ key: barangay.key, sim: simulateForBarangay(data, barangay.key, { minRate, maxRate, durationHours }, DT_HOURS, TOTAL_WINDOW_HOURS) })
-    })
-  }
-
-  function useTodaysForecast() {
-    if (!barangay) return
-    setForecastStatus('loading')
-    loadWeather(barangay.municipality).then((data) => {
-      if (!data || data.hourlyPrecipitationMm.length === 0) {
-        setForecastStatus('error')
-        return
-      }
-      const min = Math.round(Math.min(...data.hourlyPrecipitationMm) * 10) / 10
-      const max = Math.round(Math.max(...data.hourlyPrecipitationMm) * 10) / 10
-      setMinRate(min)
-      setMaxRate(Math.max(max, min))
-      setForecastStatus('idle')
+      const sim = simulateForBarangay(data, barangay.key, { minRate, maxRate, durationHours }, DT_HOURS, TOTAL_WINDOW_HOURS)
+      setRunning(false)
+      if (sim) onSimulate({ minRate, maxRate, durationHours, sim })
     })
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+    <div className="flex h-full flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+          Simulation Mode
+        </h3>
+        <button
+          type="button"
+          onClick={onExit}
+          className="bfw-btn rounded-full px-3 py-1.5 text-xs font-semibold"
+        >
+          Exit
+        </button>
+      </div>
+
       <div
         className="rounded-lg border px-3 py-2 text-xs"
-        style={{ background: 'rgba(184, 134, 11, 0.15)', borderColor: '#B8860B', color: '#F2E4C4' }}
+        style={{ background: 'rgba(184, 134, 11, 0.35)', borderColor: '#B8860B', color: '#3D2B00' }}
       >
         SIMULATED — not real data. Recomputed client-side from the inputs below using the
         same real per-basin formula the static hydrograph uses, not an actual forecast.
+      </div>
+
+      <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
+        {barangay.barangay}, {barangay.municipality}
       </div>
 
       {hasBasin === false ? (
@@ -111,48 +121,26 @@ export default function SimulationModePanel({ barangay }: { barangay: Barangay |
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-col gap-3">
             <NumberField label="Min rain (mm/hr)" value={minRate} onChange={setMinRate} />
             <NumberField label="Max rain (mm/hr)" value={maxRate} onChange={setMaxRate} />
-            <NumberField label="Duration (hr)" value={durationHours} onChange={setDurationHours} step={0.5} />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="text-xs underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ color: 'var(--text-soft)' }}
-              onClick={useTodaysForecast}
-              disabled={forecastStatus === 'loading'}
-            >
-              {forecastStatus === 'loading' ? 'Loading today’s forecast…' : "Use today's forecast"}
-            </button>
-            {forecastStatus === 'error' && (
-              <span className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                Could not load a real forecast for {barangay.municipality}.
-              </span>
-            )}
+            <NumberField
+              label={`Duration (hr, max ${MAX_DURATION_HOURS})`}
+              value={durationHours}
+              onChange={setDurationHours}
+              step={0.5}
+              max={MAX_DURATION_HOURS}
+            />
           </div>
 
           <button
             type="button"
-            className="bfw-btn w-full rounded-md py-2 text-sm font-semibold"
+            className="bfw-btn mt-auto w-full rounded-md py-2 text-sm font-semibold"
             onClick={runSimulation}
-            disabled={hasBasin === null}
+            disabled={hasBasin === null || running}
           >
-            Run simulation
+            {running ? 'Simulating…' : 'Start simulation'}
           </button>
-
-          {shownResult && (
-            <DischargeChart
-              timeHours={shownResult.timeHours}
-              q={shownResult.q}
-              title="Simulated hydrograph"
-              metaLabel={`basin ${shownResult.basinId} · peak ${Math.max(...shownResult.q, 0.001).toFixed(1)} m³/s`}
-              captionText={`Simulated: ${minRate}-${maxRate}mm/hr rain, ${durationHours}-hour duration.`}
-              color="#D97706"
-            />
-          )}
         </>
       )}
     </div>
@@ -164,11 +152,13 @@ function NumberField({
   value,
   onChange,
   step = 1,
+  max,
 }: {
   label: string
   value: number
   onChange: (value: number) => void
   step?: number
+  max?: number
 }) {
   return (
     <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-soft)' }}>
@@ -177,7 +167,11 @@ function NumberField({
         type="number"
         value={value}
         step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
+        max={max}
+        onChange={(e) => {
+          const next = Number(e.target.value)
+          onChange(max !== undefined ? Math.min(next, max) : next)
+        }}
         className="rounded-md border px-2 py-1 text-sm"
         style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}
       />

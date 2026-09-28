@@ -23,6 +23,7 @@ interface Invitation {
   code: string
   email: string
   office: string
+  invitee_name: string | null
   redeemed: boolean
   expires_at: string | null
   redeemed_at: string | null
@@ -65,9 +66,10 @@ export default function AdminInvitePanel({
 }) {
   const [email, setEmail] = useState('')
   const [office, setOffice] = useState('')
+  const [inviteeName, setInviteeName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [created, setCreated] = useState<Invitation | null>(null)
+  const [created, setCreated] = useState<{ invitation: Invitation; emailSent: boolean; emailError: string | null } | null>(null)
   const [showUserDashboard, setShowUserDashboard] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
 
@@ -75,9 +77,15 @@ export default function AdminInvitePanel({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editEmail, setEditEmail] = useState('')
   const [editOffice, setEditOffice] = useState('')
+  const [editInviteeName, setEditInviteeName] = useState('')
   const [editExpiresAt, setEditExpiresAt] = useState('')
   const [rowError, setRowError] = useState<string | null>(null)
   const [rowBusyId, setRowBusyId] = useState<number | null>(null)
+  // Set from a successful save's response, scoped to the row it applies
+  // to — the edit row itself collapses back to display mode immediately
+  // on save, so this is what actually surfaces the "emailed to X" /
+  // "email failed" result after that collapse.
+  const [editResult, setEditResult] = useState<{ id: number; emailSent: boolean; emailError: string | null } | null>(null)
 
   async function refresh() {
     const token = await getToken()
@@ -121,7 +129,7 @@ export default function AdminInvitePanel({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ email, office }),
+      body: JSON.stringify({ email, office, invitee_name: inviteeName || null }),
     })
     const data = await res.json()
     setLoading(false)
@@ -131,17 +139,20 @@ export default function AdminInvitePanel({
       return
     }
 
-    setCreated(data.invitation)
+    setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
     setEmail('')
     setOffice('')
+    setInviteeName('')
     await refresh()
   }
 
   function startEdit(inv: Invitation) {
     setRowError(null)
+    setEditResult(null)
     setEditingId(inv.id)
     setEditEmail(inv.email)
     setEditOffice(inv.office)
+    setEditInviteeName(inv.invitee_name ?? '')
     setEditExpiresAt(toDatetimeLocalValue(inv.expires_at))
   }
 
@@ -169,6 +180,7 @@ export default function AdminInvitePanel({
       body: JSON.stringify({
         email: editEmail,
         office: editOffice,
+        invitee_name: editInviteeName || null,
         expires_at: fromDatetimeLocalValue(editExpiresAt),
       }),
     })
@@ -180,6 +192,7 @@ export default function AdminInvitePanel({
       return
     }
 
+    setEditResult({ id, emailSent: data.emailSent, emailError: data.emailError })
     setEditingId(null)
     await refresh()
   }
@@ -210,16 +223,32 @@ export default function AdminInvitePanel({
     await refresh()
   }
 
+  // Renders the User Dashboard view instead of (never alongside) the
+  // Invitations modal — stacking both used to be exactly what produced a
+  // compounding double-blur backdrop behind it (each Modal instance
+  // paints its own bg-black/40 + backdrop-blur-xl at the same z-50). See
+  // UserDashboardModal.tsx's own header comment for the rest of that fix.
+  if (showUserDashboard) {
+    return <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
+  }
+
   return (
-    <>
     <Modal title="Invitations" onClose={onClose}>
-      <button
-        type="button"
-        className="bfw-btn mb-4 w-full rounded-md py-2 text-sm font-semibold"
-        onClick={() => setShowUserDashboard(true)}
-      >
-        Open User Dashboard
-      </button>
+      {/*
+        Right-aligned pill, same treatment as MunicipalityFilterDropdown's
+        trigger button — reads as this panel's own "top-right corner"
+        action, not a full-width primary action competing with "Create
+        invitation" below.
+      */}
+      <div className="mb-4 flex justify-end">
+        <button
+          type="button"
+          className="bfw-btn rounded-full px-3 py-2 text-sm font-semibold"
+          onClick={() => setShowUserDashboard(true)}
+        >
+          Open User Dashboard
+        </button>
+      </div>
 
       {/*
         Entrance-only (a full expand/collapse height animation would fight
@@ -262,6 +291,18 @@ export default function AdminInvitePanel({
             style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
           />
         </label>
+        <label className="block">
+          <span className="text-sm font-medium" style={{ color: 'var(--text-strong)' }}>Recipient name (optional)</span>
+          <input
+            type="text"
+            value={inviteeName}
+            onChange={(e) => setInviteeName(e.target.value)}
+            maxLength={100}
+            placeholder="e.g. Juan Dela Cruz"
+            className="mt-1 w-full rounded-md border px-3 py-2 text-sm outline-none"
+            style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+          />
+        </label>
 
         {error && (
           <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
@@ -269,9 +310,16 @@ export default function AdminInvitePanel({
           </p>
         )}
         {created && (
-          <p className="rounded-md bg-[#E7F3E9] px-3 py-2 text-sm text-[#2C5F3E]">
-            Created code <span className="font-mono font-semibold">{created.code}</span> for {created.email}
-          </p>
+          <div className="space-y-1 rounded-md bg-[#E7F3E9] px-3 py-2 text-sm text-[#2C5F3E]">
+            <p>
+              Created code <span className="font-mono font-semibold">{created.invitation.code}</span> for {created.invitation.email}
+            </p>
+            <p style={created.emailSent ? undefined : { color: '#8A4B12' }}>
+              {created.emailSent
+                ? `Emailed to ${created.invitation.email}.`
+                : `Created, but the email couldn't be sent${created.emailError ? ` (${created.emailError})` : ''} — share the code above manually.`}
+            </p>
+          </div>
         )}
 
         <button
@@ -307,6 +355,15 @@ export default function AdminInvitePanel({
                       type="text"
                       value={editOffice}
                       onChange={(e) => setEditOffice(e.target.value)}
+                      className="w-full rounded border px-2 py-1 text-xs outline-none"
+                      style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+                    />
+                    <input
+                      type="text"
+                      value={editInviteeName}
+                      onChange={(e) => setEditInviteeName(e.target.value)}
+                      maxLength={100}
+                      placeholder="Recipient name (optional)"
                       className="w-full rounded border px-2 py-1 text-xs outline-none"
                       style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
                     />
@@ -388,6 +445,13 @@ export default function AdminInvitePanel({
                       {inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleString()}` : 'No expiry'}
                     </div>
                   )}
+                  {editResult && editResult.id === inv.id && (
+                    <div className="text-[10px]" style={{ color: editResult.emailSent ? '#2C5F3E' : '#8A4B12' }}>
+                      {editResult.emailSent
+                        ? `Emailed to ${inv.email}.`
+                        : `Updated, but the email couldn't be sent${editResult.emailError ? ` (${editResult.emailError})` : ''} — share the code manually.`}
+                    </div>
+                  )}
                 </li>
               )
             })}
@@ -395,9 +459,5 @@ export default function AdminInvitePanel({
         </div>
       )}
     </Modal>
-    {showUserDashboard && (
-      <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
-    )}
-    </>
   )
 }
