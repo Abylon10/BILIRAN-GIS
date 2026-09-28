@@ -16,7 +16,9 @@
 // compounding double-blur behind this view, which is why this no longer
 // reuses the shared Modal component at all. Its own close control is a
 // top-left "×", not the shared Modal's top-right convention — deliberate,
-// since this reads as "exit this view," not "dismiss a dialog."
+// since this reads as "exit this view," not "dismiss a dialog." Closing
+// returns to AdminInvitePanel's own full-screen landing, never to the raw
+// map/dashboard directly — see that file's header comment.
 //
 // The map here is StaticIslandMap (read-only, no pan/zoom) — NOT a second
 // <BiliranMap> instance. See that file's header comment for why this
@@ -24,44 +26,43 @@
 // larger here than its default (a full-screen view has the room), still
 // the same non-interactive component either way.
 //
-// Simulation Mode is a slide-out sidebar from the right edge (not the old
-// inline toggle-panel-below-the-grid), always mounted but transformed
-// off-screen when closed so its own input state survives being
-// closed/reopened. "Start simulation" hands its result up via onSimulate
-// and this component auto-closes the sidebar; the resulting chart then
-// renders inside BarangayDetailPanel, alongside the real hydrograph, for
-// direct comparison — not inside the sidebar itself. Results are keyed by
-// barangay so switching the selected barangay never shows a stale result
-// for a different one (see simEntry below).
+// Simulation Mode is a slide-out sidebar from the right edge, always
+// mounted but transformed off-screen when closed so its own input state
+// survives being closed/reopened. Unlike the single-barangay version this
+// replaced, "Start simulation" now runs the storm against the WHOLE
+// island at once (lib/islandSimulation.ts) — see islandSim below: every
+// barangay's displayed FSI score/label and Warning/Alert/Danger countdown
+// gets overridden with its simulated value, which re-sorts the list and
+// re-colors the map for free (BarangayList.tsx/BarangayDetailPanel.tsx/
+// StaticIslandMap.tsx all need zero changes for this — they only ever
+// read whatever Barangay[] they're handed, never look up the "real" data
+// themselves). Countdown recompute reuses a real, disclosed formula
+// (threshold-crossing on simulated discharge); FSI recompute is a
+// disclosed approximation the user explicitly asked for after being told
+// no real discharge-to-FSI formula exists — see lib/islandSimulation.ts's
+// own header comment for the full reasoning. A persistent "SIMULATED"
+// chip in the header (never scrolls out of view) plus the top banner
+// keep this visibly labeled the whole time it's active.
 
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { loadBarangays, filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
+import { opaqueBg } from '@/lib/opaqueTheme'
+import type { SimulationParams, SimulationRunResult } from '@/lib/simulationMode'
+import type { IslandSimResult } from '@/lib/islandSimulation'
 import StaticIslandMap from '@/components/StaticIslandMap'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
-import SimulationModePanel, { type SimulationRunResult } from '@/components/SimulationModePanel'
+import SimulationModePanel from '@/components/SimulationModePanel'
 
 const TRANSITION_MS = 300
 const MAP_HEIGHT = 320
 
-// This app's --card-bg/--header-bg/--body-bg are all deliberately
-// translucent (paired with backdrop-blur, meant to tint over the always-
-// present map scene behind them) — fine for a small card, but a full-
-// screen takeover needs a genuinely opaque background or the persistent
-// map/dashboard underneath bleeds through as visible ghosting. Same RGB
-// channels as --card-bg, just alpha 1 — and, same reasoning as
-// MunicipalityFilterDropdown's DAY_COLORS/NIGHT_COLORS, keyed directly by
-// the theme prop rather than a CSS variable, so this never depends on
-// what's rendered behind it.
-const DAY_BG = '#E7F1F5'
-const NIGHT_BG = '#031716'
-
-interface SimEntry {
-  barangayKey: string
-  result: SimulationRunResult
+interface IslandSim {
+  params: SimulationParams
+  results: Map<string, IslandSimResult>
 }
 
 export default function UserDashboardModal({
@@ -75,7 +76,7 @@ export default function UserDashboardModal({
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [municipality, setMunicipality] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [simEntry, setSimEntry] = useState<SimEntry | null>(null)
+  const [islandSim, setIslandSim] = useState<IslandSim | null>(null)
 
   // Same two-phase open/close technique as the shared Modal
   // (components/ProfilePanel.tsx) — `open` starts false and flips true
@@ -99,11 +100,47 @@ export default function UserDashboardModal({
       })
   }, [])
 
-  const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
+  // Overlays each barangay's real FSI/countdown fields with its simulated
+  // ones when a simulation is active — everything downstream (sort,
+  // filter, list rows, map color, detail panel) just reads these fields
+  // off whatever Barangay object it's given, so nothing else needs to
+  // know a simulation is even happening. Falls back to the real
+  // warning/alert/danger times for the 2 basin-less barangays (no
+  // discharge curve to derive a countdown from), same honest-absence
+  // pattern as their missing hydrograph chart elsewhere in this app.
+  const displayBarangays = useMemo(() => {
+    if (!barangays || !islandSim) return barangays
+    return barangays.map((b) => {
+      const r = islandSim.results.get(b.key)
+      if (!r) return b
+      return {
+        ...b,
+        mean_fsi_score: r.simulatedFsi,
+        dominant_fsi_label: r.simulatedLabel,
+        warning_time_hours: r.warningTimeHours ?? b.warning_time_hours,
+        alert_time_hours: r.alertTimeHours ?? b.alert_time_hours,
+        danger_time_hours: r.dangerTimeHours ?? b.danger_time_hours,
+      }
+    })
+  }, [barangays, islandSim])
+
+  const sorted = useMemo(() => (displayBarangays ? sortBySeverity(displayBarangays) : []), [displayBarangays])
   const filtered = useMemo(() => filterBarangays(sorted, '', municipality), [sorted, municipality])
   const selected = useMemo(() => sorted.find((b) => b.key === selectedKey) ?? null, [sorted, selectedKey])
-  const simulationResult = simEntry && selected && simEntry.barangayKey === selected.key ? simEntry.result : null
-  const bg = theme === 'dark' ? NIGHT_BG : DAY_BG
+
+  const simulationResult: SimulationRunResult | null = useMemo(() => {
+    if (!islandSim || !selected) return null
+    const entry = islandSim.results.get(selected.key)
+    if (!entry?.hydrograph) return null
+    return {
+      minRate: islandSim.params.minRate,
+      maxRate: islandSim.params.maxRate,
+      durationHours: islandSim.params.durationHours,
+      sim: entry.hydrograph,
+    }
+  }, [islandSim, selected])
+
+  const bg = opaqueBg(theme)
 
   return (
     <div
@@ -129,7 +166,7 @@ export default function UserDashboardModal({
       `}</style>
 
       <div
-        className="flex shrink-0 items-center justify-between border-b px-6 py-4"
+        className="flex shrink-0 items-center justify-between gap-3 border-b px-6 py-4"
         style={{ borderColor: 'var(--card-border)' }}
       >
         <button
@@ -143,28 +180,59 @@ export default function UserDashboardModal({
         <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
           User Dashboard
         </h2>
-        <button
-          type="button"
-          className="bfw-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold"
-          onClick={() => setSidebarOpen(true)}
-          disabled={!selected}
-        >
-          Simulation Mode
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/*
+            Persistent, never scrolls out of view (unlike the banner
+            below, which lives inside the scrollable body) — the one
+            disclosure surface guaranteed visible the entire time a
+            simulation is active, however far the list is scrolled.
+          */}
+          {islandSim && (
+            <button
+              type="button"
+              onClick={() => setIslandSim(null)}
+              className="rounded-full border px-3 py-1.5 text-xs font-semibold"
+              style={{ background: 'rgba(184, 134, 11, 0.35)', borderColor: '#B8860B', color: '#3D2B00' }}
+            >
+              ⚠ SIMULATED · Clear
+            </button>
+          )}
+          <button
+            type="button"
+            className="bfw-btn rounded-full px-4 py-2 text-sm font-semibold"
+            onClick={() => setSidebarOpen(true)}
+            disabled={!barangays}
+          >
+            Simulation Mode
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
-        <div
-          className="rounded-lg border px-3 py-2 text-xs"
-          style={{ background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: '#F2D9D5' }}
-        >
-          Modeled from a single synthetic design storm, not a live rainfall feed — treat every
-          countdown below as illustrative until a real forecast is wired in.
-        </div>
+        {islandSim ? (
+          <div
+            className="rounded-lg border px-3 py-2 text-xs"
+            style={{ background: 'rgba(184, 134, 11, 0.15)', borderColor: '#B8860B', color: 'var(--text-strong)' }}
+          >
+            Showing a SIMULATED scenario ({islandSim.params.minRate}-{islandSim.params.maxRate}mm/hr rain,{' '}
+            {islandSim.params.durationHours}h duration) — FSI scores, ranking, and countdown times below are
+            recomputed for this storm, not real conditions. FSI is an approximate recombination of each
+            barangay&apos;s real terrain factors with a scenario-scaled rainfall input, not the authoritative
+            score.
+          </div>
+        ) : (
+          <div
+            className="rounded-lg border px-3 py-2 text-xs"
+            style={{ background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: '#F2D9D5' }}
+          >
+            Modeled from a single synthetic design storm, not a live rainfall feed — treat every
+            countdown below as illustrative until a real forecast is wired in.
+          </div>
+        )}
 
-        {barangays && (
+        {displayBarangays && (
           <>
-            <StaticIslandMap barangays={barangays} selectedKey={selectedKey} height={MAP_HEIGHT} />
+            <StaticIslandMap barangays={displayBarangays} selectedKey={selectedKey} height={MAP_HEIGHT} />
 
             <MunicipalityFilterDropdown value={municipality} onChange={setMunicipality} theme={theme} />
 
@@ -194,11 +262,10 @@ export default function UserDashboardModal({
         style={{ background: bg, borderColor: 'var(--card-border)' }}
       >
         <SimulationModePanel
-          barangay={selected}
+          selectedBarangay={selected}
           onExit={() => setSidebarOpen(false)}
-          onSimulate={(result) => {
-            if (!selected) return
-            setSimEntry({ barangayKey: selected.key, result })
+          onSimulate={(results, params) => {
+            setIslandSim({ results, params })
             setSidebarOpen(false)
           }}
         />

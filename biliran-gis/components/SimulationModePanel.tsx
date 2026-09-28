@@ -1,24 +1,24 @@
 // components/SimulationModePanel.tsx
 //
 // Admin-only "what if" tool, rendered inside UserDashboardModal's
-// slide-out sidebar: pick min/max rain rate + storm duration (capped at
-// 12 hours) for the currently selected barangay, recompute its primary
-// basin's discharge curve client-side (lib/simulationMode.ts — same
-// basin selection and same exact analytical formula the real static
-// hydrographs use). Purely client-side and ephemeral — nothing here is
-// persisted.
+// slide-out sidebar: pick a min/max rain rate + storm duration (capped
+// at 12 hours) and run it against the WHOLE island at once
+// (lib/islandSimulation.ts) — not just the currently selected barangay.
+// Purely client-side and ephemeral — nothing here is persisted.
 //
-// Doesn't render its own output chart — "Start simulation" hands the
-// result up via onSimulate() instead, so the caller can show it
-// alongside the real hydrograph in BarangayDetailPanel and auto-close
-// this sidebar. "Exit" closes without running anything.
+// Doesn't render its own output — "Start simulation" hands the full
+// island-wide result map up via onSimulate() instead, so the caller can
+// re-rank/re-color the whole dashboard and auto-close this sidebar.
+// "Exit" closes without running anything.
 
 'use client'
 
 import { useEffect, useState } from 'react'
 import type { Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographData'
-import { simulateForBarangay, type SimulatedHydrograph } from '@/lib/simulationMode'
+import { loadFsiFactors } from '@/lib/fsiFactorData'
+import { type SimulationParams } from '@/lib/simulationMode'
+import { simulateIsland, type IslandSimResult } from '@/lib/islandSimulation'
 
 const DEFAULT_MIN_RATE = 5
 const DEFAULT_MAX_RATE = 50
@@ -32,21 +32,17 @@ interface BasinCheckEntry {
   hasBasin: boolean
 }
 
-export interface SimulationRunResult {
-  minRate: number
-  maxRate: number
-  durationHours: number
-  sim: SimulatedHydrograph
-}
-
 export default function SimulationModePanel({
-  barangay,
+  selectedBarangay,
   onExit,
   onSimulate,
 }: {
-  barangay: Barangay | null
+  // Purely informational here now (the "does the currently selected
+  // barangay have its own river data" preview line) — the simulation
+  // itself always runs island-wide, never gated on a selection.
+  selectedBarangay: Barangay | null
   onExit: () => void
-  onSimulate: (result: SimulationRunResult) => void
+  onSimulate: (results: Map<string, IslandSimResult>, params: SimulationParams) => void
 }) {
   const [minRate, setMinRate] = useState(DEFAULT_MIN_RATE)
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
@@ -58,33 +54,37 @@ export default function SimulationModePanel({
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
-    if (!barangay) return
+    if (!selectedBarangay) return
     let cancelled = false
     loadBasinHydrographs()
       .then((data) => {
         if (cancelled) return
-        setBasinCheck({ key: barangay.key, hasBasin: hydrographForBarangay(data, barangay.key) !== null })
+        setBasinCheck({ key: selectedBarangay.key, hasBasin: hydrographForBarangay(data, selectedBarangay.key) !== null })
       })
       .catch(() => {
-        if (!cancelled) setBasinCheck({ key: barangay.key, hasBasin: false })
+        if (!cancelled) setBasinCheck({ key: selectedBarangay.key, hasBasin: false })
       })
     return () => {
       cancelled = true
     }
-  }, [barangay])
+  }, [selectedBarangay])
 
-  if (!barangay) return null
-
-  const isCurrent = basinCheck?.key === barangay.key
+  const isCurrent = selectedBarangay != null && basinCheck?.key === selectedBarangay.key
   const hasBasin = isCurrent ? basinCheck.hasBasin : null
 
+  // A bad input only used to break one barangay's chart — low stakes. Now
+  // it drives the whole island's ranking/FSI/countdowns, so it needs a
+  // real guard rather than just letting NaN/negative values flow through.
+  const inputsValid = minRate >= 0 && maxRate >= minRate && durationHours > 0
+
   function runSimulation() {
-    if (!barangay) return
+    if (!inputsValid) return
     setRunning(true)
-    loadBasinHydrographs().then((data) => {
-      const sim = simulateForBarangay(data, barangay.key, { minRate, maxRate, durationHours }, DT_HOURS, TOTAL_WINDOW_HOURS)
+    const params: SimulationParams = { minRate, maxRate, durationHours }
+    Promise.all([loadBasinHydrographs(), loadFsiFactors()]).then(([hydrographData, factorData]) => {
+      const results = simulateIsland(hydrographData, factorData, params, DT_HOURS, TOTAL_WINDOW_HOURS)
       setRunning(false)
-      if (sim) onSimulate({ minRate, maxRate, durationHours, sim })
+      onSimulate(results, params)
     })
   }
 
@@ -107,42 +107,46 @@ export default function SimulationModePanel({
         className="rounded-lg border px-3 py-2 text-xs"
         style={{ background: 'rgba(184, 134, 11, 0.35)', borderColor: '#B8860B', color: '#3D2B00' }}
       >
-        SIMULATED — not real data. Recomputed client-side from the inputs below using the
-        same real per-basin formula the static hydrograph uses, not an actual forecast.
+        SIMULATED — not real data. Runs this storm against the whole island at once:
+        countdown times reuse the same real per-basin formula the static hydrographs use;
+        FSI scores are an approximate recombination of each barangay&apos;s real terrain
+        factors with a scenario-scaled rainfall input, not the authoritative score.
       </div>
 
-      <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
-        {barangay.barangay}, {barangay.municipality}
-      </div>
-
-      {hasBasin === false ? (
+      {selectedBarangay && hasBasin === false && (
         <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-          {barangay.barangay} has no basin/river data to simulate against.
+          {selectedBarangay.barangay} has no basin/river data — its countdown times won&apos;t
+          change, but its FSI estimate still will.
         </p>
-      ) : (
-        <>
-          <div className="flex flex-col gap-3">
-            <NumberField label="Min rain (mm/hr)" value={minRate} onChange={setMinRate} />
-            <NumberField label="Max rain (mm/hr)" value={maxRate} onChange={setMaxRate} />
-            <NumberField
-              label={`Duration (hr, max ${MAX_DURATION_HOURS})`}
-              value={durationHours}
-              onChange={setDurationHours}
-              step={0.5}
-              max={MAX_DURATION_HOURS}
-            />
-          </div>
-
-          <button
-            type="button"
-            className="bfw-btn mt-auto w-full rounded-md py-2 text-sm font-semibold"
-            onClick={runSimulation}
-            disabled={hasBasin === null || running}
-          >
-            {running ? 'Simulating…' : 'Start simulation'}
-          </button>
-        </>
       )}
+
+      <div className="flex flex-col gap-3">
+        <NumberField label="Min rain (mm/hr)" value={minRate} onChange={setMinRate} />
+        <NumberField label="Max rain (mm/hr)" value={maxRate} onChange={setMaxRate} />
+        <NumberField
+          label={`Duration (hr, max ${MAX_DURATION_HOURS})`}
+          value={durationHours}
+          onChange={setDurationHours}
+          step={0.5}
+          max={MAX_DURATION_HOURS}
+        />
+      </div>
+
+      {!inputsValid && (
+        <p role="alert" className="text-xs" style={{ color: '#C0392B' }}>
+          Max rain must be at least min rain, both must be 0 or more, and duration must be
+          greater than 0.
+        </p>
+      )}
+
+      <button
+        type="button"
+        className="bfw-btn mt-auto w-full rounded-md py-2 text-sm font-semibold"
+        onClick={runSimulation}
+        disabled={!inputsValid || running}
+      >
+        {running ? 'Simulating…' : 'Start simulation'}
+      </button>
     </div>
   )
 }

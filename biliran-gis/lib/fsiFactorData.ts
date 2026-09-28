@@ -28,7 +28,7 @@ export interface BarangayFactors {
   n_pixels: number
 }
 
-interface RawFactorData {
+export interface RawFactorData {
   description: string
   factor_weights: FactorWeights
   barangays: Record<string, BarangayFactors>

@@ -33,6 +33,17 @@ export interface SimulatedHydrograph {
   rainfallMmHr: number[]
 }
 
+// The shape BarangayDetailPanel.tsx renders as the per-barangay comparison
+// chart — a data shape, not UI, so it lives here rather than in whichever
+// component happens to produce it (island-wide Simulation Mode, via
+// lib/islandSimulation.ts, builds this for whichever barangay is selected).
+export interface SimulationRunResult {
+  minRate: number
+  maxRate: number
+  durationHours: number
+  sim: SimulatedHydrograph
+}
+
 /**
  * A raised triangular hyetograph over a fixed total window (matching the
  * real storm's window/step so simulated and real charts share an x-axis).
