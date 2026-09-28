@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react'
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
 import { loadFsiFactors, factorsForBarangay, type BarangayFactors } from '@/lib/fsiFactorData'
+import type { SimulationRunResult } from '@/components/SimulationModePanel'
 import DischargeChart from '@/components/DischargeChart'
 
 interface HydrographEntry {
@@ -35,7 +36,18 @@ interface FactorEntry {
   factors: BarangayFactors | null
 }
 
-export default function BarangayDetailPanel({ barangay }: { barangay: Barangay | null }) {
+export default function BarangayDetailPanel({
+  barangay,
+  simulationResult,
+}: {
+  barangay: Barangay | null
+  // Admin-only, from UserDashboardModal's Simulation Mode sidebar — the
+  // real dashboard (DashboardShell.tsx) never passes this, so it's
+  // optional and renders nothing extra there. Owned by the caller, not
+  // this component: cleared whenever the caller's own selection changes,
+  // so a stale result from a different barangay never shows here.
+  simulationResult?: SimulationRunResult | null
+}) {
   // Keyed by barangay.key rather than reset-on-effect-entry, so switching
   // barangays never needs a synchronous setState at the top of the effect
   // (which would otherwise cause a redundant extra render on every switch).
@@ -135,7 +147,21 @@ export default function BarangayDetailPanel({ barangay }: { barangay: Barangay |
             ariaLabel="Rainfall over time"
           />
         </>
-      ) : (
+      ) : null}
+
+      {simulationResult && (
+        <DischargeChart
+          timeHours={simulationResult.sim.timeHours}
+          q={simulationResult.sim.q}
+          title="Simulated hydrograph"
+          metaLabel={`basin ${simulationResult.sim.basinId} · peak ${Math.max(...simulationResult.sim.q, 0.001).toFixed(1)} m³/s`}
+          captionText={`Simulated: ${simulationResult.minRate}-${simulationResult.maxRate}mm/hr rain, ${simulationResult.durationHours}-hour duration.`}
+          color="#D97706"
+          ariaLabel="Simulated basin discharge over time"
+        />
+      )}
+
+      {!(isCurrent && entry?.hydrograph) && (
         <div
           className="flex items-center gap-3 rounded-lg border border-dashed px-3 py-2"
           style={{ borderColor: 'var(--card-border)', opacity: 0.75 }}

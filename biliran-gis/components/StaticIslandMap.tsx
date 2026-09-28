@@ -32,9 +32,15 @@ interface BrgyProps {
 export default function StaticIslandMap({
   barangays,
   selectedKey,
+  height = 180,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
+  // Overridable so the full-screen admin User Dashboard (a much bigger
+  // surface than the old dialog) can give this more visual weight,
+  // closer to the real dashboard's own map — still the same read-only
+  // component either way, just resized.
+  height?: number
 }) {
   const [geo, setGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
 
@@ -69,7 +75,7 @@ export default function StaticIslandMap({
 
   return (
     <div className="overflow-hidden rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
-      <svg viewBox={viewBoxOf(bounds)} width="100%" height={180} role="img" aria-label="Island-wide flood susceptibility map (read-only)">
+      <svg viewBox={viewBoxOf(bounds)} width="100%" height={height} role="img" aria-label="Island-wide flood susceptibility map (read-only)">
         {geo.features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
           const selected = f.properties.key === selectedKey

@@ -1137,22 +1137,28 @@ fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
 
 **Simulation Mode is real now too — admin-launched, client-side, ephemeral.**
-`AdminInvitePanel.tsx` has an "Open User Dashboard" button that mounts
+`AdminInvitePanel.tsx` has an "Open User Dashboard" button (a right-
+aligned pill, same `bfw-btn rounded-full` treatment as
+`MunicipalityFilterDropdown`'s trigger — reads as this panel's own "top-
+right corner" action) that swaps the Invitations modal out for
 `components/UserDashboardModal.tsx`: a self-contained snapshot of the real
 dashboard (map + barangay list + detail panel, including the real
 hydrograph and factor breakdown, via the same `BarangayList`/
 `BarangayDetailPanel` components the live dashboard uses, reused as-is)
-plus a "Simulation Mode" button that opens
+plus a "Simulation Mode" button that opens a slide-out sidebar containing
 `components/SimulationModePanel.tsx` for whichever barangay is selected in
-that modal's own list. There an admin types a min/max rain rate (mm/hr)
-and a storm duration (hours) and clicks "Run simulation" to get a
-client-side-recomputed discharge curve — clearly banner-labeled
-`SIMULATED — not real data`, in a distinct amber color and using a
-distinct chart stroke color (`#D97706`, vs. the real chart's `#3B82C4`),
-rendered via the shared `components/DischargeChart.tsx` (extracted from
-what used to be a local `HydrographChart` function inside
-`BarangayDetailPanel.tsx`, so the real and simulated curves are pixel-for-
-pixel the same chart shape and directly comparable).
+that view's own list. There an admin types a min/max rain rate (mm/hr)
+and a storm duration (hours, capped at 12 via both the input's `max` and a
+clamping `onChange`) and clicks "Start simulation" to get a client-side-
+recomputed discharge curve — clearly banner-labeled `SIMULATED — not real
+data` (a deliberately higher-contrast amber than the first version shipped
+— see "Redesigned as a full-screen view" below) — rendered via the shared
+`components/DischargeChart.tsx` (extracted from what used to be a local
+`HydrographChart` function inside `BarangayDetailPanel.tsx`) in a distinct
+stroke color (`#D97706`, vs. the real chart's `#3B82C4`), alongside the
+real hydrograph in the detail panel — not inside the sidebar itself, so
+it's directly comparable and still visible after the sidebar auto-closes
+(see below).
 
 **The recompute reuses the real basin and the real formula, not a new
 one.** `lib/simulationMode.ts`'s `simulateForBarangay()` calls the exact
@@ -1190,16 +1196,65 @@ color barangay polygons by `mean_fsi_score` inside the modal. The one
 real, interactive, persistent `<BiliranMap>` still only ever mounts once,
 in `app/page.tsx`.
 
-**Two-modals-are-siblings, not nested — this bit once.** `UserDashboardModal`
-is rendered as a JSX *sibling* of the outer `Modal` in `AdminInvitePanel.tsx`
-(both wrapped in a fragment), not as a child placed inside the Invitations
-`Modal`'s own children. Nesting it inside would put its `fixed inset-0`
-backdrop inside an ancestor that has `backdrop-blur-xl` — `backdrop-filter`
-(like `transform`) establishes a new containing block for `position: fixed`
-descendants, so the inner modal would end up positioned relative to the
-outer dialog's small `max-w-sm` box instead of the viewport, squashing all
-its content into a tiny area (found and fixed via Playwright — list rows
-were rendering "outside the viewport" until this was corrected).
+**Redesigned as a full-screen view, not a dialog — fixing a real double-
+blur bug, not just a style pass.** The original version rendered
+`UserDashboardModal` as a JSX *sibling* of the still-open Invitations
+`Modal` (both wrapped in a fragment) rather than nesting it inside —
+deliberately, to dodge a `backdrop-filter`-establishes-a-new-containing-
+block bug (nesting put the inner modal's `fixed inset-0` backdrop inside
+an ancestor with `backdrop-blur-xl`, squashing its content into the outer
+dialog's small `max-w-sm` box). But neither modal actually closed the
+other, so **both stayed mounted at once**, each painting its own
+independent `bg-black/40` + `backdrop-blur-xl` backdrop at the same
+`z-50` — a compounding double-blur, reported and fixed this round.
+`AdminInvitePanel.tsx` now renders one or the other, never both
+(`if (showUserDashboard) return <UserDashboardModal .../>`), and
+`UserDashboardModal.tsx` no longer uses the shared `Modal` at all — it's
+its own `fixed inset-0 z-50` full-screen takeover (closer to "a database
+dashboard" than a small dialog, per the redesign brief), with a bigger
+`StaticIslandMap` (`height={320}`, up from the old modal's `180`) and its
+own close control: an `×` pinned **top-left** (not the shared `Modal`'s
+top-right convention — deliberate, since this reads as "exit this view,"
+not "dismiss a dialog").
+
+**A second real bug this surfaced**: this app's `--card-bg`/`--header-bg`/
+`--body-bg` CSS variables are all deliberately translucent (paired with
+`backdrop-blur`, meant to tint over the always-present map scene behind
+every other panel) — using `var(--card-bg)` for this new full-screen
+view's own background (an early draft did) let the still-mounted
+persistent dashboard/map bleed through visibly underneath it. Fixed with
+explicit, fully-opaque colors keyed by the `theme` prop directly (`DAY_BG`/
+`NIGHT_BG` — same reasoning as `MunicipalityFilterDropdown`'s own
+`DAY_COLORS`/`NIGHT_COLORS`, and same RGB channels as `--card-bg` at
+alpha 1), rather than any of this app's normal translucent tokens.
+
+**The Simulation Mode sidebar** (`fixed right-0 top-0 h-full w-80`,
+slide-in-from-the-right transition, same `data-open` + CSS-transition
+technique as the shared `Modal`'s own open/close animation) stays mounted
+at all times, just transformed off-screen when closed — so its input
+values survive being closed and reopened, matching the requested "auto-
+close after Start simulation, reopen by pressing Simulation Mode again"
+behavior without losing whatever the admin had typed. Its own "Exit"
+button (top of the sidebar, `bfw-btn` pill) closes without running
+anything; "Start simulation" computes the result, hands it to
+`UserDashboardModal` via an `onSimulate` callback, and the parent closes
+the sidebar itself. Results are stored keyed by `barangay.key`
+(`{ barangayKey, result }`) and only passed down to `BarangayDetailPanel`
+when that key still matches the currently selected barangay — so
+switching to a different barangay never shows a stale simulated chart for
+the one before it, without needing a synchronous reset effect (same
+key-gated-state pattern used elsewhere in this app, e.g.
+`BarangayDetailPanel`'s own hydrograph-loading state).
+
+**The real (non-admin) dashboard had a genuine height-mismatch bug too**,
+reported alongside the above: `DashboardShell.tsx`'s barangay-list column
+had `min-h-0 overflow-y-auto` (bounded, scrolls within the shared grid
+row), but the detail-panel column next to it had no height/overflow
+styling at all — its height was just whatever its own content added up
+to, so it could visibly grow taller or shorter than the list beside it.
+Fixed with the same `min-h-0 overflow-y-auto` treatment on that column too
+— a one-line change, verified via Playwright to produce pixel-identical
+heights for both columns.
 
 **Real, live weather is connected now — this app's first live external
 API call.** Everything else in this app is static JSON or Supabase;
@@ -1235,13 +1290,6 @@ the icon stops silently proxying flood risk as weather; `WeatherBadge`'s
 tooltip now names both signals separately so neither implies the other.
 A municipality whose weather hasn't loaded yet (or whose fetch failed)
 simply shows no icon that pass — no placeholder/fake condition invented.
-
-**Simulation Mode's "Use today's forecast"** (`SimulationModePanel.tsx`)
-is the one other place this touches: a button that prefills `minRate`/
-`maxRate` from the real hourly precipitation range for the selected
-barangay's municipality — still fully editable afterward, still feeding
-the same client-side "what if" recompute. This is the only real data
-Simulation Mode touches; its SIMULATED banner and output are unaffected.
 
 **Known limitation of this session's own verification**: this sandbox's
 outbound network policy blocks `api.open-meteo.com` (confirmed via the

@@ -223,16 +223,32 @@ export default function AdminInvitePanel({
     await refresh()
   }
 
+  // Renders the User Dashboard view instead of (never alongside) the
+  // Invitations modal — stacking both used to be exactly what produced a
+  // compounding double-blur backdrop behind it (each Modal instance
+  // paints its own bg-black/40 + backdrop-blur-xl at the same z-50). See
+  // UserDashboardModal.tsx's own header comment for the rest of that fix.
+  if (showUserDashboard) {
+    return <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
+  }
+
   return (
-    <>
     <Modal title="Invitations" onClose={onClose}>
-      <button
-        type="button"
-        className="bfw-btn mb-4 w-full rounded-md py-2 text-sm font-semibold"
-        onClick={() => setShowUserDashboard(true)}
-      >
-        Open User Dashboard
-      </button>
+      {/*
+        Right-aligned pill, same treatment as MunicipalityFilterDropdown's
+        trigger button — reads as this panel's own "top-right corner"
+        action, not a full-width primary action competing with "Create
+        invitation" below.
+      */}
+      <div className="mb-4 flex justify-end">
+        <button
+          type="button"
+          className="bfw-btn rounded-full px-3 py-2 text-sm font-semibold"
+          onClick={() => setShowUserDashboard(true)}
+        >
+          Open User Dashboard
+        </button>
+      </div>
 
       {/*
         Entrance-only (a full expand/collapse height animation would fight
@@ -443,9 +459,5 @@ export default function AdminInvitePanel({
         </div>
       )}
     </Modal>
-    {showUserDashboard && (
-      <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
-    )}
-    </>
   )
 }

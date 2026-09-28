@@ -223,7 +223,7 @@ export default function DashboardShell({
                   onSelectMunicipality={onMunicipalityChange}
                 />
               </div>
-              <div className="hidden md:block">
+              <div className="hidden min-h-0 overflow-y-auto md:block">
                 <BarangayDetailPanel barangay={selected} />
               </div>
             </div>
