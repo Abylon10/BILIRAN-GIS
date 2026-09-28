@@ -264,6 +264,29 @@ size variant, and its `onClick` `stopPropagation()`s when compact so
 resetting the view doesn't also read as the tap-to-expand gesture on the
 `<svg>` underneath it.
 
+**Legend (full-size variant) is left-edge, vertically centered, and
+~4x larger** — moved off the bottom-left corner because it read as too
+small/hard to parse there. `absolute left-3 top-1/2 -translate-y-1/2`,
+`flex flex-col` (a vertical stack of the five severity rows) instead of
+the old horizontal `flex items-center` row, since a row at this size
+wouldn't fit the map's width. Dots grew from `h-2 w-2` (8px) to `h-8 w-8`
+(32px, ~400%); text grew from `text-[10px]` to `text-sm` (14px) —
+deliberately a much smaller bump than the dots', so labels stay legible
+next to the map rather than a literal 4-5x blow-up (which would put
+~45px-tall labels next to a mid-sized map and dominate it). `rounded-2xl`
+now, not `rounded-full` — a giant pill wrapped around a tall column of
+varying-width rows read oddly, unlike the compact variant's small dot row
+where a pill still makes sense. The `compact` (dots-only, tiny thumbnail)
+variant is untouched — still `absolute bottom-1.5 left-1.5`, still tiny —
+there's no room for anything close to this size in the 192×144px compact
+map box, and it wasn't asked for. No collision-avoidance logic added for
+the taller stack against the top-left reset button/top-right
+`WeatherBadge`/bottom-right `ZoomControls` — confirmed via screenshot
+there's a comfortable gap at typical map heights, since each of those
+overlays is independently `absolute`-positioned into its own corner-ish
+region (see the `compact` prop paragraph above) rather than sharing a
+layout that would need to shrink around the enlarged legend.
+
 **Fill-the-middle layout, once compact.** As soon as `listScrolled` is
 true — no separate gesture required (an earlier version gated this
 behind a swipe-down pointer gesture; dropped because it only armed on
@@ -591,6 +614,7 @@ no longer just a self-validated guess.
 - Barangays are ranked by continuous `mean_fsi_score`, never by discrete FSI class (class-based ranking was tested and rejected — it collapses most barangays into one bucket)
 - Runoff thresholds are relative to each basin's own modeled peak Q (Warning 50% / Alert 75% / Danger 95%, not 100%) — disclosed as a relative proxy, not a calibrated physical threshold; there wasn't enough data (surveyed cross-sections, historical gauge records) for a calibrated approach
 - A barangay touching multiple basins uses the **earliest** (most urgent) threshold crossing time across them, not an average
+- Severity colors for Moderate/High were relightened/reddened (`#D9B23C`/`#E8A33D` → `#F2D24D`/`#E8592D`) for readability — changed in the one shared pair of functions (`urgencyTierColor()` and `fsiScoreColor()`'s `SCORE_COLOR_STOPS`, both `lib/dashboardData.ts`) that colors the map polygons, the `Legend`, and the `BarangayList`/`BarangayDetailPanel` severity dots, so all four stay in sync rather than the legend silently drifting from what's actually drawn on the map
 
 ## Dashboard UI
 
@@ -898,31 +922,79 @@ asked why they're missing.
 **Deliberately still not built**, because the data honestly doesn't exist in
 this repo — building fake versions would mislead the officials this app is
 for:
-- **Hydrograph chart** (`time_hours` vs. `Q`): needs a Q-vs-time series per
-  basin; only single crossing-time scalars exist per barangay.
-- **HAND/TWI/LC factor breakdown**: only the combined `mean_fsi_score` is in
-  the data, not the individual factor contributions.
-- **"Contributing Basins" tiles / per-basin curves**: `basin_ids` is just a
-  list of numeric IDs, no names or curves.
-- **"Precipitation Overview" hyetograph**: no rainfall time series in this
-  data.
+- **Full per-basin FSI recompute** (rainfall + HAND/TWI/LC combined) is
+  still blocked on raster-to-barangay aggregation and the original design
+  storm's rainfall baseline; `mean_fsi_score` stays a static pipeline
+  output.
 
-Add the corresponding fields to the pipeline's JSON output before building
-any of these.
+Add the corresponding fields/UI before building any of these.
 
-**Hydrograph corner is a labeled placeholder, not a chart.**
-`components/BarangayDetailPanel.tsx` renders a small dashed-border,
-muted-opacity card reading "Hydrograph — No basin flow data available
-yet" directly below the FSI block (dot + susceptibility label + score) —
-"below the FSI corner," matching the same wording used for the existing
-FSI block. This is a deliberate, honest "not yet modeled" placeholder —
-asked of and confirmed by the user rather than either fabricating a curve
-or silently omitting the corner — not a step toward a fake chart; it
-still needs the same pipeline data as the real "Hydrograph chart" bullet
-above before it can become one. Since `BarangayDetailPanel` is the one
-component used for both the sidebar (`hidden md:block`) and the inline
-mobile (`md:hidden`) detail views, this single placeholder covers both
-without extra wiring.
+**Hydrograph corner is a real chart now, for 113 of 115 barangays.**
+`components/BarangayDetailPanel.tsx` lazily fetches
+`public/data/basin_hydrographs.json` (via `lib/hydrographData.ts`'s
+`loadBasinHydrographs()`/`hydrographForBarangay()`) and renders a
+hand-rolled inline SVG polyline chart of basin discharge (`Q`, m³/s) vs.
+time for the selected barangay's largest-overlap-area basin — a barangay
+can touch several basins (up to 36 island-wide); showing only the
+primary one is a documented simplification, not hidden data. The chart is
+labeled with the basin id, its peak discharge, and the real storm
+assumption (`Modeled from a single synthetic {duration}-hour design
+storm, {peak}mm/hr peak.`, pulled from the data's own `storm_params`, not
+hardcoded).
+
+The other 2 of the 115 official barangays — **Kawayan/Burabod** and
+**Kawayan/Poblacion** — keep the original dashed-border, muted-opacity
+"Hydrograph — No basin flow data available for this barangay" placeholder,
+unchanged. This is not a data gap: real polygon-to-raster overlap found
+**zero** pixel intersection between either barangay and any basin (see
+`corrections_applied` in the source JSON below), so there's honestly no
+river-risk curve to show for them — the placeholder is the correct,
+honest state, same as it always was for every barangay before this data
+existed. Since `BarangayDetailPanel` is the one component used for both
+the sidebar (`hidden md:block`) and the inline mobile (`md:hidden`)
+detail views, this covers both without extra wiring.
+
+**Precipitation chart is real too now, gated identically to the
+hydrograph.** A second `DischargeChart` right below the first renders
+`entry.hydrograph.rainfallMmHr` against the same `timeHours` — both
+already present on `PrimaryHydrograph` from the same
+`basin_hydrographs.json` fetch, so this needed no new data, no new fetch,
+and no new loading state: it appears/disappears together with the
+hydrograph (same 113-of-115 coverage, same honest absence for the 2
+FSI-only barangays). `DischargeChart` (`components/DischargeChart.tsx`)
+picked up an optional `ariaLabel` prop for this (defaulting to the exact
+original hardcoded text, so the real hydrograph and Simulation Mode's
+simulated chart are unaffected) and is given a distinct cyan
+(`#0891B2`) so the two series read as clearly different at a glance —
+distinct from both the hydrograph's blue (`#3B82C4`) and Simulation
+Mode's amber (`#D97706`).
+
+**Provenance of `public/data/basin_hydrographs.json`**: built (one-off,
+not checked into this repo as a script) from three files the user
+generated and shared via Google Drive — island-wide `r.watershed` basin
+delineation at `threshold=200` (2,235 raw basins), Kirpich (1940)
+time-of-concentration per basin (`A = 1/Tc`, slope converted from degrees
+via `tan()`, not used directly — an earlier, ~4-5x version of this had a
+unit-conversion bug), and each of the 115 official barangays matched to
+its overlapping basin(s) by actual polygon-to-raster overlap (not
+centroids or name-matching). Only **434 of 2,235** delineated basins
+actually overlap a barangay and have a valid positive reservoir
+coefficient; those are the ones embedded in this file, each with a full
+72-point (`0h`→`~5.9h`, 5-minute step) hydrograph from a single symmetric
+triangular design storm (`peak_mm_hr: 50`, `duration_hours: 2`).
+
+**Hard constraint for future re-imports**: the Drive folder has **two
+non-identical basin delineation runs** whose `basin_id` numbers collide
+but represent different geometries (confirmed by direct value comparison
+— e.g. basin 864 is `A=2.5021` in one run, `A=4.0809` in the other). Only
+the `island_wide_output` folder's files (`island_barangay_basin_map_FIXED
+.json`, `island_basin_runoff.json`, `island_basin_runoff_summary.json` —
+all dated 2026-09-21, explicitly `_FIXED`-suffixed, carrying their own
+`corrections_applied` field) are canonical. The older, top-level
+`island_barangay_basin_map_2235_CORRECT.json` is a superseded draft
+despite its name — it's actually a mislabeled per-basin scalar summary
+with no barangay linkage at all, not a barangay map. Never re-import
+from the older set.
 
 An earlier version of this placeholder lived in `DashboardShell.tsx`'s
 compact-map grid instead (the cell directly below the compact map
@@ -932,9 +1004,198 @@ own FSI block, not the map's `Legend` chip, so a placeholder sitting
 beside the map rather than below the barangay's actual FSI info wasn't
 read as satisfying the request at all.
 
+**HAND/TWI/LC/rainfall factor breakdown is real now too.**
+`components/BarangayDetailPanel.tsx` lazily fetches
+`public/data/fsi_factors.json` (via `lib/fsiFactorData.ts`) and renders a
+four-row bar breakdown (HAND inverted, TWI, LCLU runoff score, 6-hour
+rainfall forecast, each 0-1) below the hydrograph. Unlike the hydrograph,
+there's no dedicated placeholder for missing data here — it's purely
+additive UI that only appears once fetched, matching this file's
+"supplementary, not a replacement" framing for `fsi_recomputed`.
+
+**Provenance and how this was built** (from the same Google Drive project
+the user shared, a separate, earlier — Sept 7-11 — single-watershed FSI
+pipeline than the Sept 19-21 island-wide hydrograph one above):
+`compute_fsi.py`'s own real formula (confirmed by reading it directly) is
+exactly this repo's already-documented `FSI = 0.30·HAND(inverted) +
+0.30·TWI + 0.20·LCLU + 0.20·Rainfall`, each factor min-max normalized
+**globally across the island**, not per-barangay. `fsi_factors.json` was
+built by recomputing that same normalization from the four aligned input
+rasters and reprojected barangay polygons (Python + `rasterio`/`shapely`/
+`pyproj`, one-off, not checked into this repo), then zonal-averaging each
+normalized layer per barangay.
+
+**Two inputs couldn't be downloaded at their canonical size** (the
+Drive MCP connector used to fetch them hard-fails above ~6MB; both the
+canonical `twi_aligned.tif` and `rainfall_aligned.tif` are ~7MB and
+never transferred, retried repeatedly) **and were reconstructed instead**:
+- **Rainfall**: `fetch_rainfall.py`'s own source confirms
+  `rainfall_aligned.tif` is nothing but a 7-point (one per monitored
+  municipality, Maripipi excluded) inverse-distance-weighted
+  interpolation of a 6-hour forecast total, read from the tiny (14KB)
+  `rainfall_timeseries.json`. Recomputing this IDW surface directly from
+  that JSON (same formula, same municipality coordinates) needed no
+  raster download at all.
+- **TWI**: `compute_twi.py` needs flow accumulation (`drain_cell.tif`,
+  16.7MB, also undownloadable) and slope (`slope_aligned.tif`, ~7MB).
+  Substituted **`flow_accum_aligned.tif`** (2.3MB, confirmed identical
+  grid/transform/CRS to the reference `hand_aligned.tif`) for
+  `drain_cell.tif` — this is an **older (Sept 8) artifact than the
+  pipeline's actual Sept 10 `drain_cell.tif`**, so it may not be
+  bit-identical to the canonical flow accumulation, though both come from
+  the same `r.watershed` run on the same DEM. Slope was rebuilt by
+  reprojecting the original, smaller (4.15MB) `slope_utm51n.tif` (EPSG:4326)
+  onto the reference grid with bilinear resampling — the exact same
+  operation `align_fsi_inputs.py`'s `warp_raster()` does to produce the
+  real `slope_aligned.tif`, just run here instead of read pre-built.
+
+**Validated, not just assumed**: the recomputed per-barangay
+`fsi_recomputed` (the weighted recombination of the four factor means)
+was cross-checked against the 115 barangays' authoritative
+`mean_fsi_score` in `barangay_dashboard_data.json` — **correlation 0.85,
+mean signed difference −0.0003 (unbiased), mean absolute difference
+0.038** on the 0-1 scale, largest single outlier +0.23 (San Roque,
+Naval). That level of agreement is consistent with the known
+approximations above (stale flow-accumulation raster, IDW-reconstructed
+rainfall, possibly a different `all_touched` rasterization rule than the
+original pipeline used) rather than a broken join — but it means
+`fsi_factors.json`'s numbers are a good-faith approximation, not a
+byte-for-byte match to whatever the original pipeline would have
+produced with its own canonical rasters. `mean_fsi_score` remains the
+one authoritative score everywhere else in this app; nothing here
+changes it.
+
 **Theme**: the dashboard's post-login background is theme-aware, not one
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
+
+**Simulation Mode is real now too — admin-launched, client-side, ephemeral.**
+`AdminInvitePanel.tsx` has an "Open User Dashboard" button that mounts
+`components/UserDashboardModal.tsx`: a self-contained snapshot of the real
+dashboard (map + barangay list + detail panel, including the real
+hydrograph and factor breakdown, via the same `BarangayList`/
+`BarangayDetailPanel` components the live dashboard uses, reused as-is)
+plus a "Simulation Mode" button that opens
+`components/SimulationModePanel.tsx` for whichever barangay is selected in
+that modal's own list. There an admin types a min/max rain rate (mm/hr)
+and a storm duration (hours) and clicks "Run simulation" to get a
+client-side-recomputed discharge curve — clearly banner-labeled
+`SIMULATED — not real data`, in a distinct amber color and using a
+distinct chart stroke color (`#D97706`, vs. the real chart's `#3B82C4`),
+rendered via the shared `components/DischargeChart.tsx` (extracted from
+what used to be a local `HydrographChart` function inside
+`BarangayDetailPanel.tsx`, so the real and simulated curves are pixel-for-
+pixel the same chart shape and directly comparable).
+
+**The recompute reuses the real basin and the real formula, not a new
+one.** `lib/simulationMode.ts`'s `simulateForBarangay()` calls the exact
+same `hydrographForBarangay()` used for the real chart (same largest-
+overlap-basin selection, so a simulation always targets the identical
+basin the real chart shows for that barangay), then feeds that basin's
+own `A` (now exposed on `PrimaryHydrograph` — previously loaded but
+dropped on the way out) through the exact same analytical recurrence
+documented above: `Q[t+1] = Q[t]·e^(-AΔt) + R[t+1]·(1-e^(-AΔt))`, `Q[0] =
+0`. The only new thing is the rainfall series fed into it: a **raised**
+triangular hyetograph (`buildRaisedTriangularHyetograph()`) — ramps from
+the admin's `minRate` up to `maxRate` over half the duration, back down to
+`minRate` over the other half, then holds at `minRate` (a background
+rate, not a fabricated drop to zero) for the rest of a fixed 6-hour
+display window (same window/step as the real storm, so both charts share
+an x-axis). This is a literal generalization of the real pipeline's
+single-peak `0 → peak → 0` triangle, not an invented shape — setting
+`minRate = 0` reproduces it exactly.
+
+**Sanity-checked, not just written and shipped**: running a simulation
+with `minRate=5, maxRate=50, duration=2h` for Esperanza (Cabucgayan)
+against its real basin 866 produced a peak of 42.5 m³/s, versus the real
+static hydrograph's 43.3 m³/s for the same basin — close, as expected
+given the floor-vs-zero-tail and narrower-ramp-range differences, not
+suspiciously identical or wildly off. Confirms the basin/`A`/formula
+plumbing is correct end to end.
+
+**Why a second map component (`components/StaticIslandMap.tsx`) doesn't
+reopen the "one persistent map" decision** (see below): it is a
+genuinely separate, read-only renderer — no pan/zoom/pointer handlers, no
+`view`/`resetToken` state, not a mode or prop on `BiliranMap` — that
+fetches the same `/data/geo/barangays.geojson` and reuses the same
+`lib/geo.ts` projection helpers `BiliranMap.tsx` already uses, just to
+color barangay polygons by `mean_fsi_score` inside the modal. The one
+real, interactive, persistent `<BiliranMap>` still only ever mounts once,
+in `app/page.tsx`.
+
+**Two-modals-are-siblings, not nested — this bit once.** `UserDashboardModal`
+is rendered as a JSX *sibling* of the outer `Modal` in `AdminInvitePanel.tsx`
+(both wrapped in a fragment), not as a child placed inside the Invitations
+`Modal`'s own children. Nesting it inside would put its `fixed inset-0`
+backdrop inside an ancestor that has `backdrop-blur-xl` — `backdrop-filter`
+(like `transform`) establishes a new containing block for `position: fixed`
+descendants, so the inner modal would end up positioned relative to the
+outer dialog's small `max-w-sm` box instead of the viewport, squashing all
+its content into a tiny area (found and fixed via Playwright — list rows
+were rendering "outside the viewport" until this was corrected).
+
+**Real, live weather is connected now — this app's first live external
+API call.** Everything else in this app is static JSON or Supabase;
+`app/api/weather/route.ts` is the one exception, proxying Open-Meteo's
+free, no-key forecast API (the same one the external pipeline's
+`fetch_rainfall.py` already used) server-side, cached ~15 minutes via
+Next's `fetch(..., { next: { revalidate: 900 } })`. `lib/liveWeather.ts`
+fetches it client-side (`loadWeather(municipality)`, with its own short
+client-side cache) and maps Open-Meteo's WMO weather code onto this app's
+existing 5-bucket icon system (`conditionForWeatherCode` — a documented
+judgment call, not an exact standard mapping, same spirit as
+`align_fsi_inputs.py`'s own documented LULC-runoff-score judgment calls).
+Coordinates for the 7 monitored municipalities live in the new
+`lib/municipalityCoords.ts` — **not invented**: the exact same 7 points
+already read directly from the external pipeline's own
+`rainfall_timeseries.json` during the FSI factor breakdown work earlier
+this session (Maripipi intentionally absent, same exclusion as
+everywhere else in this app).
+
+**The map's weather icon changed meaning — a deliberate, discussed
+decision, not an accident.** Before this, `BiliranMap.tsx`'s per-
+municipality icon and corner ribbon were driven by
+`weatherConditionFor(crossing)` — the *modeled flood-risk crossing time*,
+explicitly documented as "not a separately fabricated weather value."
+That function is gone; `weatherConditionForBucket()` replaces it, driven
+by real Open-Meteo data instead (fetched once for all 7 municipalities on
+mount, refreshed every ~15 minutes, via a `weatherByMunicipality` state in
+the main `BiliranMap` component). The modeled Alert/Danger countdown text
+(`LiveUpdateBanner.tsx`, `WeatherBadge`'s tooltip) stays exactly as it
+was — the two signals were decoupled on purpose (confirmed with the
+user, who chose this over adding a second parallel weather element) so
+the icon stops silently proxying flood risk as weather; `WeatherBadge`'s
+tooltip now names both signals separately so neither implies the other.
+A municipality whose weather hasn't loaded yet (or whose fetch failed)
+simply shows no icon that pass — no placeholder/fake condition invented.
+
+**Simulation Mode's "Use today's forecast"** (`SimulationModePanel.tsx`)
+is the one other place this touches: a button that prefills `minRate`/
+`maxRate` from the real hourly precipitation range for the selected
+barangay's municipality — still fully editable afterward, still feeding
+the same client-side "what if" recompute. This is the only real data
+Simulation Mode touches; its SIMULATED banner and output are unaffected.
+
+**Known limitation of this session's own verification**: this sandbox's
+outbound network policy blocks `api.open-meteo.com` (confirmed via the
+proxy's own diagnostic as an organization-policy 403, not a bug —
+per its own guidance, not something to retry). Everything above was
+verified end-to-end against **mocked** `/api/weather` responses via
+Playwright (icon rendering, the decoupling, the Simulation Mode prefill,
+all confirmed working) — but live connectivity to the real Open-Meteo
+endpoint from *this* environment couldn't be exercised. The code follows
+Open-Meteo's actual documented response shape and this app's own
+external pipeline's prior successful use of the same API, and should work
+unmodified in the real deployed environment, which has no such
+restriction — but a real end-to-end pass (hit `/api/weather?municipality=
+Naval` from a real deployment) is still worth doing once one exists.
+
+**A planned research pass didn't happen this session, for the same
+reason**: comparing real Open-Meteo data against `fsi_factors.json`'s
+stored rainfall values, to help answer the still-blocked full-FSI-
+recompute rainfall-baseline question (see "Deliberately still not built"
+above), needed the same blocked network access. Still open — worth
+revisiting from an environment that can actually reach Open-Meteo.
 
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
@@ -944,20 +1205,32 @@ provenance or oddities, not for changes here: GDAL+numpy2.x incompatible
 (pin `numpy<2`); `numba`/`pysheds`/`rasterio` blocked by Windows Smart App
 Control on the dev machine (GRASS via QGIS Processing used instead);
 `r.watershed`'s "basin" output is small local sub-catchments, not a true
-cumulative watershed; explicit-Euler numerical schemes need `A > 2/dt` to
-stay stable (the project switched to the exact analytical formula
-`Q2 = Q1·e^(-AΔt) + R·(1-e^(-AΔt))` for this reason — a ~3-5% shift down
-from earlier Euler-computed peak Q values for the 6 named rivers); a
-known open bug is source-level UTF-8 double-encoding in
-`barangay_biliran.geojson` (affects names like "Capiñahan," "Santo Niño").
+cumulative watershed — reused island-wide (at `threshold=200`, 2,235
+basins) for the per-basin hydrograph data described above, the opposite
+of its original rejected use for finding one big river; explicit-Euler
+numerical schemes need `A > 2/dt` to stay stable (the project switched to
+the exact analytical formula `Q2 = Q1·e^(-AΔt) + R·(1-e^(-AΔt))` for this
+reason — first found as a ~3-5% shift down from earlier Euler-computed
+peak Q values for the original 6 named rivers, then found to be load-
+bearing rather than cosmetic once the same pipeline was extended
+island-wide: the Euler approximation produced physically impossible
+peak-Q values, exceeding the input storm's own peak, for 354 of the 2,235
+basins); other bugs found and fixed during that same island-wide
+expansion: a fake "basin" that was actually unassigned NoData pixels
+misread as real, a barangay-name collision that silently dropped 5
+barangays from an earlier join attempt, and three files at one point
+built from two incompatible basin rasters (see the hard constraint on
+`_FIXED` vs. `_2235_CORRECT` files above); a known open bug is
+source-level UTF-8 double-encoding in `barangay_biliran.geojson` (affects
+names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart, FSI factor breakdown, and precipitation view are blocked on pipeline data this repo doesn't have — see "Deliberately still not built" above.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, see above) instead of proxying modeled flood risk — full per-basin FSI recompute is still not built — see "Deliberately still not built" above. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared; full per-basin FSI recompute (item 2) needs its own scoped investigation into aggregation method + rainfall baseline first — the planned Open-Meteo-vs-`fsi_factors.json` research pass toward that is still outstanding too, blocked on this session's own sandboxed network access (see above); the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
 - Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
-- The "Invitations" admin panel is create/list only; no revoke/expire-early or edit UI.
-- None of the new Supabase-dependent code (`/api/admin/invite`, `lib/profile.ts`'s RLS assumption) has been run against a real Supabase project — only linted, type-checked, and built. Verify the `user_profiles` "read own row" RLS policy actually exists before relying on the Profile panel.
+- The "Invitations" admin panel now has create/list/edit/revoke **and expire-early** — `AdminInvitePanel.tsx`'s edit-row includes an `expires_at` field (`<input type="datetime-local">`, with a "Clear" button to null it back to "no expiry"), PATCHed via `app/api/admin/invite/[id]/route.ts`, which now accepts `expires_at` in its body alongside `email`/`office`. Can set/shorten/extend/clear freely (no one-way-only restriction — an arbitrary editable expiry isn't a meaningful new privilege given the admin already has full edit/revoke control over unredeemed rows). `app/api/activate/route.ts`'s existing expiry check (a plain `Date` comparison) needed no changes to honor it. Broader admin-panel direction (user management for already-activated accounts, an audit log of admin actions) is still an open discussion, not yet designed.
+- **`user_profiles`'s "read own row" and "update own row" RLS policies are now verified real, not just assumed** — confirmed directly against the live "Biliran-flood" Supabase project (`qlkkengqkyjljzvtuoqh`) via `pg_policies` (both exist, both scoped `auth.uid() = user_id`, matching `avatars-storage-setup.sql`'s source exactly) **and** by actually exercising them: `SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims = '{"sub": "<uuid>", ...}'` (simulating PostgREST's own JWT-claims mechanism) inside a read-only/rolled-back transaction — querying as the real admin's own `user_id` returned exactly their one row and nothing else; querying as a fabricated `user_id` returned zero rows; a rolled-back self-`UPDATE` under the same simulated claims succeeded for the real `user_id`. `storage.objects`'s `"avatars: users manage own folder"` policy was checked the same way (exists, matches its source file exactly) — though for this app's actual upload flow it's supplementary defense-in-depth, not the real enforcement boundary: `app/api/profile/avatar-upload-url/route.ts` mints a service-role-signed upload URL already scoped server-side to `{user.id}/avatar`, so the client never gets broad `storage.objects` access to begin with. `invitation_codes` has a blanket `"no client access"` deny-all policy, correct since every real access goes through `supabaseAdmin` in `app/api/admin/*`. `get_advisors(security)` surfaced one unrelated finding — "Leaked Password Protection Disabled" (HaveIBeenPwned check off) — a Supabase Dashboard Auth-settings toggle, not fixable via SQL/migration tools, worth flipping manually. **Still not verified**: the actual browser sign-in/session flow, the `/api/admin/invite` create/edit/revoke/expire cycle with a real admin JWT, and a real `/activate` redemption — those need a real signed-in session, still blocked on an invited account (abylonmonsales@gmail.com, code `5E6B059D`) being redeemed and its credentials shared.
 - The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.

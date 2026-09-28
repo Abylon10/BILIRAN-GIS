@@ -738,7 +738,7 @@ export default function HomePage() {
           onSignOut={handleSignOut}
         />
       )}
-      {showAdminPanel && isAdmin && <AdminInvitePanel onClose={() => setShowAdminPanel(false)} />}
+      {showAdminPanel && isAdmin && <AdminInvitePanel onClose={() => setShowAdminPanel(false)} theme={theme} />}
     </div>
   )
 }

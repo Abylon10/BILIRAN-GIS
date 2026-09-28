@@ -131,9 +131,9 @@ export function urgencyTierColor(label: FsiLabel): string {
     case 'Very High':
       return '#C0392B'
     case 'High':
-      return '#E8A33D'
+      return '#E8592D'
     case 'Moderate':
-      return '#D9B23C'
+      return '#F2D24D'
     case 'Low':
       return '#8CB93D'
     case 'Very Low':
@@ -150,8 +150,8 @@ export function urgencyTierColor(label: FsiLabel): string {
 const SCORE_COLOR_STOPS: [number, [number, number, number]][] = [
   [0.1, [79, 138, 69]], // #4F8A45 green — Very Low
   [0.3, [140, 185, 61]], // #8CB93D yellow-green — Low
-  [0.5, [217, 178, 60]], // #D9B23C yellow — Moderate
-  [0.7, [232, 163, 61]], // #E8A33D orange — High
+  [0.5, [242, 210, 77]], // #F2D24D lighter yellow — Moderate
+  [0.7, [232, 89, 45]], // #E8592D red-orange — High
   [0.9, [192, 57, 43]], // #C0392B red — Very High
 ]
 
