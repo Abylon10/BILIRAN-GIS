@@ -504,16 +504,28 @@ update will error on the unknown column) and a new "Recipient name
 falls back to "Hello,". `office`/`name`/`code` are HTML-escaped before
 interpolation into the email's HTML body.
 
-**Verified reachable from this sandbox — unlike Open-Meteo.** A direct
-runtime check of `sendInvitationEmail()` with a deliberately fake
-`RESEND_API_KEY` reached `api.resend.com` and got back a real API-level
-403 (invalid key), not a network-level block — confirming this
-sandbox's egress restriction is specific to `api.open-meteo.com`
-(organization policy, see the live-weather section below), not a
-blanket block on third-party APIs. A real send with a real key still
-hasn't been exercised end-to-end in this conversation (no real
-`RESEND_API_KEY` has been provided) — worth doing once one exists,
-rather than assuming success from the reachability check alone.
+**`api.resend.com` is blocked from this sandbox — same restriction as
+Open-Meteo, not an exception to it.** An initial runtime check with a
+deliberately fake `RESEND_API_KEY` got back a 403 shaped like a real
+Resend API error (`{ name: 'application_error', ... }`) and was
+misread as one. A follow-up check with a **real** key (provided by the
+user) reproduced the identical response — and inspecting the raw
+response headers this time surfaced `x-deny-reason: host_not_allowed`,
+which is this sandbox's own egress proxy, not Resend: its README
+(`/root/.ccr/README.md`) confirms a 403/407 from the proxy means the
+destination host isn't on this session's organization-allowed list, and
+explicitly says not to retry or route around it, only report it.
+**So: real delivery through Resend could not be verified from this
+sandbox at all** — this corrects the earlier claim here (and in
+[Abylon10/BILIRAN-GIS#15](https://github.com/Abylon10/BILIRAN-GIS/pull/15)'s
+description) that Resend was reachable; it wasn't, the proxy's block
+page just happened to resemble a real API error closely enough to be
+mistaken for one on first read. The code itself is unaffected — this is
+purely a limitation of verifying it from *this* environment, not a bug
+in `lib/email.ts`. A real send still needs to be exercised once from a
+deployed environment without this restriction (e.g. the actual Vercel/
+production deployment) before this feature's delivery path is
+considered proven, not just code-reviewed.
 
 **Header profile button** (`components/HeaderProfileButton.tsx`) replaced
 the old hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
