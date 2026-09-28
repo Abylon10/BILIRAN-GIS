@@ -460,6 +460,61 @@ Administrator" toggle as an actual admin (`app/page.tsx` auto-opens
 true) — not via the header profile button's panel, which has no
 admin-panel entry point (see below and "Key architectural decisions").
 
+**Invitations are emailed automatically now — this app's first
+self-sent transactional email.** Contrast with "Forgot password is
+entirely self-service" above, where Supabase sends its own verification
+email and this repo sends/templates nothing itself — this is the
+opposite case: `lib/email.ts`'s `sendInvitationEmail()` owns both the
+copy and the send, via [Resend](https://resend.com) (the `resend` npm
+package). Both `app/api/admin/invite/route.ts` (POST/create) and
+`app/api/admin/invite/[id]/route.ts` (PATCH/edit) call it after a
+successful database write, building the activation link as
+`${req.nextUrl.origin}/activate?code=${code}` (no new env var needed for
+this — `req.nextUrl.origin` is free on the `NextRequest` already passed
+in, and adapts automatically across preview/prod deployments, unlike a
+hardcoded site-URL var would). **Resend-on-edit is intentional and safe
+by construction**: PATCH already refuses any redeemed row (409 via
+`loadUnredeemedInvite`), so a PATCH-triggered resend can never re-notify
+someone who already activated. Revoke (`DELETE`) sends nothing — not
+asked for, out of scope.
+
+**Graceful degradation is the actual design, not an afterthought.**
+`lib/email.ts` reads `RESEND_API_KEY` at module scope but — unlike
+`lib/supabaseAdmin.ts`'s `!`-asserted vars — treats it as an optional,
+handled case: unset means `sendInvitationEmail()` returns `{ ok: false,
+error: '...' }` rather than throwing, and the same happens if the actual
+`resend.emails.send()` call fails (wrapped in try/catch, since the SDK
+can throw on network-level failures too). Either way, creating or
+editing the invitation row **always succeeds regardless of email
+outcome** — the POST/PATCH responses add `emailSent`/`emailError`
+fields alongside the existing `{ invitation }` shape, and
+`components/AdminInvitePanel.tsx` surfaces both: "Emailed to X." on
+success, or "Created/Updated, but the email couldn't be sent (...) —
+share the code manually" on failure, with the raw code always still
+shown either way (that fallback already existed and must never regress).
+
+The email is personalized by an optional **recipient name** — a new
+nullable `invitee_name` column (`supabase/invitation-name-field-setup.sql`,
+same "not auto-applied, run by hand in the Supabase SQL editor" pattern
+as `avatars-storage-setup.sql`/`profile-name-fields-setup.sql` — **this
+one must be run before the feature works end to end**, or the insert/
+update will error on the unknown column) and a new "Recipient name
+(optional)" field on both the create form and the inline edit row in
+`AdminInvitePanel.tsx`. A present name produces "Hi {name},"; absent
+falls back to "Hello,". `office`/`name`/`code` are HTML-escaped before
+interpolation into the email's HTML body.
+
+**Verified reachable from this sandbox — unlike Open-Meteo.** A direct
+runtime check of `sendInvitationEmail()` with a deliberately fake
+`RESEND_API_KEY` reached `api.resend.com` and got back a real API-level
+403 (invalid key), not a network-level block — confirming this
+sandbox's egress restriction is specific to `api.open-meteo.com`
+(organization policy, see the live-weather section below), not a
+blanket block on third-party APIs. A real send with a real key still
+hasn't been exercised end-to-end in this conversation (no real
+`RESEND_API_KEY` has been provided) — worth doing once one exists,
+rather than assuming success from the reachability check alone.
+
 **Header profile button** (`components/HeaderProfileButton.tsx`) replaced
 the old hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
 Sign out) entirely — a persistent element next to the day/night toggle,

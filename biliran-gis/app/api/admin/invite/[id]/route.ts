@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { requireAdmin } from '@/lib/requireAdmin'
+import { sendInvitationEmail } from '@/lib/email'
 
 async function loadUnredeemedInvite(id: number) {
   const { data, error } = await supabaseAdmin
@@ -48,7 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: guard.error }, { status: guard.status })
   }
 
-  const { email, office, expires_at } = await req.json()
+  const { email, office, expires_at, invitee_name } = await req.json()
   if (!email || !office) {
     return NextResponse.json({ error: 'Email and office are required.' }, { status: 400 })
   }
@@ -58,19 +59,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // rather than erroring, same lenient style as expiresInDays in the
   // sibling create route.
   const nextExpiresAt = typeof expires_at === 'string' ? expires_at : null
+  // invitee_name: same explicit-clear convention as expires_at above — a
+  // missing/empty value clears the name rather than silently preserving
+  // whatever was there, since the edit form always sends the field's
+  // current (possibly now-blanked) value (see AdminInvitePanel.tsx).
+  const nextInviteeName = typeof invitee_name === 'string' && invitee_name.trim() ? invitee_name.trim() : null
 
   const { data, error } = await supabaseAdmin
     .from('invitation_codes')
-    .update({ email, office, expires_at: nextExpiresAt })
+    .update({ email, office, invitee_name: nextInviteeName, expires_at: nextExpiresAt })
     .eq('id', id)
-    .select('id, code, email, office, expires_at')
+    .select('id, code, email, office, invitee_name, expires_at')
     .single()
 
   if (error) {
     return NextResponse.json({ error: 'Could not update invitation.' }, { status: 500 })
   }
 
-  return NextResponse.json({ invitation: data })
+  // Editing only ever touches an unredeemed row (guarded above), so this
+  // can never re-notify someone who already activated — safe by
+  // construction to always resend here, no extra check needed.
+  const activateUrl = `${req.nextUrl.origin}/activate?code=${data.code}`
+  const emailResult = await sendInvitationEmail({
+    to: data.email,
+    name: data.invitee_name,
+    office: data.office,
+    code: data.code,
+    activateUrl,
+  })
+
+  return NextResponse.json({
+    invitation: data,
+    emailSent: emailResult.ok,
+    emailError: emailResult.ok ? null : emailResult.error,
+  })
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
