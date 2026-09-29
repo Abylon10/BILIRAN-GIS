@@ -1841,19 +1841,53 @@ content now.
 z-[18]` opaque wrapper, its own header row, and the "Open User Dashboard"
 button/`showUserDashboard` state entirely (see the "Superseded" note
 earlier in this file) — it's now plain tab content, just a heading plus
-the unchanged create/list/edit/revoke form and logic.
+the create/list/edit/revoke form and logic.
+
+**Follow-up round — status badges, search/filter, explicit Resend** (a
+separate request, referencing a second ChatGPT-drafted spec the user
+shared for an "Account Invitations" admin page). Confirmed directly
+before building: `revoke` (`DELETE`, `app/api/admin/invite/[id]/route.ts`)
+**hard-deletes** the row — there's no persisted state left once revoked,
+so a `Revoked` status can't be shown afterward without a real schema
+change (a `revoked_at` column, plus a new guard in
+`app/api/activate/route.ts` so a revoked code can't still redeem). Given
+the choice, the user picked keeping revoke as a hard delete rather than
+adding that column — so the list now derives exactly **three** statuses,
+computed client-side, nothing new stored: `Pending` (not redeemed, not
+expired), `Accepted` (`redeemed`), `Expired` (not redeemed,
+`expires_at` in the past) — see `inviteStatus()` in `AdminInvitePanel.tsx`,
+rendered as a small colored badge per row. A search box (matches
+email/office/`invitee_name`, case-insensitive) and a status `<select>`
+filter narrow the list client-side (`filteredInvitations`), same
+in-memory data, no new fetch. A dedicated **Resend** button sits next to
+Edit/Revoke on every unredeemed row: it calls the existing `PATCH`
+endpoint with the row's own current values completely unchanged — PATCH
+already re-sends the invitation email on every successful edit (see
+above), so this is just that same effect exposed as its own one-click
+action, with **no new backend route**. Safe by the same construction as
+edit/revoke: PATCH already refuses a redeemed row (409), so Resend can
+only ever appear on, and only ever target, an unredeemed invitation.
 
 **Users tab** (new, read-only — `components/AdminUsersTab.tsx`). New
 `app/api/admin/users/route.ts` (`GET`, admin-gated via `requireAdmin`,
 mirroring `app/api/admin/invite/route.ts`'s own pattern): `user_profiles`
 has no email column (see this file's structured-name-fields note), so
 this merges `supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })` (for
-email/`created_at`) with `user_profiles` rows (office, access_level, name
-fields) by `user_id` — the same two-source join `app/api/activate/route.ts`'s
-own write path already implies (it creates one row in each), sorted by
-joined-date descending. No edit/delete affordance in the UI at all — a
-deliberate scope choice, not an oversight; user management (promote/
-demote, deactivate) remains an open item, same as before this redesign.
+email/`created_at`/`banned_until`) with `user_profiles` rows (office,
+access_level, name fields) by `user_id` — the same two-source join
+`app/api/activate/route.ts`'s own write path already implies (it creates
+one row in each), sorted by joined-date descending. No edit/delete
+affordance in the UI at all — a deliberate scope choice, not an
+oversight; user management (promote/demote) remains an open item, same as
+before this redesign. **Active/Disabled status column** (same follow-up
+round as the Invitations changes above): derived from Supabase Auth's own
+real `banned_until` field on the `listUsers()` response (confirmed via
+`@supabase/auth-js`'s own types — `banned_until?: string`, set to a
+far-future timestamp for an indefinite ban, absent for an active user) —
+a genuine signal from Supabase Auth itself, not something this app tracks
+or invents. Deliberately a **label, not a toggle**: this tab stays
+read-only, so disabling/re-enabling a user is still only done from the
+Supabase dashboard directly, not from this app.
 
 **Not built here, same as the mockup's own unsupported panels**: a
 "System Status" panel, an Activity Log tab, Reports, Settings. All

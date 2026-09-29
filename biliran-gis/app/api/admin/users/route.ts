@@ -3,11 +3,15 @@
 // Admin-only, read-only: lists already-activated accounts for the admin
 // dashboard's Users tab (components/AdminUsersTab.tsx). user_profiles has
 // no email column (see CLAUDE.md's structured-name-fields note), so this
-// merges supabaseAdmin.auth.admin.listUsers() (email, created_at) with
-// user_profiles rows (office, access_level, name fields) by user_id — the
-// same two-source join app/api/activate/route.ts's own write path already
-// implies (it creates one row in each). No edit/delete here — deliberately
-// read-only, per the user's own explicit scope choice for this tab.
+// merges supabaseAdmin.auth.admin.listUsers() (email, created_at,
+// banned_until) with user_profiles rows (office, access_level, name
+// fields) by user_id — the same two-source join app/api/activate/route.ts's
+// own write path already implies (it creates one row in each). No
+// edit/delete here — deliberately read-only, per the user's own explicit
+// scope choice for this tab: `banned_until` is surfaced as a plain
+// Active/Disabled label, not a toggle this route or the UI can set —
+// disabling a Supabase Auth user is done from the Supabase dashboard, not
+// this app.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
@@ -42,6 +46,10 @@ export async function GET(req: NextRequest) {
       title: profile?.title ?? null,
       firstName: profile?.first_name ?? null,
       familyName: profile?.family_name ?? null,
+      // Supabase sets this to a far-future timestamp for an indefinite
+      // ban and clears it (undefined) for an active user — a real signal
+      // from Supabase Auth itself, not something this app tracks.
+      disabled: Boolean(u.banned_until && new Date(u.banned_until).getTime() > Date.now()),
       // Prefer the profile row's own created_at (when the account was
       // actually activated in this app) over the auth user's — for every
       // real account these come from the same /api/activate transaction

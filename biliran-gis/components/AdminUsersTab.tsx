@@ -4,7 +4,9 @@
 // activated accounts (app/api/admin/users/route.ts). Deliberately
 // read-only, per the user's own explicit scope choice for this tab: no
 // edit/promote/demote affordance here, just visibility into who has an
-// account.
+// account. The Active/Disabled column reflects Supabase Auth's own real
+// `banned_until` field (see that route's own comment) — a status label,
+// not a toggle; disabling a user is done from the Supabase dashboard.
 
 'use client'
 
@@ -20,6 +22,7 @@ interface AdminUser {
   firstName: string | null
   familyName: string | null
   joinedAt: string
+  disabled: boolean
 }
 
 async function getToken(): Promise<string | null> {
@@ -90,6 +93,7 @@ export default function AdminUsersTab() {
               <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Office</th>
               <th className="px-3 py-2 font-medium">Access level</th>
+              <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Joined</th>
             </tr>
           </thead>
@@ -100,6 +104,18 @@ export default function AdminUsersTab() {
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.email ?? '—'}</td>
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.office ?? '—'}</td>
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.accessLevel ?? '—'}</td>
+                <td className="px-3 py-2">
+                  <span
+                    className="rounded-full px-2 py-0.5 text-xs font-semibold"
+                    style={
+                      u.disabled
+                        ? { background: 'rgba(192, 57, 43, 0.15)', color: '#C0392B' }
+                        : { background: 'rgba(44, 95, 62, 0.15)', color: '#2C5F3E' }
+                    }
+                  >
+                    {u.disabled ? 'Disabled' : 'Active'}
+                  </span>
+                </td>
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{new Date(u.joinedAt).toLocaleDateString()}</td>
               </tr>
             ))}

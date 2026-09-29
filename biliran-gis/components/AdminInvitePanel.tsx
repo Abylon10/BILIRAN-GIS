@@ -18,8 +18,17 @@
 // UserDashboardModal as a sibling overlay; both are gone now that
 // AdminShell provides the shared header/tab chrome and "Rainfall &
 // Scenarios" is its own tab rendering UserDashboardModal directly
-// (embedded) instead. The form/list/edit/revoke logic below is otherwise
+// (embedded) instead. The form/edit/revoke logic below is otherwise
 // unchanged.
+//
+// The list itself gained a derived Pending/Accepted/Expired status badge,
+// a search box (email/office/name), a status filter, and a dedicated
+// "Resend" button (reuses the PATCH endpoint with the row's own
+// unchanged values — PATCH already resends on every edit, so this is
+// just a no-op edit exposed as its own action, no new route needed). No
+// "Revoked" status: revoking hard-deletes the row (see inviteStatus's own
+// comment below), so there's nothing left to label afterward — a
+// deliberate scope decision, not an oversight.
 
 'use client'
 
@@ -35,6 +44,27 @@ interface Invitation {
   redeemed: boolean
   expires_at: string | null
   redeemed_at: string | null
+}
+
+// Derived, not stored — "Revoked" isn't one of these: revoking an
+// invitation (DELETE, app/api/admin/invite/[id]/route.ts) hard-deletes
+// the row, so there's no persisted state left to label afterward. Adding
+// a real, filterable "Revoked" status would need a soft-revoke column
+// plus a matching guard in app/api/activate/route.ts (otherwise a
+// "revoked" code would still redeem) — a deliberate scope decision to
+// leave that as-is for now, not an oversight.
+type InviteStatus = 'Pending' | 'Accepted' | 'Expired'
+
+function inviteStatus(inv: Invitation): InviteStatus {
+  if (inv.redeemed) return 'Accepted'
+  if (inv.expires_at && new Date(inv.expires_at).getTime() < Date.now()) return 'Expired'
+  return 'Pending'
+}
+
+const STATUS_COLORS: Record<InviteStatus, string> = {
+  Pending: '#8A4B12',
+  Accepted: '#2C5F3E',
+  Expired: '#C0392B',
 }
 
 // Supabase returns expires_at as an ISO 8601 UTC string, but
@@ -73,6 +103,12 @@ export default function AdminInvitePanel() {
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ invitation: Invitation; emailSent: boolean; emailError: string | null } | null>(null)
   const [invitations, setInvitations] = useState<Invitation[]>([])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<InviteStatus | 'all'>('all')
+  // Set from a successful resend, scoped to the row it applies to — same
+  // pattern as editResult below, just for the dedicated Resend button
+  // rather than a save.
+  const [resendResult, setResendResult] = useState<{ id: number; emailSent: boolean; emailError: string | null } | null>(null)
 
   // Inline edit state — at most one row editable at a time.
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -160,6 +196,7 @@ export default function AdminInvitePanel() {
   function startEdit(inv: Invitation) {
     setRowError(null)
     setEditResult(null)
+    setResendResult(null)
     setEditingId(inv.id)
     setEditEmail(inv.email)
     setEditOffice(inv.office)
@@ -214,6 +251,52 @@ export default function AdminInvitePanel() {
     }
   }
 
+  // Dedicated "Resend" — reuses the PATCH endpoint with the row's own
+  // current values unchanged (PATCH already resends the email on every
+  // successful edit; a no-op edit is a legitimate, safe way to trigger
+  // just that, with no new backend route needed). Only ever called for an
+  // unredeemed row (the only kind this button renders for), so this can
+  // never re-notify someone who already activated.
+  async function resendInvite(inv: Invitation) {
+    setRowError(null)
+    setResendResult(null)
+    setRowBusyId(inv.id)
+
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${inv.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: inv.email,
+          office: inv.office,
+          invitee_name: inv.invitee_name,
+          expires_at: inv.expires_at,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setRowError(data.error ?? 'Could not resend invitation.')
+        return
+      }
+
+      setResendResult({ id: inv.id, emailSent: data.emailSent, emailError: data.emailError })
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
+      setRowBusyId(null)
+    }
+  }
+
   async function revoke(id: number) {
     setRowError(null)
     setRowBusyId(id)
@@ -248,7 +331,17 @@ export default function AdminInvitePanel() {
     }
   }
 
-  // Renders the User Dashboard view instead of (never alongside) the
+  const filteredInvitations = invitations.filter((inv) => {
+    if (statusFilter !== 'all' && inviteStatus(inv) !== statusFilter) return false
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return (
+      inv.email.toLowerCase().includes(q) ||
+      inv.office.toLowerCase().includes(q) ||
+      (inv.invitee_name ?? '').toLowerCase().includes(q)
+    )
+  })
+
   return (
     <div className="flex flex-col">
       <h2 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
@@ -338,14 +431,41 @@ export default function AdminInvitePanel() {
       </form>
 
       {invitations.length > 0 && (
-        <div className="mt-5 max-h-64 overflow-y-auto border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+        <div className="mt-5 border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search email, office, or name"
+              className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs outline-none"
+              style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as InviteStatus | 'all')}
+              className="shrink-0 rounded-md border px-2 py-1.5 text-xs outline-none"
+              style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)', background: 'var(--card-bg)' }}
+            >
+              <option value="all">All statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Accepted">Accepted</option>
+              <option value="Expired">Expired</option>
+            </select>
+          </div>
+
           {rowError && (
             <p role="alert" className="mb-2 rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-xs text-[#8A4B12]">
               {rowError}
             </p>
           )}
-          <ul className="space-y-2 text-xs">
-            {invitations.map((inv) => {
+          {filteredInvitations.length === 0 && (
+            <p className="py-3 text-center text-xs" style={{ color: 'var(--text-soft)' }}>
+              No invitations match.
+            </p>
+          )}
+          <ul className="max-h-64 space-y-2 overflow-y-auto text-xs">
+            {filteredInvitations.map((inv) => {
               const busy = rowBusyId === inv.id
               if (editingId === inv.id) {
                 return (
@@ -417,15 +537,32 @@ export default function AdminInvitePanel() {
                   </li>
                 )
               }
+              const status = inviteStatus(inv)
               return (
                 <li key={inv.id} className="space-y-0.5">
                   <div className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
-                    <span className="truncate">{inv.email} · {inv.office}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: `${STATUS_COLORS[status]}26`, color: STATUS_COLORS[status] }}
+                      >
+                        {status}
+                      </span>
+                      <span className="truncate">{inv.email} · {inv.office}</span>
+                    </span>
                     {inv.redeemed ? (
                       <span className="font-mono shrink-0">redeemed</span>
                     ) : (
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="font-mono">{inv.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => resendInvite(inv)}
+                          disabled={busy}
+                          className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy ? '…' : 'Resend'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => startEdit(inv)}
@@ -456,6 +593,13 @@ export default function AdminInvitePanel() {
                       {editResult.emailSent
                         ? `Emailed to ${inv.email}.`
                         : `Updated, but the email couldn't be sent${editResult.emailError ? ` (${editResult.emailError})` : ''} — share the code manually.`}
+                    </div>
+                  )}
+                  {resendResult && resendResult.id === inv.id && (
+                    <div className="text-[10px]" style={{ color: resendResult.emailSent ? '#2C5F3E' : '#8A4B12' }}>
+                      {resendResult.emailSent
+                        ? `Emailed to ${inv.email}.`
+                        : `Couldn't resend the email${resendResult.emailError ? ` (${resendResult.emailError})` : ''} — share the code manually.`}
                     </div>
                   )}
                 </li>
