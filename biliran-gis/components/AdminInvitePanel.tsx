@@ -11,25 +11,20 @@
 // existing expiry check (a plain Date comparison) needs no changes to
 // honor whatever this sets.
 //
-// This is the admin landing now — app/page.tsx opens it for any admin
-// reveal (see its own comment there), not a modal reachable from the
-// normal dashboard. It's a full-screen opaque takeover (fixed inset-0
-// z-[18], same explicit-opaque-background technique as
-// UserDashboardModal — the shared Modal's backdrop is translucent by
-// design, which used to let the live map/dashboard bleed through behind
-// this exact panel), sitting ABOVE .bfw-map-shell (z-15) and .bfw-dash
-// (z-10) so it fully occludes them, but BELOW the persistent header row
-// (z-20, Profile/sign-out/day-night) so that chrome stays reachable the
-// entire time an admin is here — a deliberate choice, since there's no
-// close button on this view itself (see below). No map/dashboard
-// visible at all until "Open User Dashboard" is pressed.
+// Plain tab content now — components/AdminShell.tsx renders this as its
+// "Invitations" tab, not a full-screen takeover of its own. Used to own a
+// fixed inset-0 opaque wrapper (back when this WAS the entire admin
+// landing) plus an "Open User Dashboard" button that opened
+// UserDashboardModal as a sibling overlay; both are gone now that
+// AdminShell provides the shared header/tab chrome and "Rainfall &
+// Scenarios" is its own tab rendering UserDashboardModal directly
+// (embedded) instead. The form/list/edit/revoke logic below is otherwise
+// unchanged.
 
 'use client'
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { opaqueBg } from '@/lib/opaqueTheme'
-import UserDashboardModal from '@/components/UserDashboardModal'
 
 interface Invitation {
   id: number
@@ -70,18 +65,13 @@ async function fetchInvitations(token: string): Promise<Invitation[]> {
   return data.invitations ?? []
 }
 
-export default function AdminInvitePanel({
-  theme,
-}: {
-  theme: 'light' | 'dark'
-}) {
+export default function AdminInvitePanel() {
   const [email, setEmail] = useState('')
   const [office, setOffice] = useState('')
   const [inviteeName, setInviteeName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ invitation: Invitation; emailSent: boolean; emailError: string | null } | null>(null)
-  const [showUserDashboard, setShowUserDashboard] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
 
   // Inline edit state — at most one row editable at a time.
@@ -259,41 +249,11 @@ export default function AdminInvitePanel({
   }
 
   // Renders the User Dashboard view instead of (never alongside) the
-  // Invitations landing — closing it (top-left ×) returns to this
-  // landing, never to the raw map/dashboard directly, since there's
-  // nothing else to fall back to (see this file's own header comment).
-  if (showUserDashboard) {
-    return <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
-  }
-
   return (
-    <div className="fixed inset-0 z-[18] flex flex-col" style={{ background: opaqueBg(theme) }}>
-      {/*
-        pr reserves space for the persistent header row (app/page.tsx's
-        Profile button + day/night toggle, absolute right-5 top-5 z-20,
-        which stays visible/clickable above this panel by design — see
-        this file's own header comment). Without it, "Open User
-        Dashboard" renders underneath that always-on-top chrome and
-        becomes unclickable — found via Playwright, not a guess: the
-        persistent header measures well under this at every name length
-        this app actually shows, eyeballed with margin to spare rather
-        than computed exactly.
-      */}
-      <div
-        className="flex shrink-0 items-center justify-between border-b py-4 pl-6"
-        style={{ borderColor: 'var(--card-border)', paddingRight: 260 }}
-      >
-        <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
-          Invitations
-        </h2>
-        <button
-          type="button"
-          className="bfw-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold"
-          onClick={() => setShowUserDashboard(true)}
-        >
-          Open User Dashboard
-        </button>
-      </div>
+    <div className="flex flex-col">
+      <h2 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
+        Invitations
+      </h2>
 
       {/*
         Entrance-only (a full expand/collapse height animation would fight

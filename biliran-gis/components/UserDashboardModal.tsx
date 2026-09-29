@@ -1,24 +1,18 @@
 // components/UserDashboardModal.tsx
 //
-// "Open User Dashboard" — reachable from inside the admin session
-// (AdminInvitePanel.tsx) without leaving it: a full-screen takeover (not
-// a centered dialog) showing the real end-user dashboard (map + barangay
-// list + detail panel, including the real hydrograph and factor
-// breakdown) as a self-contained snapshot, plus a "Simulation Mode" entry
-// point. Its own selectedKey/municipality state is local and independent
-// of app/page.tsx's — this is a read-only-ish view, not a second copy of
-// the live dashboard's navigation state.
+// The "Rainfall & Scenarios" admin tab content (components/AdminShell.tsx)
+// — the real end-user dashboard (map + barangay list + detail panel,
+// including the real hydrograph and factor breakdown) as a self-contained
+// snapshot, plus a "Simulation Mode" entry point. Its own selectedKey/
+// municipality state is local and independent of app/page.tsx's — this is
+// a read-only-ish view, not a second copy of the live dashboard's
+// navigation state.
 //
-// Full-screen rather than a dialog-over-a-backdrop on purpose: the
-// Invitations panel that opens this is never mounted at the same time
-// (see AdminInvitePanel.tsx's showUserDashboard branch) — stacking two
-// independent Modal backdrops used to be exactly what produced a
-// compounding double-blur behind this view, which is why this no longer
-// reuses the shared Modal component at all. Its own close control is a
-// top-left "×", not the shared Modal's top-right convention — deliberate,
-// since this reads as "exit this view," not "dismiss a dialog." Closing
-// returns to AdminInvitePanel's own full-screen landing, never to the raw
-// map/dashboard directly — see that file's header comment.
+// Takes an `embedded` prop: true when rendered as AdminShell tab content
+// (no fixed inset-0 overlay, no fade-in transition, no top-left "×" — the
+// tab bar itself is the way in and out, so there's nothing for this view
+// to close back to on its own). `onClose` becomes optional accordingly —
+// only the non-embedded (default) mode ever calls it.
 //
 // The map here is StaticIslandMap (read-only, no pan/zoom) — NOT a second
 // <BiliranMap> instance. See that file's header comment for why this
@@ -68,9 +62,11 @@ interface IslandSim {
 export default function UserDashboardModal({
   onClose,
   theme,
+  embedded = false,
 }: {
-  onClose: () => void
+  onClose?: () => void
   theme: 'light' | 'dark'
+  embedded?: boolean
 }) {
   const [barangays, setBarangays] = useState<Barangay[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -82,14 +78,18 @@ export default function UserDashboardModal({
   // (components/ProfilePanel.tsx) — `open` starts false and flips true
   // next frame to drive the entrance transition; requestClose flips it
   // back and defers the real onClose until the CSS transition has run.
-  const [open, setOpen] = useState(false)
+  // Embedded mode skips this entirely — it's tab content, not an overlay
+  // that fades in/out, so `open` just stays true the whole time.
+  const [open, setOpen] = useState(embedded)
   useEffect(() => {
+    if (embedded) return
     const raf = requestAnimationFrame(() => setOpen(true))
     return () => cancelAnimationFrame(raf)
-  }, [])
+  }, [embedded])
   function requestClose() {
+    if (embedded) return
     setOpen(false)
-    setTimeout(onClose, TRANSITION_MS)
+    setTimeout(() => onClose?.(), TRANSITION_MS)
   }
 
   useEffect(() => {
@@ -144,9 +144,9 @@ export default function UserDashboardModal({
 
   return (
     <div
-      className="bfw-user-dashboard fixed inset-0 z-50 flex flex-col"
+      className={embedded ? 'flex flex-col' : 'bfw-user-dashboard fixed inset-0 z-50 flex flex-col'}
       data-open={open}
-      style={{ background: bg }}
+      style={embedded ? undefined : { background: bg }}
     >
       <style>{`
         .bfw-user-dashboard {
@@ -166,20 +166,24 @@ export default function UserDashboardModal({
       `}</style>
 
       <div
-        className="flex shrink-0 items-center justify-between gap-3 border-b px-6 py-4"
-        style={{ borderColor: 'var(--card-border)' }}
+        className={embedded ? 'flex shrink-0 items-center justify-end gap-3 pb-4' : 'flex shrink-0 items-center justify-between gap-3 border-b px-6 py-4'}
+        style={embedded ? undefined : { borderColor: 'var(--card-border)' }}
       >
-        <button
-          type="button"
-          onClick={requestClose}
-          aria-label="Close user dashboard"
-          className="bfw-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none"
-        >
-          ×
-        </button>
-        <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
-          User Dashboard
-        </h2>
+        {!embedded && (
+          <button
+            type="button"
+            onClick={requestClose}
+            aria-label="Close user dashboard"
+            className="bfw-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none"
+          >
+            ×
+          </button>
+        )}
+        {!embedded && (
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
+            User Dashboard
+          </h2>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           {/*
             Persistent, never scrolls out of view (unlike the banner
@@ -208,7 +212,7 @@ export default function UserDashboardModal({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+      <div className={embedded ? 'flex flex-col gap-4' : 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6'}>
         {islandSim ? (
           <div
             className="rounded-lg border px-3 py-2 text-xs"
