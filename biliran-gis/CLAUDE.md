@@ -1280,6 +1280,15 @@ color barangay polygons by `mean_fsi_score` inside the modal. The one
 real, interactive, persistent `<BiliranMap>` still only ever mounts once,
 in `app/page.tsx`.
 
+It also renders the same FSI-severity `Legend` the real map uses —
+`Legend` was module-private in `BiliranMap.tsx`, exported (no signature/
+behavior change) so `StaticIslandMap.tsx` can import and reuse it rather
+than reimplementing the same five color stops a second time. Always the
+full (non-compact) variant — `StaticIslandMap` has exactly one caller
+(`UserDashboardModal.tsx`, `height={320}`), always tall enough for it, so
+there's no need for the `compact` dots-only mode `BiliranMap`'s own small
+compact-map state uses.
+
 **Redesigned as a full-screen view, not a dialog — fixing a real double-
 blur bug, not just a style pass.** The original version rendered
 `UserDashboardModal` as a JSX *sibling* of the still-open Invitations
