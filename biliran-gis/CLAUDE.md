@@ -2106,6 +2106,37 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## Light-theme (day) honesty-banner contrast fix
+
+The disclosure banner above the map on the Rainfall & Scenarios tab (`components/UserDashboardModal.tsx`'s
+`disclosureBanner`, "Modeled from a single synthetic design storm...") was unreadable in Day (light) theme —
+reported via screenshot. Root cause, confirmed by reading the code: a translucent red background
+(`rgba(192, 57, 43, 0.15)`) paired with a hardcoded **pale** `#F2D9D5` (near-white pink) text color — tuned to
+read against a dark-theme composite, but in light theme the translucent red barely tints the light card
+background, so pale-on-near-white was nearly invisible. This is the mirror case of the night-mode SIMULATED
+banner bug fixed just above (there: translucent background + hardcoded *dark* text, illegible in dark theme;
+here: translucent background + hardcoded *pale* text, illegible in light theme) — same root class of bug,
+opposite direction.
+
+The exact same `rgba(192, 57, 43, 0.15)` + `#F2D9D5` pairing was copy-pasted in three more places, all with the
+identical bug, none reported yet but all real: `components/DashboardShell.tsx`'s own "loading the live forecast"
+banner (shown on the real public dashboard whenever `!liveActive`, i.e. on every fresh page load until the live
+forecast arrives) and its `loadError` text (bare pale-red text with no box, even harder to read); and
+`components/AdminDashboardTab.tsx`'s equivalent loading-state banner. Confirmed this was fixable with the
+already-proven pattern already sitting three lines below the broken one in `AdminDashboardTab.tsx` itself — its
+own "highest-risk barangay" alert banner uses the identical translucent-red background but pairs it with
+`color: 'var(--text-strong)'` instead, and reads fine in both themes; `var(--text-strong)` is the same
+theme-aware token the `liveActive` branch of these same ternaries already used successfully. Fixed all four
+spots the same way: swapped the hardcoded `#F2D9D5` for `var(--text-strong)` in the three box-background
+instances (`UserDashboardModal.tsx`, `DashboardShell.tsx`'s loading banner, `AdminDashboardTab.tsx`), and swapped
+`DashboardShell.tsx`'s bare `loadError` text color to a solid `#C0392B` (matching the existing solid-red
+convention already used for plain alert/error text elsewhere, e.g. `SimulationModePanel.tsx`'s validation error)
+rather than `var(--text-strong)`, since that one is specifically an error message and should stay visually
+red-coded rather than blending into the page's normal text color. No border color, background tint, box shape,
+or copy changed anywhere — text color only. Verified via mocked-auth Playwright in both themes: light theme now
+resolves the banner text to `rgb(3, 23, 22)` (dark, legible against the light pink tint) and dark theme still
+resolves to `rgb(133, 183, 206)` (the same light-blue `var(--text-strong)` value, confirming no regression).
+
 ## Night-mode banner contrast fix + mobile/phone responsive audit
 
 Two more rounds of feedback, both resolved this round:
