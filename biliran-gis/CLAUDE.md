@@ -2106,6 +2106,24 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## "Copy link" button for manual invitation sharing
+
+No domain is verified in Resend yet, so invitation emails currently only deliver to the Resend account's own
+address — any other recipient hits Resend's sandbox-mode restriction and the email fails, falling back to the
+existing "share the code manually" message. `app/activate/page.tsx` only ever reads its invitation code from a
+`?code=` URL param (there's no manual code-entry field there), so what actually needs sharing by hand is the full
+activation link, not the bare code — previously the admin had to hand-build that URL themselves every time.
+
+`components/AdminInvitePanel.tsx` gained a "Copy link" button, purely client-side (`activationLink(code)` builds
+`` `${window.location.origin}/activate?code=${code}` ``, referenced only inside the click handler, never during
+render — no new prop or server data needed): it appears right after the code in the post-create success message
+and in every still-pending row's own action list (before Resend/Edit/Revoke), copies the full link via
+`navigator.clipboard.writeText`, and self-confirms by swapping its own label to "Copied!" for ~1.6s before
+reverting (or "Couldn't copy" on a clipboard failure, e.g. an insecure context) — a single `copyFeedback: { id,
+ok } | null` state shared by both locations, keyed by the invitation's own numeric id (the just-created
+invitation and its later list row share the same id). A redeemed row still shows no copy button — there's no
+link left to share for an already-activated account.
+
 ## Light-theme (day) honesty-banner contrast fix
 
 The disclosure banner above the map on the Rainfall & Scenarios tab (`components/UserDashboardModal.tsx`'s
