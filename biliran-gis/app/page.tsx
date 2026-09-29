@@ -40,13 +40,19 @@ const LAST_LOGIN_KEY = 'bfw_last_login_date'
 const BARANGAY_SELECT_COMPACT_DELAY_MS = 450
 
 type AuthState = 'checking' | 'needsLogin' | 'revealed'
-// Copy/branding only, never a security gate — the logo on the login
-// screen toggles this, swapping the login card's heading between the
-// regular and "administrator" framing. There's only one real auth
-// mechanism (supabase.auth.signInWithPassword) regardless of this value;
-// actual admin authorization is still the post-login access_level ===
-// 'admin' check (isAdmin state) that already exists elsewhere in this
-// file. Always resets to 'user' on mount — no persistence.
+// Copy/branding for most of this file — the logo on the login screen
+// toggles this, swapping the login card's heading between the regular and
+// "administrator" framing. There's still only one real auth mechanism
+// (supabase.auth.signInWithPassword); actual admin authorization is
+// always the post-login access_level === 'admin' check (isAdmin state)
+// elsewhere in this file, not this value.
+//
+// It IS a real gate in exactly one direction, though (handleSubmit
+// below): an actual admin account submitting credentials while this is
+// still 'user' gets signed back out immediately rather than let through —
+// admins must switch to "Welcome, Administrator" to sign in at all. A
+// non-admin account is never affected by this value either way. Always
+// resets to 'user' on mount — no persistence.
 type LoginMode = 'user' | 'admin'
 
 function prefersDark() {
@@ -267,18 +273,34 @@ export default function HomePage() {
       setError(null)
       setLoading(true)
 
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
-      setLoading(false)
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
       if (authError) {
+        setLoading(false)
         setError('Email or password is incorrect. Try again.')
         return
       }
 
+      // Admin accounts must sign in via the administrator toggle — this is
+      // the one real gate loginMode drives (see its own doc comment above):
+      // a real admin authenticating while the card is still in regular
+      // 'user' mode gets signed back out immediately rather than let
+      // in, so the account's own access_level can never quietly bypass the
+      // toggle. Non-admin accounts are unaffected either way — loginMode
+      // never gates them, admin or not.
+      const profile = await fetchOwnProfile(authData.user.id)
+      if (profile?.access_level === 'admin' && loginMode !== 'admin') {
+        await supabase.auth.signOut()
+        setLoading(false)
+        setError('This is an administrator account — switch to "Welcome, Administrator" above to sign in.')
+        return
+      }
+
+      setLoading(false)
       window.localStorage.setItem(LAST_LOGIN_KEY, new Date().toDateString())
       setAuthState('revealed') // triggers the CSS transition since this happens post-mount
     },
-    [email, password]
+    [email, password, loginMode]
   )
 
   // "Forgot password?" — entirely self-service, no admin/manual step.
