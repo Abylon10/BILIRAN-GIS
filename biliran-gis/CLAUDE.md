@@ -2005,6 +2005,53 @@ old always-in-view sidebar arrangement) into this one action. The
 non-embedded slide-out sidebar still passes `onExit` instead (closes
 without running anything, unchanged behavior).
 
+## Profile: capitalized name/office, viewable photo, bigger avatar circle
+
+Three small fixes to the profile UI (`components/ProfilePanel.tsx`,
+`components/HeaderProfileButton.tsx`, `lib/profile.ts`):
+
+- **Capitalization**: `lib/profile.ts` gained `capitalizeFirst(s)` —
+  uppercases only the first character, leaving the rest untouched
+  (deliberately not a "capitalize every word" title-case, which would
+  mangle an acronym like "MDRRMO" into "Mdrrmo" if it was already typed
+  correctly). Applied in three places: `fetchOwnProfile()` now
+  capitalizes `title`/`first_name`/`family_name`/`office` before
+  returning (so older rows saved before this change, or edited directly
+  in Supabase, still display correctly — no data migration needed);
+  `formatDisplayName()` applies it again to whatever it's given, a cheap
+  second layer for any caller that builds a name from state that didn't
+  come through `fetchOwnProfile` (e.g. `ProfilePanel`'s own just-saved
+  `fields` object, passed straight to it via `onProfileFieldsChange`);
+  and `ProfilePanel.tsx`'s 4 `FieldInput`s wrap their `onChange` with it
+  too, so it capitalizes live as typed, and `handleSaveFields` runs the
+  same transform before saving, not just relying on the live-typing path.
+- **Viewable photo**: the avatar circle used to be *only* a file-picker
+  trigger — clicking it always immediately opened the OS file dialog to
+  replace the photo, with no way to just look at the current one bigger.
+  Now it's conditional: if a photo exists, clicking the circle opens a
+  lightbox (`viewingPhoto` state) instead; the separate "Change photo"/
+  "Upload photo" text link is the only trigger for the file picker now.
+  No photo yet → the circle still opens the file picker directly (same
+  as before — nothing to view). The lightbox itself is rendered as a
+  **sibling of `<Modal>`**, not nested inside it — `Modal`'s own dialog
+  box animates via a CSS `transform`, which establishes a new containing
+  block for any `position: fixed` descendant (the same class of bug this
+  app already hit once with `backdrop-filter` elsewhere), so a `fixed
+  inset-0` lightbox placed inside it would be boxed into the dialog
+  instead of covering the viewport — confirmed via Playwright before
+  shipping (the lightbox's image only rendered full-size once moved
+  outside `<Modal>`).
+- **Circle vs. trapezoid sizing**: `HeaderProfileButton.tsx`'s
+  `.bfw-header-profile-avatar` (the circle) grew from 32px/44px
+  (not-revealed/revealed) to 50px/68px — roughly +55-56%, tuned to read
+  as clearly bigger than `.bfw-header-profile-tab` (the reverse-trapezoid
+  name/office tab) beside it. `.bfw-header-profile-tab` itself (240px
+  max-width, padding, clip-path, the `-14px` seam-hiding overlap) is
+  completely unchanged — the seam overlap only needs to cover the seam
+  width, not scale with the circle, and `align-items: center` keeps both
+  shapes vertically centered together as the circle grows past the tab's
+  own height.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

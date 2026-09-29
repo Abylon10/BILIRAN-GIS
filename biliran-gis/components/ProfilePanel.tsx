@@ -15,6 +15,16 @@
 // entry point here anymore — see app/page.tsx: signing in via the login
 // screen's "Welcome, Administrator" toggle, as an actual admin, opens the
 // admin panel directly instead.
+//
+// The avatar circle opens a bigger view of the current photo (a
+// lightbox, rendered as a sibling of the shared Modal rather than nested
+// inside it — see the comment at that lightbox's own render site for
+// why); "Change photo"/"Upload photo" is the only trigger for the file
+// picker now. Title/first/family name and office are capitalized (first
+// letter only, not every word — preserves an acronym like "MDRRMO")
+// both live as typed and again on read (lib/profile.ts's
+// fetchOwnProfile), so older lowercase rows display correctly without a
+// data migration.
 
 'use client'
 
@@ -22,6 +32,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import {
+  capitalizeFirst,
   fetchOwnProfile,
   getAvatarUrl,
   updateOwnAvatarPath,
@@ -51,6 +62,10 @@ export default function ProfilePanel({
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'error'>('idle')
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // The avatar circle now opens a bigger view of the current photo
+  // instead of always jumping straight to the file picker — "Change
+  // photo" below it is the only trigger for that now.
+  const [viewingPhoto, setViewingPhoto] = useState(false)
 
   const [title, setTitle] = useState('')
   const [firstName, setFirstName] = useState('')
@@ -148,10 +163,10 @@ export default function ProfilePanel({
     setFieldsSaved(false)
 
     const fields = {
-      title: title.trim() || null,
-      first_name: firstName.trim() || null,
-      family_name: familyName.trim() || null,
-      office: office.trim() || null,
+      title: title.trim() ? capitalizeFirst(title.trim()) : null,
+      first_name: firstName.trim() ? capitalizeFirst(firstName.trim()) : null,
+      family_name: familyName.trim() ? capitalizeFirst(familyName.trim()) : null,
+      office: office.trim() ? capitalizeFirst(office.trim()) : null,
     }
     const ok = await updateOwnProfileFields(user.id, fields)
     setSavingFields(false)
@@ -165,91 +180,112 @@ export default function ProfilePanel({
   }
 
   return (
-    <Modal onClose={onClose} title="Profile">
-      <div className="mb-5 flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploadState === 'uploading'}
-          className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 disabled:cursor-not-allowed"
-          style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)' }}
-          aria-label="Change profile photo"
-          title="Change profile photo"
-        >
-          <Avatar url={avatarUrl} label={user.email} sizeClassName="h-full w-full" />
-          {uploadState === 'uploading' && (
-            <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-medium text-white">
-              Uploading…
-            </span>
-          )}
-        </button>
-        <div>
+    <>
+      <Modal onClose={onClose} title="Profile">
+        <div className="mb-5 flex items-center gap-4">
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => (avatarUrl ? setViewingPhoto(true) : fileInputRef.current?.click())}
             disabled={uploadState === 'uploading'}
-            className="text-sm font-medium underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ color: 'var(--text-strong)' }}
+            className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 disabled:cursor-not-allowed"
+            style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)' }}
+            aria-label={avatarUrl ? 'View profile photo' : 'Upload profile photo'}
+            title={avatarUrl ? 'View profile photo' : 'Upload profile photo'}
           >
-            {avatarUrl ? 'Change photo' : 'Upload photo'}
+            <Avatar url={avatarUrl} label={user.email} sizeClassName="h-full w-full" />
+            {uploadState === 'uploading' && (
+              <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-medium text-white">
+                Uploading…
+              </span>
+            )}
           </button>
-          <p className="mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>JPG or PNG, up to 5MB</p>
+          <div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadState === 'uploading'}
+              className="text-sm font-medium underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ color: 'var(--text-strong)' }}
+            >
+              {avatarUrl ? 'Change photo' : 'Upload photo'}
+            </button>
+            <p className="mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>JPG or PNG, up to 5MB</p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelected}
+            className="hidden"
+          />
         </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileSelected}
-          className="hidden"
-        />
-      </div>
 
-      {uploadState === 'error' && uploadError && (
-        <p role="alert" className="mb-4 rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
-          {uploadError}
-        </p>
-      )}
-
-      <p className="mb-3 text-sm" style={{ color: 'var(--text-soft)' }}>
-        {user.email ?? '—'}
-      </p>
-
-      <form onSubmit={handleSaveFields} className="space-y-3">
-        <div className="grid grid-cols-[80px_1fr] gap-2">
-          <FieldInput label="Title" value={title} onChange={setTitle} placeholder="Mr./Mrs./Ms./Engr." disabled={loading} />
-          <FieldInput label="First name" value={firstName} onChange={setFirstName} disabled={loading} />
-        </div>
-        <FieldInput label="Family name" value={familyName} onChange={setFamilyName} disabled={loading} />
-        <FieldInput label="Office" value={office} onChange={setOffice} placeholder="e.g. MDRRMO Naval" disabled={loading} />
-
-        {fieldsError && (
-          <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
-            {fieldsError}
+        {uploadState === 'error' && uploadError && (
+          <p role="alert" className="mb-4 rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
+            {uploadError}
           </p>
         )}
-        {fieldsSaved && !fieldsError && (
-          <p className="rounded-md bg-[#E7F3E9] px-3 py-2 text-sm text-[#2C5F3E]">Saved.</p>
-        )}
 
-        <button
-          type="submit"
-          disabled={loading || savingFields}
-          className="bfw-btn w-full rounded-md py-2 text-sm font-semibold"
-        >
-          {savingFields ? 'Saving…' : 'Save changes'}
-        </button>
-      </form>
+        <p className="mb-3 text-sm" style={{ color: 'var(--text-soft)' }}>
+          {user.email ?? '—'}
+        </p>
 
-      <div className="mt-5 space-y-2 border-t pt-4" style={{ borderColor: 'var(--card-border)' }}>
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="bfw-btn w-full rounded-md py-2 text-sm font-medium"
+        <form onSubmit={handleSaveFields} className="space-y-3">
+          <div className="grid grid-cols-[80px_1fr] gap-2">
+            <FieldInput label="Title" value={title} onChange={(v) => setTitle(capitalizeFirst(v))} placeholder="Mr./Mrs./Ms./Engr." disabled={loading} />
+            <FieldInput label="First name" value={firstName} onChange={(v) => setFirstName(capitalizeFirst(v))} disabled={loading} />
+          </div>
+          <FieldInput label="Family name" value={familyName} onChange={(v) => setFamilyName(capitalizeFirst(v))} disabled={loading} />
+          <FieldInput label="Office" value={office} onChange={(v) => setOffice(capitalizeFirst(v))} placeholder="e.g. MDRRMO Naval" disabled={loading} />
+
+          {fieldsError && (
+            <p role="alert" className="rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-sm text-[#8A4B12]">
+              {fieldsError}
+            </p>
+          )}
+          {fieldsSaved && !fieldsError && (
+            <p className="rounded-md bg-[#E7F3E9] px-3 py-2 text-sm text-[#2C5F3E]">Saved.</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || savingFields}
+            className="bfw-btn w-full rounded-md py-2 text-sm font-semibold"
+          >
+            {savingFields ? 'Saving…' : 'Save changes'}
+          </button>
+        </form>
+
+        <div className="mt-5 space-y-2 border-t pt-4" style={{ borderColor: 'var(--card-border)' }}>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="bfw-btn w-full rounded-md py-2 text-sm font-medium"
+          >
+            Sign out
+          </button>
+        </div>
+      </Modal>
+
+      {viewingPhoto && avatarUrl && (
+        // A sibling of <Modal>, not nested inside it — Modal's own dialog
+        // box animates via a CSS `transform`, which establishes a new
+        // containing block for any `position: fixed` descendant (the same
+        // class of bug this app has hit before with backdrop-filter
+        // elsewhere), so a `fixed inset-0` lightbox placed inside it would
+        // be boxed into the dialog instead of covering the viewport.
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setViewingPhoto(false)}
+          role="button"
+          tabIndex={0}
+          aria-label="Close photo view"
         >
-          Sign out
-        </button>
-      </div>
-    </Modal>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={avatarUrl} alt="" className="max-h-[80vh] max-w-[90vw] rounded-lg object-contain shadow-2xl" />
+        </div>
+      )}
+    </>
   )
 }
 

@@ -21,6 +21,14 @@ export interface Profile {
   family_name: string | null
 }
 
+// Uppercases only the first character, leaves the rest as typed —
+// "start with a capital letter," not "capitalize every word" (which
+// would mangle an acronym like "MDRRMO" into "Mdrrmo" if typed
+// correctly to begin with).
+export function capitalizeFirst(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
+}
+
 export async function fetchOwnProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('user_profiles')
@@ -29,7 +37,17 @@ export async function fetchOwnProfile(userId: string): Promise<Profile | null> {
     .single()
 
   if (error || !data) return null
-  return data as Profile
+  const p = data as Profile
+  // Defensive — normalizes any row saved before this capitalization was
+  // added (or edited directly in Supabase), so display is always
+  // capitalized without needing a data migration.
+  return {
+    ...p,
+    title: p.title ? capitalizeFirst(p.title) : p.title,
+    first_name: p.first_name ? capitalizeFirst(p.first_name) : p.first_name,
+    family_name: p.family_name ? capitalizeFirst(p.family_name) : p.family_name,
+    office: p.office ? capitalizeFirst(p.office) : p.office,
+  }
 }
 
 // Requires the "user_profiles: users update own row" RLS policy from
@@ -70,7 +88,14 @@ export async function updateOwnProfileFields(
 const MAX_FULL_NAME_CHARS = 20
 
 export function formatDisplayName(profile: Pick<Profile, 'title' | 'first_name' | 'family_name'>): string | null {
-  const { title, first_name, family_name } = profile
+  // capitalizeFirst again here (fetchOwnProfile already does it) — cheap
+  // second layer of defense for any caller building this from state that
+  // didn't come through fetchOwnProfile (e.g. ProfilePanel's own
+  // just-saved `fields` object, passed straight to this via
+  // onProfileFieldsChange).
+  const title = profile.title ? capitalizeFirst(profile.title) : profile.title
+  const first_name = profile.first_name ? capitalizeFirst(profile.first_name) : profile.first_name
+  const family_name = profile.family_name ? capitalizeFirst(profile.family_name) : profile.family_name
   if (!first_name && !family_name) return null
 
   const full = [title, first_name, family_name].filter(Boolean).join(' ')
