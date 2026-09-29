@@ -420,10 +420,12 @@ always calls it first, regardless of `loginMode`.
 user's profile immediately after a successful `signInWithPassword` call
 (`fetchOwnProfile`, same helper `loadUser()` below already uses) and
 checks `profile?.access_level === 'admin' && loginMode !== 'admin'`. If
-true, it calls `supabase.auth.signOut()` right away and shows "This is an
-administrator account — switch to 'Welcome, Administrator' above to sign
-in." instead of revealing the dashboard — an admin account can no longer
-sign in at all through the regular "Sign in" form. This *does* mean a
+true, it calls `supabase.auth.signOut()` right away and shows "No user
+account exists." instead of revealing the dashboard — deliberately the
+same generic wording a wrong email/password gets, not naming this an
+administrator account, so a regular-mode sign-in attempt can't be used to
+fingerprint which emails belong to admin accounts. An admin account can
+no longer sign in at all through the regular "Sign in" form. This *does* mean a
 brief real authentication happens before the rejection (there's no way to
 know `access_level` without it — nothing pre-auth can query
 `user_profiles` for an arbitrary email), immediately undone by the
