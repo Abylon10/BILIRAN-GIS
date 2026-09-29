@@ -1,13 +1,22 @@
 // components/StaticIslandMap.tsx
 //
 // A genuinely separate, read-only island map for the Simulation Mode
-// "User Dashboard" modal — NOT a second instance of BiliranMap and not a
-// mode/prop on it. No pan/zoom/pointer handlers, no view/resetToken
-// state: just barangay polygons colored by mean_fsi_score, reusing the
-// same projection helpers (lib/geo.ts) and same barangays.geojson
-// BiliranMap.tsx already fetches. This is why it doesn't reopen this
-// app's "one persistent map" architectural decision (see CLAUDE.md) — the
-// real interactive map still only mounts once, in app/page.tsx.
+// "User Dashboard" modal and the admin Dashboard/Barangays tabs — NOT a
+// second instance of BiliranMap and not a mode/prop on it. No pan/zoom/
+// pointer handlers, no view/resetToken state: just barangay polygons
+// colored by mean_fsi_score, reusing the same projection helpers
+// (lib/geo.ts) and same barangays.geojson BiliranMap.tsx already
+// fetches. This is why it doesn't reopen this app's "one persistent map"
+// architectural decision (see CLAUDE.md) — the real interactive map
+// still only mounts once, in app/page.tsx.
+//
+// `highlightMunicipality` (optional): outlines one municipality's real
+// boundary (/data/geo/municipalities.geojson — the same file
+// BiliranMap.tsx's own MunicipalityLayer already fetches, same MuniProps
+// shape) on top of the barangay fills, so a municipality filter elsewhere
+// on the page can be "tracked" on this map — still genuinely
+// non-interactive (pointerEvents stays 'none' throughout): no zoom/pan/
+// click handling was added to support this, only a highlight overlay.
 
 'use client'
 
@@ -30,10 +39,17 @@ interface BrgyProps {
   pgc_prefix: string
 }
 
+interface MuniProps {
+  pgc_prefix: string
+  municipality: string
+  barangay_count: number
+}
+
 export default function StaticIslandMap({
   barangays,
   selectedKey,
   height = 180,
+  highlightMunicipality = null,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -42,8 +58,14 @@ export default function StaticIslandMap({
   // closer to the real dashboard's own map — still the same read-only
   // component either way, just resized.
   height?: number
+  // The active municipality filter, if any (AdminBarangaysTab.tsx,
+  // UserDashboardModal.tsx) — outlines that municipality's real boundary.
+  // null/omitted: no highlight, no municipalities.geojson fetch at all
+  // (lazy, same pattern as the barangay fetch itself).
+  highlightMunicipality?: string | null
 }) {
   const [geo, setGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
+  const [muniGeo, setMuniGeo] = useState<GeoFeatureCollection<MuniProps> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -58,6 +80,22 @@ export default function StaticIslandMap({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!highlightMunicipality || muniGeo) return
+    let cancelled = false
+    fetchGeoJSON<GeoFeatureCollection<MuniProps>>('/data/geo/municipalities.geojson')
+      .then((data) => {
+        if (!cancelled) setMuniGeo(data)
+      })
+      .catch(() => {
+        // Highlight is purely supplementary — the barangay map itself
+        // still renders fine without it.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [highlightMunicipality, muniGeo])
 
   if (!geo) {
     return (
@@ -93,6 +131,19 @@ export default function StaticIslandMap({
             />
           )
         })}
+        {highlightMunicipality &&
+          muniGeo?.features
+            .filter((f) => f.properties.municipality === highlightMunicipality)
+            .map((f) => (
+              <path
+                key={f.properties.pgc_prefix}
+                d={geometryToPath(f.geometry, project)}
+                fill="none"
+                stroke="#E8A33D"
+                strokeWidth={0.0022}
+                pointerEvents="none"
+              />
+            ))}
       </svg>
       {/*
         Same FSI-severity Legend the real BiliranMap uses (reused, not

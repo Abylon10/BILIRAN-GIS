@@ -29,11 +29,17 @@
 // "Revoked" status: revoking hard-deletes the row (see inviteStatus's own
 // comment below), so there's nothing left to label afterward — a
 // deliberate scope decision, not an oversight.
+//
+// Stat cards (Total/Pending/Accepted/Expired) are new this round —
+// computed client-side from the already-fetched `invitations` array via
+// the same `inviteStatus()` helper the list badges use, no new fetch. No
+// "Revoked" card, same reasoning as the missing status.
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { StatCard } from '@/components/AdminDashboardTab'
 
 interface Invitation {
   id: number
@@ -331,6 +337,12 @@ export default function AdminInvitePanel() {
     }
   }
 
+  const statusCounts = useMemo(() => {
+    const counts = { Pending: 0, Accepted: 0, Expired: 0 }
+    for (const inv of invitations) counts[inviteStatus(inv)]++
+    return counts
+  }, [invitations])
+
   const filteredInvitations = invitations.filter((inv) => {
     if (statusFilter !== 'all' && inviteStatus(inv) !== statusFilter) return false
     const q = search.trim().toLowerCase()
@@ -347,6 +359,13 @@ export default function AdminInvitePanel() {
       <h2 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
         Invitations
       </h2>
+
+      <div className="mx-auto grid w-full max-w-xl grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard label="Total invitations" value={String(invitations.length)} />
+        <StatCard label="Pending" value={String(statusCounts.Pending)} />
+        <StatCard label="Accepted" value={String(statusCounts.Accepted)} />
+        <StatCard label="Expired" value={String(statusCounts.Expired)} />
+      </div>
 
       {/*
         Entrance-only (a full expand/collapse height animation would fight

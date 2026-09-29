@@ -34,7 +34,10 @@ async function getToken(): Promise<string | null> {
   return session?.access_token ?? null
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+// Exported — AdminBarangaysTab.tsx/AdminUsersTab.tsx/AdminInvitePanel.tsx
+// reuse this same small stat-card shape rather than each defining their
+// own copy.
+export function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-lg border p-4" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)' }}>
       <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>

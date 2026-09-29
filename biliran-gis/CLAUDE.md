@@ -1894,6 +1894,117 @@ Supabase dashboard directly, not from this app.
 flagged above, all addable later if a real data source/feature exists to
 back them.
 
+## Admin UI polish round 2: left sidebar nav, stat cards, map highlighting, Rainfall & Scenarios redesign
+
+The user shared 4 more detailed mockups (Rainfall & Scenarios, Barangays,
+Users, Invitations) built around a persistent left sidebar, asking to
+apply what's applicable and neglect CRUD functions. Four real conflicts
+were confirmed directly before building, same no-fabrication discipline
+as every prior round:
+
+- **Nav layout**: switched from the top tab bar (previous round) to a
+  left sidebar. `components/AdminShell.tsx`'s `TabId` gained `'reports'
+  | 'activity' | 'settings'` alongside the 6 real ones — all three render
+  the new `components/AdminComingSoonTab.tsx` ("Not built yet — no real
+  data or feature exists behind this section"), a real nav entry with an
+  honest placeholder, not omitted and not faked. Icons are small
+  hand-rolled inline-SVG paths (`NavIcon`/`ICONS` in `AdminShell.tsx`) —
+  this repo has no icon library, same "no charting library" spirit as
+  `DischargeChart.tsx`'s own inline SVG.
+- **Revoked status**: the Invitations mockup showed a persisted
+  "Revoked" row, conflicting with the previous round's explicit decision
+  that revoke hard-deletes the row. **Re-confirmed staying with hard
+  delete** — `AdminInvitePanel.tsx`'s status badges/filter are still only
+  Pending/Accepted/Expired.
+- **Invite role selection**: the mockup lets the admin pick an account's
+  role at invite time; today every invite always creates a `'standard'`
+  account (`app/api/activate/route.ts`, hardcoded). **Skipped** — a real
+  new capability with security implications (granting admin access via
+  invite), not built.
+- **Rainfall & Scenarios**: approved a full two-column redesign (below).
+
+**Stat cards** — `components/AdminDashboardTab.tsx`'s `StatCard` is now
+`export`ed and reused (not duplicated) by `AdminBarangaysTab.tsx` (Total/
+Very High/High+Moderate/Low+Very Low risk counts), `AdminUsersTab.tsx`
+(Total/Active/Disabled), and `AdminInvitePanel.tsx` (Total/Pending/
+Accepted/Expired, computed client-side from the already-fetched
+`invitations` array via the existing `inviteStatus()` helper — no new
+fetch). No "With Data"/"Status: Active" cards anywhere — no real
+per-barangay active/inactive concept exists in this app to back one.
+
+**Municipality highlighting on the map** — `components/
+StaticIslandMap.tsx` gained an optional `highlightMunicipality?: string
+| null` prop: lazily fetches `/data/geo/municipalities.geojson` (same
+file/shape `BiliranMap.tsx`'s own `MunicipalityLayer` already uses —
+`MuniProps { pgc_prefix, municipality, barangay_count }`) only when the
+prop is first set, and draws that municipality's real boundary outline
+(thicker amber stroke, no fill change) above the barangay layer —
+`pointerEvents` stays `'none'` throughout, so this stays genuinely
+non-interactive; no zoom/pan/layer-toggle controls were added anywhere
+(those would imply real interactivity, which would reopen this app's
+"one persistent interactive map" rule — `BiliranMap.tsx` only). Wired up
+in `AdminBarangaysTab.tsx` (which had no map at all before this round)
+and in `UserDashboardModal.tsx`'s embedded layout, both passing the
+active municipality filter through.
+
+**`AdminBarangaysTab.tsx`** also gained a real text search box, wired to
+`filterBarangays(sorted, query, municipality)` — the `query` param
+already existed in `lib/dashboardData.ts` and was simply always called
+with `''` before this round. No "+ Add Barangay" button, no per-row
+Edit/Delete, no "Recent Activity" feed — barangay data comes from a
+fixed external pipeline (see "Deliberately still not built" above), not
+an admin-editable database, and Activity Logs are their own deferred
+placeholder (above).
+
+**`AdminUsersTab.tsx`** gained a real "Last Login" column —
+`app/api/admin/users/route.ts` now also returns `lastLoginAt:
+u.last_sign_in_at ?? null`, Supabase Auth's own real field (same
+confirmation method as `banned_until` last round: checked
+`@supabase/auth-js`'s own types), shown as "Never" when null (possible
+right after `/activate`, before a first real sign-in) — plus a search
+box and an access-level filter dropdown. Still fully read-only, no "+
+Add User", no row-actions menu.
+
+**Rainfall & Scenarios — full two-column redesign.**
+`components/UserDashboardModal.tsx`'s embedded case (the non-embedded
+case is untouched, kept for any future non-embedded caller) now renders
+a `lg:grid-cols-[1fr_360px]` layout instead of the old single-column
+stack: left column is the map (with the new municipality highlight) plus
+a new `BarangayRankingTable` (a real `<table>`, same column pattern as
+`AdminDashboardTab.tsx`'s own "Recent FSI by barangay" table — #,
+Barangay, Municipality, FSI Score, Class, Countdown, no "Status" column
+— replacing `BarangayList`'s row-button rendering for this tab
+specifically; `BarangayList`'s other callers are unaffected) plus a
+search box; right column is `SimulationModePanel`, now **always
+visible** instead of a dismissable slide-out sidebar for the embedded
+case (the non-embedded case still uses the original `fixed right-0
+top-0` slide-out — `SimulationModePanel` itself branches on whichever of
+`onExit`/`onReset` its caller passes, both now optional), plus a new
+`SelectedBarangayCard` — a compact summary (small map thumbnail, FSI
+score, predicted countdown, and — only while a simulation is active —
+the scenario's rainfall range/duration) with a "View full details"
+toggle that expands the real `BarangayDetailPanel` below it, rather than
+duplicating its content. Every field on this card is already available
+on the `Barangay`/`SimulationRunResult`/`islandSim` objects this
+component already computes — nothing new is fetched or invented.
+
+`SimulationModePanel.tsx` gained a **"Scenario name"** text field (local
+component state only — never sent to `onSimulate`, never persisted
+anywhere; a session-only label for the admin's own reference, cleared on
+Reset) and a **"Predicted alert count"** breakdown: real counts of Very
+Low/Low/Moderate/High/Very High derived from the same
+`Map<string, IslandSimResult>` `simulateIsland()` already returns
+(`lastResults`, a local copy kept purely to render this summary — the
+full map is still handed to the caller via `onSimulate` as before). A
+new **"Reset"** button (alongside "Start simulation") restores the
+default inputs, clears this local summary, and — via the new optional
+`onReset` callback the embedded caller passes — tells
+`UserDashboardModal` to clear `islandSim` too, consolidating what used
+to be a separate "⚠ SIMULATED · Clear" header chip (only relevant to the
+old always-in-view sidebar arrangement) into this one action. The
+non-embedded slide-out sidebar still passes `onExit` instead (closes
+without running anything, unchanged behavior).
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
