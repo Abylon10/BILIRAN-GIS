@@ -407,29 +407,45 @@ there. Landing on the page without a valid token (missing, already used,
 or expired) shows a "Link expired" state pointing back to `/` instead of
 a broken form.
 
-**Admin sign-in toggle drives the admin panel's only entry point, but is
-still not itself a security gate.** The login card's logo becomes a
-button while `authState === 'needsLogin'` (gone entirely once signed in —
-no lingering control in the dashboard), toggling a `loginMode: 'user' |
-'admin'` local state that swaps the card's heading ("Sign in" ↔ "Welcome,
-Administrator"). The email/password fields and `handleSubmit` are
-unchanged either way — there's only one real auth mechanism
-(`supabase.auth.signInWithPassword`); `loginMode` itself grants nothing.
-What it *does* do: `app/page.tsx`'s post-sign-in `loadUser()` effect
-(`[authState, loginMode]`) checks `loginMode === 'admin' && access_level
-=== 'admin'` once the profile loads, and only then calls
-`setShowAdminPanel(true)` — auto-opening `AdminInvitePanel` right after
-sign-in. Both conditions are required: a non-admin account signing in via
-the admin-styled form still just lands on the normal dashboard with no
-admin entry point at all (there's no other way in — see below), same as
-any other non-admin sign-in; and an actual admin who signs in via the
-*regular* form (`loginMode` still `'user'`) also just lands on the normal
-dashboard, since `loginMode` alone decides nothing. `loginMode` always
-starts (and, on sign-out, resets to) `'user'` — plain `useState`, no
-persistence — which is also why this can't misfire on a returning-session
-auto-reveal: the toggle button only renders pre-reveal, so `loginMode`
-can't be `'admin'` unless this exact browser tab's session just toggled
-it before an interactive sign-in.
+**Admin sign-in toggle drives the admin panel's only entry point — and is
+now a real gate for admin accounts specifically, not just copy.** The
+login card's logo becomes a button while `authState === 'needsLogin'`
+(gone entirely once signed in — no lingering control in the dashboard),
+toggling a `loginMode: 'user' | 'admin'` local state that swaps the
+card's heading ("Sign in" ↔ "Welcome, Administrator"). There's still only
+one real auth mechanism (`supabase.auth.signInWithPassword`) — `handleSubmit`
+always calls it first, regardless of `loginMode`.
+
+**What changed**: `handleSubmit` now fetches the just-authenticated
+user's profile immediately after a successful `signInWithPassword` call
+(`fetchOwnProfile`, same helper `loadUser()` below already uses) and
+checks `profile?.access_level === 'admin' && loginMode !== 'admin'`. If
+true, it calls `supabase.auth.signOut()` right away and shows "This is an
+administrator account — switch to 'Welcome, Administrator' above to sign
+in." instead of revealing the dashboard — an admin account can no longer
+sign in at all through the regular "Sign in" form. This *does* mean a
+brief real authentication happens before the rejection (there's no way to
+know `access_level` without it — nothing pre-auth can query
+`user_profiles` for an arbitrary email), immediately undone by the
+`signOut()`. A non-admin account is completely unaffected either way —
+this check only ever fires for `access_level === 'admin'`, so `loginMode`
+still decides nothing for a regular sign-in, admin-styled form or not.
+
+This supersedes the previous "toggle grants nothing, never a security
+gate" framing for admin accounts specifically — verified via mocked-auth
+Playwright: admin credentials submitted with the card still in "Sign in"
+mode get rejected (error shown, `auth.signOut` fires, login card stays
+up, no dashboard/admin-panel reveal); the same credentials succeed once
+toggled to "Welcome, Administrator".
+
+Separately, `app/page.tsx`'s post-sign-in `loadUser()` effect (still
+keyed on `admin` alone, not `loginMode` — see its own comment there) is
+what actually opens `AdminInvitePanel` once a *successful* admin sign-in
+lands: any admin reveal opens it, whether from a fresh interactive
+sign-in or a returning session's auto-reveal (which never went through
+`handleSubmit` or `loginMode` at all, since the login card and its toggle
+don't render on that path). `loginMode` always starts (and, on sign-out,
+resets to) `'user'` — plain `useState`, no persistence.
 
 **Supabase clients are split by privilege** (`lib/supabase.ts` vs.
 `lib/supabaseAdmin.ts`): the anon/browser client is safe in client components;
@@ -673,7 +689,7 @@ no longer just a self-validated guess.
 
 - Single merged page (map + login + dashboard as states of one component, not routes)
 - Daily login gate is UX, not security
-- Admin sign-in toggle (the login-screen logo button) grants nothing by itself, never a security gate on its own — real admin authorization is always the post-login `access_level === 'admin'` check; the toggle only decides whether a *successful, actually-admin* sign-in auto-opens the admin panel (see below)
+- Admin sign-in toggle (the login-screen logo button) grants nothing by itself for a non-admin account — real admin authorization is always the post-login `access_level === 'admin'` check. For an admin account specifically, though, the toggle is now a real precondition: `handleSubmit` rejects (and immediately signs back out) an admin credential pair submitted while the card is still in regular "Sign in" mode, requiring "Welcome, Administrator" to actually sign in (see "Admin sign-in toggle..." below). The toggle separately still decides whether a *successful, actually-admin* sign-in auto-opens the admin panel (see below)
 - Account creation is fully admin-controlled; no public signup
 - Invite codes are device-bound only at redemption
 - No AI/LLM features in the product
