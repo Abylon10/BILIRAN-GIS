@@ -1,18 +1,26 @@
 // components/AdminUsersTab.tsx
 //
-// The admin shell's "Users" tab — a read-only list of real, already-
-// activated accounts (app/api/admin/users/route.ts). Deliberately
-// read-only, per the user's own explicit scope choice for this tab: no
-// edit/promote/demote affordance here, just visibility into who has an
-// account. The Active/Disabled column reflects Supabase Auth's own real
-// `banned_until` field (see that route's own comment) — a status label,
-// not a toggle; disabling a user is done from the Supabase dashboard.
+// The admin shell's "Users" tab — a list of real, already-activated
+// accounts (app/api/admin/users/route.ts). Name/email/office/access
+// level stay non-editable (account creation and access level are
+// managed via the Invitations tab, per the user's own explicit scope
+// choice) — but the Active/Disabled status is a real, working toggle
+// now, not just a label: a plain status badge with nothing behind it
+// read as broken/confusing once shown next to columns that ARE real
+// data. Calls the new app/api/admin/users/[id]/route.ts (`PATCH`),
+// which uses Supabase Auth's own real ban mechanism
+// (`ban_duration` — see that route's own comment). Guarded against
+// self-lockout both server-side (that route rejects it) and here
+// client-side (the toggle is simply disabled on the signed-in admin's
+// own row, with an explanatory title, rather than letting them click
+// into a guaranteed error).
 //
-// Stat cards, "Last Login", search, and an access-level filter are new
-// this round (matching a reference mockup). Last Login is Supabase
-// Auth's own real `last_sign_in_at` — not invented. No "Pending" stat
-// card here (that's an Invitations-tab concept, not a Users one) and no
-// "+ Add User"/row-actions menu — stays fully read-only.
+// Stat cards, "Last Login", search, and an access-level filter are from
+// an earlier round (matching a reference mockup). Last Login is
+// Supabase Auth's own real `last_sign_in_at` — not invented. No
+// "Pending" stat card here (that's an Invitations-tab concept, not a
+// Users one) and no "+ Add User" — account creation still only happens
+// via Invitations.
 
 'use client'
 
@@ -48,9 +56,15 @@ export default function AdminUsersTab() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [accessFilter, setAccessFilter] = useState<'all' | string>('all')
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancelled) setCurrentUserId(data.user?.id ?? null)
+    })
     getToken().then((token) => {
       if (!token) {
         if (!cancelled) setError('Your session expired — sign in again.')
@@ -72,6 +86,41 @@ export default function AdminUsersTab() {
       cancelled = true
     }
   }, [])
+
+  async function toggleDisabled(u: AdminUser) {
+    setRowError(null)
+    setBusyId(u.id)
+    const nextDisabled = !u.disabled
+
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError({ id: u.id, message: 'Your session expired — sign in again.' })
+        return
+      }
+
+      const res = await fetch(`/api/admin/users/${u.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ disabled: nextDisabled }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setRowError({ id: u.id, message: data.error ?? 'Could not update this user.' })
+        return
+      }
+
+      setUsers((prev) => prev && prev.map((row) => (row.id === u.id ? { ...row, disabled: nextDisabled } : row)))
+    } catch {
+      setRowError({ id: u.id, message: 'Could not reach the server — check your connection and try again.' })
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   const accessLevels = useMemo(() => {
     if (!users) return []
@@ -120,7 +169,8 @@ export default function AdminUsersTab() {
       </div>
 
       <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-        Read-only — account creation and access level are managed via the Invitations tab.
+        Account creation and access level are managed via the Invitations tab — status (Active/Disabled) can be
+        toggled below.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -159,30 +209,43 @@ export default function AdminUsersTab() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((u) => (
-              <tr key={u.id} className="border-t" style={{ borderColor: 'var(--card-border)' }}>
-                <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{displayName(u)}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.email ?? '—'}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.office ?? '—'}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.accessLevel ?? '—'}</td>
-                <td className="px-3 py-2">
-                  <span
-                    className="rounded-full px-2 py-0.5 text-xs font-semibold"
-                    style={
-                      u.disabled
-                        ? { background: 'rgba(192, 57, 43, 0.15)', color: '#C0392B' }
-                        : { background: 'rgba(44, 95, 62, 0.15)', color: '#2C5F3E' }
-                    }
-                  >
-                    {u.disabled ? 'Disabled' : 'Active'}
-                  </span>
-                </td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>
-                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}
-                </td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{new Date(u.joinedAt).toLocaleDateString()}</td>
-              </tr>
-            ))}
+            {filtered.map((u) => {
+              const isSelf = u.id === currentUserId
+              const busy = busyId === u.id
+              return (
+                <tr key={u.id} className="border-t align-top" style={{ borderColor: 'var(--card-border)' }}>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{displayName(u)}</td>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.email ?? '—'}</td>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.office ?? '—'}</td>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{u.accessLevel ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleDisabled(u)}
+                      disabled={busy || isSelf}
+                      title={isSelf ? "You can't disable your own account." : u.disabled ? 'Click to re-enable' : 'Click to disable'}
+                      className="rounded-full px-2 py-0.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                      style={
+                        u.disabled
+                          ? { background: 'rgba(192, 57, 43, 0.15)', color: '#C0392B' }
+                          : { background: 'rgba(44, 95, 62, 0.15)', color: '#2C5F3E' }
+                      }
+                    >
+                      {busy ? '…' : u.disabled ? 'Disabled' : 'Active'}
+                    </button>
+                    {rowError && rowError.id === u.id && (
+                      <div className="mt-1 text-[10px]" style={{ color: '#8A4B12' }}>
+                        {rowError.message}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>
+                    {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}
+                  </td>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{new Date(u.joinedAt).toLocaleDateString()}</td>
+                </tr>
+              )
+            })}
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-6 text-center text-xs" style={{ color: 'var(--text-soft)' }}>

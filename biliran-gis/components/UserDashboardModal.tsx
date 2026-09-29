@@ -47,9 +47,12 @@
 // other BarangayList callers untouched); right column is the always-
 // visible SimulationModePanel plus a new "Selected Barangay" summary
 // card (small map thumbnail + FSI/countdown/rainfall recap, all fields
-// BarangayDetailPanel already receives, just re-presented compactly)
-// with a "View full details" toggle that expands the real
-// BarangayDetailPanel below it. SimulationModePanel's own `onReset`
+// BarangayDetailPanel already receives, just re-presented compactly),
+// immediately followed by the real BarangayDetailPanel itself as a
+// separate sibling card (not nested inside the summary card behind a
+// toggle, per feedback from testing the previous round's build — the FSI
+// summary and the full hydrograph/factor-breakdown detail need to read
+// as two distinct sections). SimulationModePanel's own `onReset`
 // (not `onExit`, which the embedded case doesn't pass) clears `islandSim`
 // here — consolidating what used to be a separate "⚠ SIMULATED · Clear"
 // header chip into the panel's own Reset button, since its output is
@@ -99,9 +102,6 @@ export default function UserDashboardModal({
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [islandSim, setIslandSim] = useState<IslandSim | null>(null)
-  // Embedded layout only — whether the "Selected Barangay" summary card
-  // has expanded to show the full BarangayDetailPanel below it.
-  const [showFullDetail, setShowFullDetail] = useState(false)
 
   // Same two-phase open/close technique as the shared Modal
   // (components/ProfilePanel.tsx) — `open` starts false and flips true
@@ -316,10 +316,7 @@ export default function UserDashboardModal({
             <BarangayRankingTable
               barangays={filtered}
               selectedKey={selectedKey}
-              onSelect={(key) => {
-                setSelectedKey(key)
-                setShowFullDetail(false)
-              }}
+              onSelect={(key) => setSelectedKey(key)}
             />
           </div>
 
@@ -331,13 +328,20 @@ export default function UserDashboardModal({
             />
 
             {selected && (
-              <SelectedBarangayCard
-                barangay={selected}
-                showFullDetail={showFullDetail}
-                onToggleDetail={() => setShowFullDetail((v) => !v)}
-                simulationResult={simulationResult}
-                islandSim={islandSim}
-              />
+              <>
+                <SelectedBarangayCard barangay={selected} islandSim={islandSim} />
+                {/*
+                  A separate sibling card, not nested inside
+                  SelectedBarangayCard's own border — the FSI summary and
+                  the full hydrograph/factor-breakdown detail read as two
+                  distinct sections again (matching the pre-two-column
+                  layout), not one box with a "View full details" toggle.
+                  BarangayDetailPanel already renders its own
+                  rounded-xl/border/p-5 card, so no new styling is needed
+                  here for it to look separate.
+                */}
+                <BarangayDetailPanel barangay={selected} simulationResult={simulationResult} />
+              </>
             )}
           </div>
         </div>
@@ -432,21 +436,17 @@ function BarangayRankingTable({
 
 // "Selected Barangay" compact summary card for the embedded layout's
 // right column — every field here is already computed/available on
-// `barangay`/`simulationResult`/`islandSim`, nothing new is fetched or
-// invented. "View full details" expands the real BarangayDetailPanel
-// below it (same component the public dashboard uses, hydrograph/factor
-// breakdown included) rather than duplicating that content here.
+// `barangay`/`islandSim`, nothing new is fetched or invented. The real
+// BarangayDetailPanel (hydrograph/factor breakdown) renders as this
+// card's own separate sibling in UserDashboardModal's own JSX, not
+// nested inside here behind a toggle — keeps the FSI summary and the
+// full detail visually distinct, per the user's own "separate the FSI
+// and hydrograph, like before" request.
 function SelectedBarangayCard({
   barangay,
-  showFullDetail,
-  onToggleDetail,
-  simulationResult,
   islandSim,
 }: {
   barangay: Barangay
-  showFullDetail: boolean
-  onToggleDetail: () => void
-  simulationResult: SimulationRunResult | null
   islandSim: IslandSim | null
 }) {
   return (
@@ -503,16 +503,6 @@ function SelectedBarangayCard({
           ? 'This is a simulated result based on the selected scenario. Actual conditions may vary.'
           : 'Real modeled values from the static design storm — not a live forecast.'}
       </p>
-
-      <button
-        type="button"
-        onClick={onToggleDetail}
-        className="bfw-btn w-full rounded-md py-2 text-xs font-semibold"
-      >
-        {showFullDetail ? 'Hide details' : 'View full details →'}
-      </button>
-
-      {showFullDetail && <BarangayDetailPanel barangay={barangay} simulationResult={simulationResult} />}
     </div>
   )
 }

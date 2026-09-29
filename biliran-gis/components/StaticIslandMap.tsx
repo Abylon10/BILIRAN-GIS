@@ -112,6 +112,12 @@ export default function StaticIslandMap({
   const bounds = expandBounds(boundsOf(geo.features, project), 0.04)
   const barangaysByKey = new Map(barangays.map((b) => [b.key, b]))
 
+  // Thresholds are eyeballed against this component's actual callers
+  // (120px thumbnail, 220px Barangays-tab map, 280-320px full maps), not
+  // computed from the Legend's own measured height — same "tuned by eye"
+  // precedent Legend's own comments already set for its other variants.
+  const legendProps = height < 150 ? { compact: true } : height < 250 ? { size: 'md' as const } : {}
+
   return (
     <div className="relative overflow-hidden rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
       <svg viewBox={viewBoxOf(bounds)} width="100%" height={height} role="img" aria-label="Island-wide flood susceptibility map (read-only)">
@@ -147,11 +153,15 @@ export default function StaticIslandMap({
       </svg>
       {/*
         Same FSI-severity Legend the real BiliranMap uses (reused, not
-        reimplemented) — this map has exactly one caller (UserDashboardModal,
-        height=320), always tall enough for the full labeled variant, so
-        no compact (dots-only) mode is needed here.
+        reimplemented). This component now has several callers at very
+        different heights (the 320px Rainfall & Scenarios map down to a
+        120px "Selected Barangay" thumbnail) — picking the variant from
+        `height` itself, not a prop every caller has to remember to set,
+        so a new caller can't reintroduce the "legend taller than the
+        map" bug a smaller height once produced with the always-'lg'
+        Legend this used to render unconditionally.
       */}
-      <Legend />
+      <Legend {...legendProps} />
     </div>
   )
 }

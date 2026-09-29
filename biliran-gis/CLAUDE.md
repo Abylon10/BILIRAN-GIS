@@ -2052,6 +2052,60 @@ Three small fixes to the profile UI (`components/ProfilePanel.tsx`,
   shapes vertically centered together as the circle grows past the tab's
   own height.
 
+## Three follow-up fixes from live-site testing: legend size, FSI/hydrograph separation, real user disable toggle
+
+Testing the deployed build (PR #21) surfaced 3 more issues:
+
+- **Size-aware `Legend`**: `components/BiliranMap.tsx`'s `Legend` only
+  had two variants — a large labeled column tuned for ~280px+ maps, and
+  a dots-only `compact` pill tuned for BiliranMap's own ~144-192px
+  compact state. `components/StaticIslandMap.tsx` always rendered the
+  large variant regardless of its own `height`, so at the Barangays
+  tab's 220px map the legend (≈272px tall) was literally taller than the
+  map — confirmed by a screenshot of the live site. `Legend` gained a
+  `size?: 'lg' | 'md'` prop (default `'lg'`, so `BiliranMap.tsx`'s own
+  two call sites are unaffected — neither passes it): `'md'` is a
+  smaller labeled column (14px dots, tighter gaps/padding/text), not the
+  dots-only `compact` pill — Barangays-tab-sized maps still want real
+  labels, just sized to fit. `StaticIslandMap.tsx` now picks the variant
+  from its own `height` automatically (`< 150` → `compact`, `< 250` →
+  `size="md"`, else the unchanged `'lg'` default) rather than a prop
+  every caller has to remember — this also fixes a legend-vs-map-size
+  bug the 120px "Selected Barangay" thumbnail (below) would otherwise
+  have hit, never separately reported but real.
+- **FSI summary and full detail are separate cards again**: the
+  Rainfall & Scenarios two-column redesign had nested the full
+  `BarangayDetailPanel` (hydrograph, factor breakdown) *inside*
+  `SelectedBarangayCard`'s own bordered box in
+  `components/UserDashboardModal.tsx`, behind a "View full details"
+  toggle. Per direct feedback ("separate the FSI and hydrograph, just
+  like before"), that toggle/nesting is gone —
+  `SelectedBarangayCard` is back to being only the compact summary
+  (thumbnail, FSI score, countdown, rainfall range while simulated), and
+  `BarangayDetailPanel` renders as its own separate sibling card
+  immediately after it once a barangay is selected, always visible, no
+  toggle. `BarangayDetailPanel` itself is unchanged.
+- **Users tab: Active/Disabled is a real toggle now**: a status label
+  with nothing to change it read as broken next to columns that are real
+  data. New `app/api/admin/users/[id]/route.ts` (`PATCH`, admin-gated):
+  uses Supabase Auth's own real ban mechanism —
+  `supabaseAdmin.auth.admin.updateUserById(id, { ban_duration })`,
+  confirmed via `@supabase/auth-js`'s own types (`'none'` lifts a ban,
+  any other duration string bans; this route uses `'876000h'`, ~100
+  years, as the conventional "indefinite" value) — the same field the
+  `GET` route already reads back as `disabled`
+  (`banned_until` in the future). **Guarded against self-lockout twice**:
+  server-side, the route rejects `disabled: true` when the target id
+  matches the calling admin's own id; client-side,
+  `components/AdminUsersTab.tsx` simply disables the toggle button on
+  the signed-in admin's own row (with an explanatory `title`) rather
+  than letting them click into a guaranteed error. No guard against
+  disabling a *different* admin — this app has no "protected account"
+  concept beyond "not yourself," matching its otherwise-flat
+  `access_level`-gated admin model. Name/email/office/access level stay
+  non-editable — only status is actionable now, so the tab's own
+  explanatory copy was reworded away from a blanket "Read-only" claim.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
