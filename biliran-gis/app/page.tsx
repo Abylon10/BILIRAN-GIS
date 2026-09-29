@@ -861,9 +861,22 @@ export default function HomePage() {
           than var(--text-strong), since --header-bg is deliberately dark
           in both themes (a branded band, not a theme-following surface).
         */}
-        <div className="shrink-0 border-b-2 px-6 py-4" style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)' }}>
-          <h1 className="text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
-          <p className="text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
+        <div
+          className="min-w-0 shrink-0 border-b-2 px-6 py-4"
+          style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)', paddingRight: 260 }}
+        >
+          {/*
+            paddingRight: 260 reserves space under the absolutely-positioned
+            Day/Night+Profile controls above (z-20, up to ~400px wide once
+            HeaderProfileButton is revealed) — same reservation technique
+            already proven for this exact collision shape elsewhere in this
+            app (AdminInvitePanel's old "Open User Dashboard" button). Without
+            it, the subtitle line runs far enough right on a phone screen to
+            be painted over by those higher-z-index controls. truncate is a
+            second safety net for very narrow phones.
+          */}
+          <h1 className="truncate text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
+          <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
         </div>
         <div className="min-h-0 flex-1 p-6" style={{ background: 'var(--body-bg)' }}>
           <DashboardShell

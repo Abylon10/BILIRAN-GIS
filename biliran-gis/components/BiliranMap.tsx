@@ -142,11 +142,30 @@ export default function BiliranMap({
   // instantly, rather than lagging behind it. Programmatic jumps (tap a
   // municipality, pick a barangay, zoom buttons, reset) keep the transition.
   const [interacting, setInteracting] = useState(false)
+  // Real viewport width, independent of `compact` (which is driven by
+  // barangay-list scroll state — a different question). Used only to pick
+  // the Legend's already-built 'md' size variant on a phone-width screen
+  // instead of its full desktop-sized default — same matchMedia pattern
+  // app/page.tsx already uses for its own dark-mode-preference listener.
+  const [isNarrowViewport, setIsNarrowViewport] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 480px)').matches
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startView: View; capturing: boolean } | null>(null)
   const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // rAF-throttling for drag-pan: raw pointermove can fire well above 60Hz
+  // on Android, and each setView() re-renders/re-stringifies every
+  // municipality/barangay/waterway path underneath the map's transform —
+  // capping the actual setView() call to once per animation frame (instead
+  // of once per raw event) keeps that re-render frequency at the display's
+  // real refresh rate. rafIdRef tracks whether a frame is already scheduled
+  // (so a burst of pointermove events between frames only schedules one);
+  // pendingPointerRef holds the latest raw pointer position for whenever
+  // that frame actually runs.
+  const rafIdRef = useRef<number | null>(null)
+  const pendingPointerRef = useRef<{ clientX: number; clientY: number } | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -162,6 +181,19 @@ export default function BiliranMap({
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load map data.'))
   }, [])
 
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 480px)')
+    const listener = (e: MediaQueryListEvent) => setIsNarrowViewport(e.matches)
+    mq.addEventListener('change', listener)
+    return () => mq.removeEventListener('change', listener)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current)
+    }
+  }, [])
+
   const project = useMemo(() => makeProjector(11.58), [])
 
   const islandBounds: Bounds | null = useMemo(() => {
@@ -174,6 +206,28 @@ export default function BiliranMap({
     bounds.maxY = Math.max(bounds.maxY, my)
     return expandBounds(bounds, 0.1)
   }, [municipalities, project])
+
+  // Waterway path strings don't depend on view/scale at all (pan/zoom is
+  // applied as a transform on the wrapping <g>, not by recomputing
+  // projected coordinates) — memoized here so re-renders triggered by
+  // setView() during a drag (see applyPendingPointerMove above) don't
+  // re-stringify all 448 line features' `d` attributes on every frame,
+  // only whenever the underlying waterways data itself changes.
+  const waterwayPaths = useMemo(
+    () => waterways?.features.map((f) => lineGeometryToPath(f.geometry, project)) ?? [],
+    [waterways, project]
+  )
+
+  // Same reasoning as waterwayPaths above, for municipality polygons —
+  // computed once here (keyed only on the geojson data + the stable
+  // `project` reference, never on view/scale) and reused both by the
+  // dimmed context-outline layer just below and by MunicipalityLayer,
+  // instead of each recomputing its own copy of the same ~7 path strings
+  // on every drag frame.
+  const municipalityPaths = useMemo(
+    () => new Map(municipalities?.features.map((f) => [f.properties.pgc_prefix, geometryToPath(f.geometry, project)]) ?? []),
+    [municipalities, project]
+  )
 
   // Native (non-React-synthetic) wheel listener, added with { passive: false }
   // so preventDefault() actually stops page scroll — React's onWheel prop is
@@ -452,20 +506,18 @@ export default function BiliranMap({
     }
   }
 
-  function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
+  // Runs at most once per animation frame (scheduled by handlePointerMove
+  // below), reading the latest raw pointer position rather than one
+  // captured per-event — this is the actual setView()-triggering work,
+  // decoupled from raw pointermove frequency.
+  function applyPendingPointerMove() {
+    rafIdRef.current = null
+    const pending = pendingPointerRef.current
     const drag = dragRef.current
-    if (!drag || drag.pointerId !== e.pointerId || !svgRef.current || !islandBounds) return
-
-    if (!drag.capturing) {
-      const movedPx = Math.hypot(e.clientX - drag.startClientX, e.clientY - drag.startClientY)
-      if (movedPx < DRAG_THRESHOLD_PX) return
-      drag.capturing = true
-      setInteracting(true)
-      e.currentTarget.setPointerCapture(e.pointerId)
-    }
+    if (!pending || !drag || !svgRef.current || !islandBounds) return
 
     const [startX, startY] = clientPointToSvgSpace(svgRef.current, drag.startClientX, drag.startClientY)
-    const [curX, curY] = clientPointToSvgSpace(svgRef.current, e.clientX, e.clientY)
+    const [curX, curY] = clientPointToSvgSpace(svgRef.current, pending.clientX, pending.clientY)
     const deltaX = (curX - startX) * DRAG_DAMPING
     const deltaY = (curY - startY) * DRAG_DAMPING
     setView(
@@ -480,11 +532,34 @@ export default function BiliranMap({
     )
   }
 
+  function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId || !svgRef.current || !islandBounds) return
+
+    if (!drag.capturing) {
+      const movedPx = Math.hypot(e.clientX - drag.startClientX, e.clientY - drag.startClientY)
+      if (movedPx < DRAG_THRESHOLD_PX) return
+      drag.capturing = true
+      setInteracting(true)
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
+
+    pendingPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+    if (rafIdRef.current == null) {
+      rafIdRef.current = requestAnimationFrame(applyPendingPointerMove)
+    }
+  }
+
   function endDrag(e: React.PointerEvent<SVGSVGElement>) {
     if (dragRef.current?.pointerId === e.pointerId) {
       dragRef.current = null
       setInteracting(false)
     }
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    pendingPointerRef.current = null
   }
 
   return (
@@ -622,8 +697,8 @@ export default function BiliranMap({
             strokeWidth={0.0006 + barangayOpacity * 0.0003}
             fill="none"
           >
-            {waterways.features.map((f, i) => (
-              <path key={i} d={lineGeometryToPath(f.geometry, project)} />
+            {waterwayPaths.map((d, i) => (
+              <path key={i} d={d} />
             ))}
           </g>
 
@@ -632,7 +707,7 @@ export default function BiliranMap({
             {municipalities.features.map((f) => (
               <path
                 key={f.properties.pgc_prefix}
-                d={geometryToPath(f.geometry, project)}
+                d={municipalityPaths.get(f.properties.pgc_prefix)}
                 fill="none"
                 stroke="var(--text-strong)"
                 strokeWidth={0.0004}
@@ -654,6 +729,7 @@ export default function BiliranMap({
           */}
           <MunicipalityLayer
             municipalities={municipalities}
+            municipalityPaths={municipalityPaths}
             barangays={barangays}
             onSelect={focusMuni}
             nearestPrefix={nearestPrefix}
@@ -665,7 +741,8 @@ export default function BiliranMap({
             pointerEvents={barangayOpacity > 0.5 ? 'auto' : 'none'}
           >
             <BarangayLayer
-              features={nearestPrefix ? brgyGeo.features.filter((f) => f.properties.pgc_prefix === nearestPrefix) : []}
+              brgyGeo={brgyGeo}
+              nearestPrefix={nearestPrefix}
               barangaysByKey={barangaysByKey}
               selectedKey={selectedKey}
               onSelect={(key) => {
@@ -715,7 +792,7 @@ export default function BiliranMap({
         it stays visible and legible at the small compact-map size, so it
         shouldn't disappear entirely just because the map is compact.
       */}
-      {showChrome && <Legend compact={compact} />}
+      {showChrome && <Legend compact={compact} size={isNarrowViewport ? 'md' : 'lg'} />}
     </div>
   )
 }
@@ -768,6 +845,7 @@ function DriftingClouds({ bounds }: { bounds: Bounds }) {
 
 function MunicipalityLayer({
   municipalities,
+  municipalityPaths,
   barangays,
   onSelect,
   nearestPrefix,
@@ -775,6 +853,13 @@ function MunicipalityLayer({
   weatherByMunicipality,
 }: {
   municipalities: GeoFeatureCollection<MuniProps>
+  // Precomputed by the parent (BiliranMap) via useMemo, keyed only on the
+  // geojson data + the stable projector — shared with its own dimmed
+  // context-outline layer so the same ~7 path strings aren't computed
+  // twice per render, and aren't recomputed at all just because a drag
+  // frame changed nearestPrefix/barangayOpacity (neither of which the
+  // path geometry itself depends on).
+  municipalityPaths: Map<string, string>
   barangays: Barangay[]
   onSelect: (prefix: string) => void
   // Only the municipality the current view is nearest to fades out (as
@@ -799,7 +884,7 @@ function MunicipalityLayer({
       <g filter="url(#bfw-land-shadow)">
         {municipalities.features.map((f) => {
           const score = municipalityWorstScore(barangays, f.properties.municipality)
-          const d = geometryToPath(f.geometry, project)
+          const d = municipalityPaths.get(f.properties.pgc_prefix)
           return (
             <g key={f.properties.pgc_prefix} style={{ opacity: fadeFor(f.properties.pgc_prefix), transition: 'opacity 0.4s ease' }}>
               <path
@@ -872,24 +957,46 @@ function MunicipalityLayer({
 }
 
 function BarangayLayer({
-  features,
+  brgyGeo,
+  nearestPrefix,
   barangaysByKey,
   selectedKey,
   onSelect,
 }: {
-  features: GeoFeature<BrgyProps>[]
+  // Raw collection + the current municipality prefix, rather than a
+  // pre-filtered array — filtering happens inside this component's own
+  // useMemo below (deliberately not done by the caller) so the result has
+  // a stable identity across renders where nearestPrefix hasn't actually
+  // changed. A hook call in the parent component can't do this safely
+  // here (BiliranMap has conditional early returns above the point where
+  // nearestPrefix becomes known, and hooks can't follow those), so this
+  // needed to live in a component with no such early return instead.
+  brgyGeo: GeoFeatureCollection<BrgyProps>
+  nearestPrefix: string | null
   barangaysByKey: Map<string, Barangay>
   selectedKey: string | null
   onSelect: (key: string) => void
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
+  const features = useMemo(
+    () => (nearestPrefix ? brgyGeo.features.filter((f) => f.properties.pgc_prefix === nearestPrefix) : []),
+    [brgyGeo, nearestPrefix]
+  )
+  // Only recomputed when `features` itself changes — i.e. when
+  // nearestPrefix actually changes municipality, not on every drag frame
+  // — the up-to-~24 path strings here don't depend on
+  // selectedKey/barangaysByKey at all.
+  const barangayPaths = useMemo(
+    () => new Map(features.map((f) => [f.properties.key, geometryToPath(f.geometry, project)])),
+    [features, project]
+  )
   return (
     <g>
       <g filter="url(#bfw-land-shadow)">
         {features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
           const selected = f.properties.key === selectedKey
-          const d = geometryToPath(f.geometry, project)
+          const d = barangayPaths.get(f.properties.key)
           return (
             <g key={f.properties.key}>
               <path
@@ -955,7 +1062,13 @@ function ZoomControls({
 }) {
   return (
     <div
-      className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      // Mobile-first: tighter gap/padding by default, growing at sm: —
+      // extends the same pattern the slider below already used on its own
+      // (w-16 -> sm:w-20) to the rest of this control's chrome, rather than
+      // leaving the slider as the only responsive piece here. Button size
+      // itself (h-6 w-6) is left alone at every width — already a small,
+      // deliberately compact touch target, not something to shrink further.
+      className="absolute bottom-3 right-3 flex items-center gap-1 rounded-full border px-2 py-1 shadow-lg ring-1 ring-white/10 backdrop-blur-md sm:gap-1.5 sm:px-2.5 sm:py-1.5"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
     >
       <button
@@ -975,7 +1088,7 @@ function ZoomControls({
           value={scale}
           onChange={(e) => onChange(Number(e.target.value))}
           aria-label="Zoom level"
-          className="h-1 w-16 accent-current sm:w-20"
+          className="h-1 w-12 accent-current sm:w-20"
         />
       )}
       <button
@@ -1257,7 +1370,9 @@ function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: 
 
   return (
     <div
-      className="absolute right-0 top-0 flex items-center gap-2 py-2.5 pl-8 pr-4 backdrop-blur-md"
+      // Mobile-first sizing, same reasoning as ZoomControls above — tighter
+      // padding by default, growing at sm:.
+      className="absolute right-0 top-0 flex items-center gap-1.5 py-2 pl-6 pr-3 backdrop-blur-md sm:gap-2 sm:py-2.5 sm:pl-8 sm:pr-4"
       style={{
         background: 'var(--card-bg)',
         clipPath: 'polygon(0 0, 100% 0, 100% 100%, 24px 100%)',
@@ -1266,7 +1381,7 @@ function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: 
       title={title}
     >
       <WeatherIconStyles />
-      <svg width="34" height="28" viewBox="0 0 44 36" aria-hidden>
+      <svg className="h-6 w-7 sm:h-7 sm:w-[34px]" viewBox="0 0 44 36" aria-hidden>
         <WeatherIconSVG condition={condition} />
       </svg>
       <span className="flex flex-col leading-tight">

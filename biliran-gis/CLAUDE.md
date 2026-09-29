@@ -2106,6 +2106,69 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## Real-device phone fixes: header overlap, oversized map chrome, pan/zoom lag
+
+A phone screenshot showed the public (non-admin) dashboard's header title/subtitle overlapping the Day/Night
+toggle and Profile button, plus the map's FSI severity Legend dominating the screen — and the user separately
+reported the map feels "laggy and pretty much not usable" on a real Android phone. This is the public dashboard
+(`app/page.tsx` + `components/BiliranMap.tsx`) — a different surface from the admin-shell mobile audit earlier
+this session, which never touched this file. Three Explore agents read the actual code and confirmed three real,
+distinct bugs (not assumptions):
+
+- **Header overlap**: `app/page.tsx`'s Day/Night+Profile controls (`absolute right-5 top-5 z-20`) and the title/
+  subtitle band (`.bfw-dash`'s header, a plain full-width block) were independent elements with no shared layout
+  and no space reservation — the higher-`z-20` controls simply painted over the subtitle text once it reached
+  that corner. Fixed the same way this exact collision shape was already solved once elsewhere in this app
+  (`AdminInvitePanel`'s old "Open User Dashboard" button): a `paddingRight: 260` reservation on the title band,
+  plus `truncate`/`min-w-0` as a safety net. `components/HeaderProfileButton.tsx`'s avatar/tab (deliberately
+  enlarged ~55-56% for desktop in an earlier round) also gained a `@media (max-width: 480px)` override scaling
+  both back down for phone widths only (68px→54px avatar, 240px→150px tab max-width) — purely additive, the
+  desktop sizing above that breakpoint is untouched.
+- **Oversized map chrome**: `Legend` already had a `size?: 'lg' | 'md'` prop (built for `StaticIslandMap.tsx`'s
+  medium-height maps), but `BiliranMap.tsx`'s own call site never passed it, always rendering the full `'lg'`
+  variant regardless of viewport — the existing `compact` mode is driven by barangay-list scroll state, a
+  different question from "is this a narrow screen," so it did nothing for a first-load phone view. Added a
+  `isNarrowViewport` state (`window.matchMedia('(max-width: 480px)')`, same listener pattern `app/page.tsx`
+  already uses for its own dark-mode-preference sync) and pass `size={isNarrowViewport ? 'md' : 'lg'}` to
+  `Legend` — reusing the already-built, already-tested variant rather than inventing new markup.
+  `ZoomControls`/`WeatherBadge` gained the same "smaller by default, `sm:` grows it" mobile-first treatment the
+  zoom slider already used on its own (`w-16 sm:w-20`) — extended to the rest of `ZoomControls`' padding/gap and
+  to `WeatherBadge`'s icon/padding, via plain responsive Tailwind classes (no new state needed for these two).
+- **Pan/zoom lag on a real device**: `handlePointerMove` called `setView()` synchronously on every raw
+  `pointermove` event (uncapped — Android can fire these well above 60Hz), and none of the per-feature SVG path
+  `d`-string generation (`geometryToPath`/`lineGeometryToPath`, `lib/geo.ts`) for ~7 municipalities, up to ~24
+  barangays, and 448 waterway line features was memoized — so every one of those events forced a full
+  re-stringification of hundreds of paths, even though none of those coordinates actually depend on `view`/
+  `scale` at all (pan/zoom is applied cheaply as a `transform` on one wrapping `<g>`, which was already correct
+  and never the bottleneck). Two fixes:
+  1. **rAF-throttled drag updates**: `handlePointerMove` now stores the latest pointer position in a ref
+     (`pendingPointerRef`) and schedules at most one `setView()` per animation frame via `requestAnimationFrame`
+     (`rafIdRef` tracks whether one's already pending, so a burst of events between frames only schedules once);
+     cancelled on `pointerup`/`pointercancel` (`endDrag`) and on unmount. Caps re-render frequency to the
+     display's actual refresh rate instead of raw event rate.
+  2. **Memoized path generation**: waterway and municipality path strings are now computed once via `useMemo`
+     in `BiliranMap` itself, keyed only on the geojson data + the already-stable `project` reference (never on
+     `view`/`scale`) — `municipalityPaths` (a precomputed `Map<prefix, d>`) is shared between the dimmed
+     context-outline layer and `MunicipalityLayer` instead of each recomputing the same ~7 paths separately.
+     `BarangayLayer` was restructured to accept the raw `brgyGeo` collection + `nearestPrefix` (rather than a
+     pre-filtered `features` array from the parent) and do its own `useMemo`'d filter + path-string generation
+     internally — this was necessary, not just a style choice: `BiliranMap` has conditional early returns
+     (loading/error states) above the point where `nearestPrefix` becomes computable, so a `useMemo` hook for
+     the filtered array couldn't live in the parent without violating React's rules of hooks; moving both the
+     filter and the path memoization into `BarangayLayer` (which has no such early return) gives the filtered
+     array a stable identity across renders where `nearestPrefix` hasn't actually changed, which is what makes
+     its own internal path-memoization actually effective during a drag.
+  - `feDropShadow` filter cost over the polygon layers is a secondary, compounding factor, not fixed here.
+    `BarangayList.tsx`'s non-virtualized 115-row render is a sibling of the map, not nested under it, so it
+    doesn't compound with drag frame rate and was left alone.
+
+**Honest limitation**: real on-device frame-rate/jank can't be measured from this sandbox (no physical Android
+device, no profiler attached) — verified instead by code review confirming the re-render/re-stringify cascade is
+actually eliminated, and by a functional regression check (drag-pan still lands at the correct clamped position
+after the drag ends, at both a phone and a desktop viewport). Flagged to the user as something to confirm
+themselves on their own phone after this ships, same as real Resend delivery and real Supabase RLS behavior were
+flagged as sandbox-unverifiable earlier this session.
+
 ## "Copy link" button for manual invitation sharing
 
 No domain is verified in Resend yet, so invitation emails currently only deliver to the Resend account's own
