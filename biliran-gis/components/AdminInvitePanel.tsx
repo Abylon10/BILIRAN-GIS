@@ -11,25 +11,29 @@
 // existing expiry check (a plain Date comparison) needs no changes to
 // honor whatever this sets.
 //
-// This is the admin landing now — app/page.tsx opens it for any admin
-// reveal (see its own comment there), not a modal reachable from the
-// normal dashboard. It's a full-screen opaque takeover (fixed inset-0
-// z-[18], same explicit-opaque-background technique as
-// UserDashboardModal — the shared Modal's backdrop is translucent by
-// design, which used to let the live map/dashboard bleed through behind
-// this exact panel), sitting ABOVE .bfw-map-shell (z-15) and .bfw-dash
-// (z-10) so it fully occludes them, but BELOW the persistent header row
-// (z-20, Profile/sign-out/day-night) so that chrome stays reachable the
-// entire time an admin is here — a deliberate choice, since there's no
-// close button on this view itself (see below). No map/dashboard
-// visible at all until "Open User Dashboard" is pressed.
+// Plain tab content now — components/AdminShell.tsx renders this as its
+// "Invitations" tab, not a full-screen takeover of its own. Used to own a
+// fixed inset-0 opaque wrapper (back when this WAS the entire admin
+// landing) plus an "Open User Dashboard" button that opened
+// UserDashboardModal as a sibling overlay; both are gone now that
+// AdminShell provides the shared header/tab chrome and "Rainfall &
+// Scenarios" is its own tab rendering UserDashboardModal directly
+// (embedded) instead. The form/edit/revoke logic below is otherwise
+// unchanged.
+//
+// The list itself gained a derived Pending/Accepted/Expired status badge,
+// a search box (email/office/name), a status filter, and a dedicated
+// "Resend" button (reuses the PATCH endpoint with the row's own
+// unchanged values — PATCH already resends on every edit, so this is
+// just a no-op edit exposed as its own action, no new route needed). No
+// "Revoked" status: revoking hard-deletes the row (see inviteStatus's own
+// comment below), so there's nothing left to label afterward — a
+// deliberate scope decision, not an oversight.
 
 'use client'
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { opaqueBg } from '@/lib/opaqueTheme'
-import UserDashboardModal from '@/components/UserDashboardModal'
 
 interface Invitation {
   id: number
@@ -40,6 +44,27 @@ interface Invitation {
   redeemed: boolean
   expires_at: string | null
   redeemed_at: string | null
+}
+
+// Derived, not stored — "Revoked" isn't one of these: revoking an
+// invitation (DELETE, app/api/admin/invite/[id]/route.ts) hard-deletes
+// the row, so there's no persisted state left to label afterward. Adding
+// a real, filterable "Revoked" status would need a soft-revoke column
+// plus a matching guard in app/api/activate/route.ts (otherwise a
+// "revoked" code would still redeem) — a deliberate scope decision to
+// leave that as-is for now, not an oversight.
+type InviteStatus = 'Pending' | 'Accepted' | 'Expired'
+
+function inviteStatus(inv: Invitation): InviteStatus {
+  if (inv.redeemed) return 'Accepted'
+  if (inv.expires_at && new Date(inv.expires_at).getTime() < Date.now()) return 'Expired'
+  return 'Pending'
+}
+
+const STATUS_COLORS: Record<InviteStatus, string> = {
+  Pending: '#8A4B12',
+  Accepted: '#2C5F3E',
+  Expired: '#C0392B',
 }
 
 // Supabase returns expires_at as an ISO 8601 UTC string, but
@@ -70,19 +95,20 @@ async function fetchInvitations(token: string): Promise<Invitation[]> {
   return data.invitations ?? []
 }
 
-export default function AdminInvitePanel({
-  theme,
-}: {
-  theme: 'light' | 'dark'
-}) {
+export default function AdminInvitePanel() {
   const [email, setEmail] = useState('')
   const [office, setOffice] = useState('')
   const [inviteeName, setInviteeName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ invitation: Invitation; emailSent: boolean; emailError: string | null } | null>(null)
-  const [showUserDashboard, setShowUserDashboard] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<InviteStatus | 'all'>('all')
+  // Set from a successful resend, scoped to the row it applies to — same
+  // pattern as editResult below, just for the dedicated Resend button
+  // rather than a save.
+  const [resendResult, setResendResult] = useState<{ id: number; emailSent: boolean; emailError: string | null } | null>(null)
 
   // Inline edit state — at most one row editable at a time.
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -127,39 +153,50 @@ export default function AdminInvitePanel({
     setCreated(null)
     setLoading(true)
 
-    const token = await getToken()
-    if (!token) {
+    // Wrapped in try/catch/finally — without it, a network failure, a
+    // timed-out request, or any non-JSON response (e.g. a platform
+    // timeout page instead of real JSON) throws before setLoading(false)
+    // ever runs, leaving the button stuck on "Creating…" forever with no
+    // error shown. finally guarantees the loading state always clears,
+    // success or failure.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch('/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email, office, invitee_name: inviteeName || null }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error ?? 'Could not create invitation.')
+        return
+      }
+
+      setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
+      setEmail('')
+      setOffice('')
+      setInviteeName('')
+      await refresh()
+    } catch {
+      setError('Could not reach the server — check your connection and try again.')
+    } finally {
       setLoading(false)
-      setError('Your session expired — sign in again.')
-      return
     }
-
-    const res = await fetch('/api/admin/invite', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ email, office, invitee_name: inviteeName || null }),
-    })
-    const data = await res.json()
-    setLoading(false)
-
-    if (!res.ok) {
-      setError(data.error ?? 'Could not create invitation.')
-      return
-    }
-
-    setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
-    setEmail('')
-    setOffice('')
-    setInviteeName('')
-    await refresh()
   }
 
   function startEdit(inv: Invitation) {
     setRowError(null)
     setEditResult(null)
+    setResendResult(null)
     setEditingId(inv.id)
     setEditEmail(inv.email)
     setEditOffice(inv.office)
@@ -175,101 +212,141 @@ export default function AdminInvitePanel({
     setRowError(null)
     setRowBusyId(id)
 
-    const token = await getToken()
-    if (!token) {
+    // Same try/catch/finally reasoning as handleSubmit above — a thrown
+    // network/parse error must never leave rowBusyId stuck on this row.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: editEmail,
+          office: editOffice,
+          invitee_name: editInviteeName || null,
+          expires_at: fromDatetimeLocalValue(editExpiresAt),
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setRowError(data.error ?? 'Could not update invitation.')
+        return
+      }
+
+      setEditResult({ id, emailSent: data.emailSent, emailError: data.emailError })
+      setEditingId(null)
+      await refresh()
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
       setRowBusyId(null)
-      setRowError('Your session expired — sign in again.')
-      return
     }
+  }
 
-    const res = await fetch(`/api/admin/invite/${id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        email: editEmail,
-        office: editOffice,
-        invitee_name: editInviteeName || null,
-        expires_at: fromDatetimeLocalValue(editExpiresAt),
-      }),
-    })
-    const data = await res.json()
-    setRowBusyId(null)
+  // Dedicated "Resend" — reuses the PATCH endpoint with the row's own
+  // current values unchanged (PATCH already resends the email on every
+  // successful edit; a no-op edit is a legitimate, safe way to trigger
+  // just that, with no new backend route needed). Only ever called for an
+  // unredeemed row (the only kind this button renders for), so this can
+  // never re-notify someone who already activated.
+  async function resendInvite(inv: Invitation) {
+    setRowError(null)
+    setResendResult(null)
+    setRowBusyId(inv.id)
 
-    if (!res.ok) {
-      setRowError(data.error ?? 'Could not update invitation.')
-      return
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${inv.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: inv.email,
+          office: inv.office,
+          invitee_name: inv.invitee_name,
+          expires_at: inv.expires_at,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setRowError(data.error ?? 'Could not resend invitation.')
+        return
+      }
+
+      setResendResult({ id: inv.id, emailSent: data.emailSent, emailError: data.emailError })
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
+      setRowBusyId(null)
     }
-
-    setEditResult({ id, emailSent: data.emailSent, emailError: data.emailError })
-    setEditingId(null)
-    await refresh()
   }
 
   async function revoke(id: number) {
     setRowError(null)
     setRowBusyId(id)
 
-    const token = await getToken()
-    if (!token) {
+    // Same try/catch/finally reasoning as handleSubmit/saveEdit above —
+    // this already guarded the res.json() parse on failure, but not a
+    // thrown fetch() itself (e.g. a network drop), which would have left
+    // rowBusyId stuck the same way.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setRowError(data.error ?? 'Could not revoke invitation.')
+        return
+      }
+
+      await refresh()
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
       setRowBusyId(null)
-      setRowError('Your session expired — sign in again.')
-      return
     }
-
-    const res = await fetch(`/api/admin/invite/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    setRowBusyId(null)
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      setRowError(data.error ?? 'Could not revoke invitation.')
-      return
-    }
-
-    await refresh()
   }
 
-  // Renders the User Dashboard view instead of (never alongside) the
-  // Invitations landing — closing it (top-left ×) returns to this
-  // landing, never to the raw map/dashboard directly, since there's
-  // nothing else to fall back to (see this file's own header comment).
-  if (showUserDashboard) {
-    return <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
-  }
+  const filteredInvitations = invitations.filter((inv) => {
+    if (statusFilter !== 'all' && inviteStatus(inv) !== statusFilter) return false
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return (
+      inv.email.toLowerCase().includes(q) ||
+      inv.office.toLowerCase().includes(q) ||
+      (inv.invitee_name ?? '').toLowerCase().includes(q)
+    )
+  })
 
   return (
-    <div className="fixed inset-0 z-[18] flex flex-col" style={{ background: opaqueBg(theme) }}>
-      {/*
-        pr reserves space for the persistent header row (app/page.tsx's
-        Profile button + day/night toggle, absolute right-5 top-5 z-20,
-        which stays visible/clickable above this panel by design — see
-        this file's own header comment). Without it, "Open User
-        Dashboard" renders underneath that always-on-top chrome and
-        becomes unclickable — found via Playwright, not a guess: the
-        persistent header measures well under this at every name length
-        this app actually shows, eyeballed with margin to spare rather
-        than computed exactly.
-      */}
-      <div
-        className="flex shrink-0 items-center justify-between border-b py-4 pl-6"
-        style={{ borderColor: 'var(--card-border)', paddingRight: 260 }}
-      >
-        <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
-          Invitations
-        </h2>
-        <button
-          type="button"
-          className="bfw-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold"
-          onClick={() => setShowUserDashboard(true)}
-        >
-          Open User Dashboard
-        </button>
-      </div>
+    <div className="flex flex-col">
+      <h2 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
+        Invitations
+      </h2>
 
       {/*
         Entrance-only (a full expand/collapse height animation would fight
@@ -354,14 +431,41 @@ export default function AdminInvitePanel({
       </form>
 
       {invitations.length > 0 && (
-        <div className="mt-5 max-h-64 overflow-y-auto border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+        <div className="mt-5 border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search email, office, or name"
+              className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs outline-none"
+              style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)' }}
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as InviteStatus | 'all')}
+              className="shrink-0 rounded-md border px-2 py-1.5 text-xs outline-none"
+              style={{ borderColor: 'var(--field-line)', color: 'var(--text-strong)', background: 'var(--card-bg)' }}
+            >
+              <option value="all">All statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Accepted">Accepted</option>
+              <option value="Expired">Expired</option>
+            </select>
+          </div>
+
           {rowError && (
             <p role="alert" className="mb-2 rounded-md bg-[#FBEEE0]/90 px-3 py-2 text-xs text-[#8A4B12]">
               {rowError}
             </p>
           )}
-          <ul className="space-y-2 text-xs">
-            {invitations.map((inv) => {
+          {filteredInvitations.length === 0 && (
+            <p className="py-3 text-center text-xs" style={{ color: 'var(--text-soft)' }}>
+              No invitations match.
+            </p>
+          )}
+          <ul className="max-h-64 space-y-2 overflow-y-auto text-xs">
+            {filteredInvitations.map((inv) => {
               const busy = rowBusyId === inv.id
               if (editingId === inv.id) {
                 return (
@@ -433,15 +537,32 @@ export default function AdminInvitePanel({
                   </li>
                 )
               }
+              const status = inviteStatus(inv)
               return (
                 <li key={inv.id} className="space-y-0.5">
                   <div className="flex items-center justify-between gap-2" style={{ color: 'var(--text-soft)' }}>
-                    <span className="truncate">{inv.email} · {inv.office}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: `${STATUS_COLORS[status]}26`, color: STATUS_COLORS[status] }}
+                      >
+                        {status}
+                      </span>
+                      <span className="truncate">{inv.email} · {inv.office}</span>
+                    </span>
                     {inv.redeemed ? (
                       <span className="font-mono shrink-0">redeemed</span>
                     ) : (
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="font-mono">{inv.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => resendInvite(inv)}
+                          disabled={busy}
+                          className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy ? '…' : 'Resend'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => startEdit(inv)}
@@ -472,6 +593,13 @@ export default function AdminInvitePanel({
                       {editResult.emailSent
                         ? `Emailed to ${inv.email}.`
                         : `Updated, but the email couldn't be sent${editResult.emailError ? ` (${editResult.emailError})` : ''} — share the code manually.`}
+                    </div>
+                  )}
+                  {resendResult && resendResult.id === inv.id && (
+                    <div className="text-[10px]" style={{ color: resendResult.emailSent ? '#2C5F3E' : '#8A4B12' }}>
+                      {resendResult.emailSent
+                        ? `Emailed to ${inv.email}.`
+                        : `Couldn't resend the email${resendResult.emailError ? ` (${resendResult.emailError})` : ''} — share the code manually.`}
                     </div>
                   )}
                 </li>

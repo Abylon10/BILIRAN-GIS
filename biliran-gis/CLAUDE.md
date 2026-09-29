@@ -511,6 +511,34 @@ success, or "Created/Updated, but the email couldn't be sent (...) —
 share the code manually" on failure, with the raw code always still
 shown either way (that fallback already existed and must never regress).
 
+**A real bug shipped after the first real deployment, found and fixed
+this session**: `resend.emails.send()` has no built-in timeout — the SDK
+just awaits its own `fetch()` indefinitely. Once a real `RESEND_API_KEY`
+was actually configured for the first time (previously this sandbox
+could never reach `api.resend.com` at all, so this path was never
+exercised for real), a slow real network round trip could run this
+route's whole response past the serverless platform's own timeout,
+which then returns a non-JSON error page instead of this route's own
+`NextResponse.json(...)`. `components/AdminInvitePanel.tsx`'s
+`handleSubmit`/`saveEdit`/`revoke` had no `try/catch` around their
+`fetch`/`res.json()` calls, so that thrown parse error skipped past
+`setLoading(false)`/`setRowBusyId(null)` entirely — the "Creating…"
+button (or the edit/revoke row) got stuck forever with no error shown,
+reported directly from the live site. Fixed two ways: (1) `lib/email.ts`
+now races `resend.emails.send()` against an explicit 8-second timeout
+(`Promise.race`), so this route always responds well within any
+reasonable platform limit regardless of how the real network call goes
+— invitation creation/edit still always succeeds either way, per the
+graceful-degradation design above, just faster and more predictably now;
+(2) all three handlers in `AdminInvitePanel.tsx` now wrap their
+fetch/parse logic in `try/catch/finally`, so ANY thrown failure (network
+drop, malformed response, anything) always clears the busy/loading state
+and shows a plain "Could not reach the server — check your connection
+and try again" message, never hangs silently again. Verified via mocked
+Playwright: a route mocked to return a non-JSON 504 (reproducing the
+exact failure mode) no longer leaves the button stuck — it resets and
+shows the new error message within seconds.
+
 The email is personalized by an optional **recipient name** — a new
 nullable `invitee_name` column (`supabase/invitation-name-field-setup.sql`,
 same "not auto-applied, run by hand in the Supabase SQL editor" pattern
@@ -739,10 +767,20 @@ space.
 Ranking is **highest FSI score first** (`sortBySeverity()` in
 `lib/dashboardData.ts`, mean_fsi_score descending, tie-broken by soonest
 `danger_time_hours`) — an explicit product decision, not the time-based
-"soonest crossing" order used earlier. The LIVE UPDATE banner still uses the
-time-based `mostUrgentCrossing()` signal; the two are deliberately different
-questions ("who's worst" vs. "what happens soonest") and aren't meant to
-agree.
+"soonest crossing" order used earlier. **The LIVE UPDATE/MODELED ALERT
+banner now uses the same risk-based criterion as the list**
+(`highestRiskCrossing()`, `lib/dashboardData.ts` — reuses
+`sortBySeverity()[0]`, paired with whichever of that one barangay's own
+Alert/Danger crossings comes sooner) — originally this banner used the
+time-based `mostUrgentCrossing()` signal instead, deliberately answering a
+different question ("what happens soonest" vs. the list's "who's worst");
+the user later asked for the banner to show the highest-risk barangay
+too, so it no longer disagrees with the list on purpose. `BiliranMap.tsx`'s
+`WeatherBadge` still uses the original time-based `mostUrgentCrossing()`
+unchanged, for its own separate purpose (picking which municipality's
+real-weather icon appears in the corner ribbon) — that one wasn't asked
+to change and still deliberately answers "what happens soonest," not
+"who's worst."
 
 The map's `WeatherBadge` condition (Calm/Cloudy/Light rain/Rain/Heavy rain)
 is driven by that same `mostUrgentCrossing()` call, not a separate or
@@ -1171,11 +1209,12 @@ fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
 
 **Simulation Mode is real now too — admin-launched, client-side, ephemeral,
-and island-wide.** `AdminInvitePanel.tsx` has an "Open User Dashboard"
-button (a right-aligned pill, same `bfw-btn rounded-full` treatment as
-`MunicipalityFilterDropdown`'s trigger) that swaps the Invitations landing
-out for `components/UserDashboardModal.tsx`: a self-contained snapshot of
-the real dashboard (map + barangay list + detail panel, including the real
+and island-wide.** (Reached differently today than described just below —
+see the "Superseded" note earlier in this file and "Full admin dashboard
+redesign": there's no "Open User Dashboard" button anymore, it's the admin
+shell's own "Rainfall & Scenarios" tab.) `components/UserDashboardModal.tsx`
+is a self-contained snapshot of the real dashboard (map + barangay list +
+detail panel, including the real
 hydrograph and factor breakdown, via the same `BarangayList`/
 `BarangayDetailPanel` components the live dashboard uses, reused as-is)
 plus a "Simulation Mode" button that opens a slide-out sidebar containing
@@ -1355,6 +1394,19 @@ button used to be `disabled={!selected}` back when a simulation only
 targeted one; now it's `disabled={!barangays}` (just needs the roster
 loaded), since the recompute always covers the whole island regardless of
 what's currently selected in the list.
+
+**Superseded — see "Full admin dashboard redesign" near the end of this
+file.** The `AdminInvitePanel.tsx`-as-full-screen-landing architecture
+described in this paragraph and the several below it (the `z-[18]`
+takeover, "Open User Dashboard" swapping it for `UserDashboardModal`,
+`showUserDashboard`) no longer reflects the current code — `AdminShell.tsx`
+is the admin landing now, `AdminInvitePanel.tsx` is just its "Invitations"
+tab's plain content, and `UserDashboardModal` is its "Rainfall &
+Scenarios" tab (via a new `embedded` prop), not a button-triggered
+overlay. Left in place as a historical record of the bugs found/fixed at
+the time (the double-blur bug, the opaque-background fix, the z-index
+click-interception bug) since those fixes and their reasoning (especially
+`lib/opaqueTheme.ts`) are still directly relevant today.
 
 **Admin sign-in now lands directly on a full-screen "Invitations"
 view — not a modal over the live map.** Reported bug: the shared `Modal`
@@ -1652,13 +1704,203 @@ built from two incompatible basin rasters (see the hard constraint on
 source-level UTF-8 double-encoding in `barangay_biliran.geojson` (affects
 names like "Capiñahan," "Santo Niño").
 
+## Full admin dashboard redesign (multi-tab, matching a reference mockup)
+
+The user shared a ChatGPT-generated mockup of a much larger admin UI
+(top-nav tabs: Dashboard, Barangays, GIS/FSI Data, Rainfall & Scenarios,
+Users, Invitations, Reports, Activity Logs, Settings; stat cards; a flood
+map; FSI tables/charts; a "System Status" panel; Activity/Alerts feeds)
+and asked for a full redesign to match it. Most of the mockup's own
+numbers/panels were generic placeholders with no real backing data in
+this repo (10 barangays where the real count is 115, a fabricated 7-day
+FSI trend, a "System Status" panel reporting on services that don't exist
+here) — confirmed directly with the user before building anything, per
+this project's established no-fabrication discipline (see this file's own
+history above): **System Status was dropped entirely** (nothing real to
+report), **FSI Trend was built for real, starting from the day this
+shipped** (not backfilled or invented), **Activity Logs were deferred**
+(a genuinely separate feature — a real audit-log table plus logging on
+every admin action — scoped on its own later), and **the Users tab is
+read-only** (no edit/promote/demote from this tab). Reports and Settings
+were left out too, for the same reason as System Status — no real content
+or data to back either yet, not silently dropped but explicitly flagged
+as omitted.
+
+**`components/AdminShell.tsx` is the admin landing now**, replacing
+`AdminInvitePanel.tsx` as what `app/page.tsx` mounts for
+`showAdminPanel && isAdmin` — see the "Superseded" note earlier in this
+file for what changed structurally. It owns its own header (title/
+subtitle left; Day/Night toggle + `HeaderProfileButton` right, wired to
+the exact same `theme`/`showProfile` state `app/page.tsx` already had) and
+a horizontal tab bar (Dashboard / Barangays / GIS & FSI Data / Rainfall &
+Scenarios / Invitations / Users), swapping tab content below it via plain
+`useState` — not routes, since this whole shell only ever exists behind
+the same `showAdminPanel && isAdmin` gate already enforced upstream, so
+nothing here needs to survive a reload/deep-link. Fully occludes the
+persistent app header and the real dashboard/map while open, same
+precedent `UserDashboardModal.tsx` already established (a temporary
+admin-only view, not permanent app chrome) — `z-50`, `opaqueBg(theme)`
+for its own background **and** its header/tab-bar bands (NOT the
+`--body-bg`/`--header-bg` CSS variables `DashboardShell`'s persistent
+header uses — those are deliberately translucent, and using them here let
+the still-mounted real dashboard/map visibly ghost through behind the
+shell, caught via this feature's own Playwright screenshot pass before
+shipping, same bug class documented at length earlier in this file for
+`UserDashboardModal`/`AdminInvitePanel`). `app/page.tsx`'s `ProfilePanel`
+is rendered **after** `AdminShell` in the JSX now (previously it came
+first) so it paints on top of the shell at the same `z-50` when opened
+from `AdminShell`'s own Profile button — otherwise it would render
+underneath and be invisible.
+
+**Dashboard tab** (`components/AdminDashboardTab.tsx`, the new default):
+4 stat cards — total barangays (`115`, hardcoded fact, not fetched),
+registered users (a real count from the new `GET /api/admin/users`, see
+below), GIS/FSI factors (`4`, hardcoded — HAND/TWI/LCLU/Rainfall), and
+High+Very High risk count (computed live from whichever `barangays` prop
+AdminShell was handed). **`barangays` is not fetched independently here
+— it's the exact same live-forecast-overlaid list `app/page.tsx` already
+computes for the real dashboard** (`displayBarangays`, threaded through
+`AdminShell` as a prop, alongside `liveActive={liveIslandState != null}`)
+rather than a second independent fetch/recompute — a deliberate
+simplification from the original plan (which suggested the tab load
+`basin_hydrographs.json`/`fsi_factors.json`/live weather itself): reusing
+the app's one already-computed live state means the admin view can never
+show a different number than the public dashboard for the same barangay,
+and avoids a second full set of Open-Meteo calls. Below the stat cards:
+the same `highestRiskCrossing()` line the public dashboard's banner uses,
+a `StaticIslandMap` + FSI class-percentage breakdown (computed from the
+real barangay set), a "Recent FSI by barangay" table (`sortBySeverity()`,
+top 10, click-through to the Barangays tab), and the FSI Trend chart
+(below).
+
+**FSI Trend — the one genuinely new data source.** New table
+`public.fsi_daily_snapshots` (`supabase/fsi-daily-snapshots-setup.sql`,
+same "NOT auto-applied, run by hand in the Supabase SQL editor" convention
+as every other `supabase/*.sql` file here — **not yet run against the
+real project**, so the chart shows nothing until someone with dashboard
+access runs it): one row per calendar date (`snapshot_date` unique,
+`avg_fsi`, `high_risk_count`, `source: 'live'|'static'`), RLS-enabled with
+a blanket deny-all policy (same reasoning as `invitation_codes` — every
+real access goes through `supabaseAdmin` in the new admin-gated route
+below, never a direct client). New `app/api/admin/fsi-snapshot/route.ts`:
+`GET` returns the last 30 rows; `POST` is an **idempotent upsert-if-missing**
+keyed on today's date (`Asia/Manila`, matching this app's other date
+handling) — it only ever inserts if today's row doesn't already exist, so
+calling it repeatedly (every Dashboard-tab mount) never overwrites an
+already-recorded day with a possibly-different intraday value. New
+`lib/fsiTrend.ts` (`fetchFsiHistory`/`postTodaySnapshot`, both take a
+bearer token as a parameter rather than fetching their own session —
+matching `AdminInvitePanel.tsx`'s existing pattern). `AdminDashboardTab`
+POSTs today's snapshot once per mount (`avgFsi`/`highRiskCount` computed
+from the same `barangays` prop above, `source` set from `liveActive`),
+then GETs the history to render `components/FsiTrendChart.tsx` — a new
+hand-rolled SVG line chart, same polyline technique as
+`components/DischargeChart.tsx` (this repo's own "no charting library"
+convention), fixed `[0, 1]` FSI y-axis, points colored via the same
+`fsiScoreColor()` every other FSI visualization in this app uses. Starts
+empty and only ever grows from whenever the table is first created
+forward — **deliberately not backfilled** with invented historical
+values, and the chart says so explicitly when it has fewer than one
+point.
+
+**Barangays tab** (`components/AdminBarangaysTab.tsx`): a browsable list
+of all 115 (`MunicipalityFilterDropdown` for filtering, `BarangayList`
+for the ranked rows), selecting one reuses `BarangayDetailPanel`
+unchanged — same real hydrograph/precipitation/factor-breakdown content
+the public dashboard and Rainfall & Scenarios tab both already show, zero
+duplicated logic.
+
+**GIS & FSI Data tab** (`components/AdminGisDataTab.tsx`): a static,
+purely informational page — the real FSI formula
+(`0.30·HAND(inverted) + 0.30·TWI + 0.20·LCLU + 0.20·Rainfall`), the 4
+input factors and their real provenance, and the real validation numbers
+already computed and documented earlier in this file (correlation 0.85,
+mean absolute difference 0.038 against `mean_fsi_score`). Nothing new is
+computed or claimed here — this just surfaces already-true, already-
+documented facts in the admin UI instead of leaving them buried in this
+file, which is exactly why the mockup's own fabricated "6 GIS Datasets"
+card was dropped rather than reproduced.
+
+**Rainfall & Scenarios tab**: `UserDashboardModal` rendered directly with
+a new `embedded` prop (default `false`, preserving the old fixed-overlay/
+close-`×`/fade-in-transition behavior for any future non-embedded caller,
+though none currently exists — `AdminShell` is the only caller now, and
+always passes `embedded`). Embedded mode drops the `fixed inset-0`
+wrapper, the opaque background (the surrounding tab-content area already
+provides one), the fade-in transition, and the top-left `×`/"User
+Dashboard" heading (the tab bar itself is the way in and out — there's
+nothing for this view to close back to on its own). The Simulation Mode
+sidebar keeps its own `fixed right-0 top-0` positioning either way, since
+that's relative to the viewport regardless of embedding context. This
+replaces the old "Open User Dashboard" button + `showUserDashboard`
+toggle inside `AdminInvitePanel.tsx` entirely — there is no longer a
+button that opens this as an overlay; it's just always-available tab
+content now.
+
+**Invitations tab**: `AdminInvitePanel.tsx` lost its own `fixed inset-0
+z-[18]` opaque wrapper, its own header row, and the "Open User Dashboard"
+button/`showUserDashboard` state entirely (see the "Superseded" note
+earlier in this file) — it's now plain tab content, just a heading plus
+the create/list/edit/revoke form and logic.
+
+**Follow-up round — status badges, search/filter, explicit Resend** (a
+separate request, referencing a second ChatGPT-drafted spec the user
+shared for an "Account Invitations" admin page). Confirmed directly
+before building: `revoke` (`DELETE`, `app/api/admin/invite/[id]/route.ts`)
+**hard-deletes** the row — there's no persisted state left once revoked,
+so a `Revoked` status can't be shown afterward without a real schema
+change (a `revoked_at` column, plus a new guard in
+`app/api/activate/route.ts` so a revoked code can't still redeem). Given
+the choice, the user picked keeping revoke as a hard delete rather than
+adding that column — so the list now derives exactly **three** statuses,
+computed client-side, nothing new stored: `Pending` (not redeemed, not
+expired), `Accepted` (`redeemed`), `Expired` (not redeemed,
+`expires_at` in the past) — see `inviteStatus()` in `AdminInvitePanel.tsx`,
+rendered as a small colored badge per row. A search box (matches
+email/office/`invitee_name`, case-insensitive) and a status `<select>`
+filter narrow the list client-side (`filteredInvitations`), same
+in-memory data, no new fetch. A dedicated **Resend** button sits next to
+Edit/Revoke on every unredeemed row: it calls the existing `PATCH`
+endpoint with the row's own current values completely unchanged — PATCH
+already re-sends the invitation email on every successful edit (see
+above), so this is just that same effect exposed as its own one-click
+action, with **no new backend route**. Safe by the same construction as
+edit/revoke: PATCH already refuses a redeemed row (409), so Resend can
+only ever appear on, and only ever target, an unredeemed invitation.
+
+**Users tab** (new, read-only — `components/AdminUsersTab.tsx`). New
+`app/api/admin/users/route.ts` (`GET`, admin-gated via `requireAdmin`,
+mirroring `app/api/admin/invite/route.ts`'s own pattern): `user_profiles`
+has no email column (see this file's structured-name-fields note), so
+this merges `supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })` (for
+email/`created_at`/`banned_until`) with `user_profiles` rows (office,
+access_level, name fields) by `user_id` — the same two-source join
+`app/api/activate/route.ts`'s own write path already implies (it creates
+one row in each), sorted by joined-date descending. No edit/delete
+affordance in the UI at all — a deliberate scope choice, not an
+oversight; user management (promote/demote) remains an open item, same as
+before this redesign. **Active/Disabled status column** (same follow-up
+round as the Invitations changes above): derived from Supabase Auth's own
+real `banned_until` field on the `listUsers()` response (confirmed via
+`@supabase/auth-js`'s own types — `banned_until?: string`, set to a
+far-future timestamp for an indefinite ban, absent for an active user) —
+a genuine signal from Supabase Auth itself, not something this app tracks
+or invents. Deliberately a **label, not a toggle**: this tab stays
+read-only, so disabling/re-enabling a user is still only done from the
+Supabase dashboard directly, not from this app.
+
+**Not built here, same as the mockup's own unsupported panels**: a
+"System Status" panel, an Activity Log tab, Reports, Settings. All
+flagged above, all addable later if a real data source/feature exists to
+back them.
+
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.
 - Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
-- The "Invitations" admin panel now has create/list/edit/revoke **and expire-early** — `AdminInvitePanel.tsx`'s edit-row includes an `expires_at` field (`<input type="datetime-local">`, with a "Clear" button to null it back to "no expiry"), PATCHed via `app/api/admin/invite/[id]/route.ts`, which now accepts `expires_at` in its body alongside `email`/`office`. Can set/shorten/extend/clear freely (no one-way-only restriction — an arbitrary editable expiry isn't a meaningful new privilege given the admin already has full edit/revoke control over unredeemed rows). `app/api/activate/route.ts`'s existing expiry check (a plain `Date` comparison) needed no changes to honor it. Broader admin-panel direction (user management for already-activated accounts, an audit log of admin actions) is still an open discussion, not yet designed.
+- The "Invitations" tab (inside the admin shell — see "Full admin dashboard redesign" above) has create/list/edit/revoke **and expire-early** — `AdminInvitePanel.tsx`'s edit-row includes an `expires_at` field (`<input type="datetime-local">`, with a "Clear" button to null it back to "no expiry"), PATCHed via `app/api/admin/invite/[id]/route.ts`, which now accepts `expires_at` in its body alongside `email`/`office`. Can set/shorten/extend/clear freely (no one-way-only restriction — an arbitrary editable expiry isn't a meaningful new privilege given the admin already has full edit/revoke control over unredeemed rows). `app/api/activate/route.ts`'s existing expiry check (a plain `Date` comparison) needed no changes to honor it. A read-only Users tab now exists (real registered accounts, no edit/promote/demote) — full user management (promote/demote, deactivate) and a real audit log of admin actions are still open, deliberately deferred during the admin redesign above.
 - **`user_profiles`'s "read own row" and "update own row" RLS policies are now verified real, not just assumed** — confirmed directly against the live "Biliran-flood" Supabase project (`qlkkengqkyjljzvtuoqh`) via `pg_policies` (both exist, both scoped `auth.uid() = user_id`, matching `avatars-storage-setup.sql`'s source exactly) **and** by actually exercising them: `SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims = '{"sub": "<uuid>", ...}'` (simulating PostgREST's own JWT-claims mechanism) inside a read-only/rolled-back transaction — querying as the real admin's own `user_id` returned exactly their one row and nothing else; querying as a fabricated `user_id` returned zero rows; a rolled-back self-`UPDATE` under the same simulated claims succeeded for the real `user_id`. `storage.objects`'s `"avatars: users manage own folder"` policy was checked the same way (exists, matches its source file exactly) — though for this app's actual upload flow it's supplementary defense-in-depth, not the real enforcement boundary: `app/api/profile/avatar-upload-url/route.ts` mints a service-role-signed upload URL already scoped server-side to `{user.id}/avatar`, so the client never gets broad `storage.objects` access to begin with. `invitation_codes` has a blanket `"no client access"` deny-all policy, correct since every real access goes through `supabaseAdmin` in `app/api/admin/*`. `get_advisors(security)` surfaced one unrelated finding — "Leaked Password Protection Disabled" (HaveIBeenPwned check off) — a Supabase Dashboard Auth-settings toggle, not fixable via SQL/migration tools, worth flipping manually. **Still not verified**: the actual browser sign-in/session flow, the `/api/admin/invite` create/edit/revoke/expire cycle with a real admin JWT, and a real `/activate` redemption — those need a real signed-in session, still blocked on an invited account (abylonmonsales@gmail.com, code `5E6B059D`) being redeemed and its credentials shared.
 - The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.

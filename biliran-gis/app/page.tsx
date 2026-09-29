@@ -35,7 +35,7 @@ import { computeLiveIslandState } from '@/lib/liveIslandState'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
-import AdminInvitePanel from '@/components/AdminInvitePanel'
+import AdminShell from '@/components/AdminShell'
 import HeaderProfileButton from '@/components/HeaderProfileButton'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
@@ -891,6 +891,26 @@ export default function HomePage() {
         style={{ opacity: authState === 'checking' ? 1 : 0, pointerEvents: authState === 'checking' ? 'auto' : 'none' }}
       />
 
+      {showAdminPanel && isAdmin && (
+        <AdminShell
+          theme={theme}
+          onToggleTheme={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+          avatarUrl={avatarUrl}
+          displayName={displayName}
+          office={office}
+          onOpenProfile={() => setShowProfile(true)}
+          barangays={displayBarangays}
+          liveActive={liveIslandState != null}
+        />
+      )}
+
+      {/*
+        Rendered AFTER AdminShell above (both z-50) so it paints on top of
+        it — needed since AdminShell's own header now has its own Profile
+        button (wired to this same showProfile state) that must be able to
+        open this while the admin shell is showing, not just from the
+        pre-admin persistent header.
+      */}
       {showProfile && user && (
         <ProfilePanel
           user={user}
@@ -903,7 +923,6 @@ export default function HomePage() {
           onSignOut={handleSignOut}
         />
       )}
-      {showAdminPanel && isAdmin && <AdminInvitePanel theme={theme} />}
     </div>
   )
 }

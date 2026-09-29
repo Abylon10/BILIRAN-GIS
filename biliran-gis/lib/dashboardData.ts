@@ -109,6 +109,28 @@ export function mostUrgentCrossing(barangays: Barangay[]): {
   return best
 }
 
+/**
+ * The single highest-risk barangay (same criterion sortBySeverity() ranks
+ * the list by — continuous mean_fsi_score descending), paired with
+ * whichever of ITS OWN Alert/Danger crossing times comes sooner —
+ * deliberately different from mostUrgentCrossing() above, which scans
+ * every barangay for the overall soonest crossing regardless of risk.
+ * Used by components/LiveUpdateBanner.tsx only; components/BiliranMap.tsx's
+ * WeatherBadge still uses mostUrgentCrossing() for its own icon-selection
+ * purpose, unaffected by this.
+ */
+export function highestRiskCrossing(barangays: Barangay[]): {
+  barangay: Barangay
+  tier: 'Alert' | 'Danger'
+  hours: number
+} | null {
+  if (barangays.length === 0) return null
+  const top = sortBySeverity(barangays)[0]
+  const tier: 'Alert' | 'Danger' = top.alert_time_hours <= top.danger_time_hours ? 'Alert' : 'Danger'
+  const hours = tier === 'Alert' ? top.alert_time_hours : top.danger_time_hours
+  return { barangay: top, tier, hours }
+}
+
 /** Worst-case (highest) mean_fsi_score among a municipality's barangays — safety-first, not an average. */
 export function municipalityWorstScore(barangays: Barangay[], municipality: string): number {
   let worst = 0

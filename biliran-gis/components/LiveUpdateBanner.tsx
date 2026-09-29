@@ -1,10 +1,14 @@
 // components/LiveUpdateBanner.tsx
 //
-// The single most urgent upcoming threshold crossing across every barangay,
-// per the dashboard design spec in CLAUDE.md. Explicitly labeled as modeled
-// (design-storm) rather than live, since no rainfall feed is wired up yet.
+// The single highest-risk barangay (same ranking the list below it uses —
+// sortBySeverity()'s continuous mean_fsi_score descending), paired with
+// whichever of its own Alert/Danger crossings comes sooner
+// (highestRiskCrossing() in lib/dashboardData.ts) — deliberately a
+// risk-based question ("who's worst"), not the time-based "what happens
+// soonest" mostUrgentCrossing() still answers for BiliranMap.tsx's own
+// weather-icon selection (unaffected by this file).
 
-import { formatHoursAsCountdown, mostUrgentCrossing, type Barangay } from '@/lib/dashboardData'
+import { formatHoursAsCountdown, highestRiskCrossing, type Barangay } from '@/lib/dashboardData'
 
 export default function LiveUpdateBanner({
   barangays,
@@ -13,7 +17,7 @@ export default function LiveUpdateBanner({
   barangays: Barangay[]
   onSelect: (barangay: Barangay) => void
 }) {
-  const urgent = mostUrgentCrossing(barangays)
+  const urgent = highestRiskCrossing(barangays)
   if (!urgent) return null
 
   return (
