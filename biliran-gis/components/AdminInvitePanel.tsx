@@ -87,6 +87,13 @@ function fromDatetimeLocalValue(value: string): string | null {
   return value ? new Date(value).toISOString() : null
 }
 
+// Client-side only (window.location.origin) — referenced only inside the
+// copyLink handler below, never during render, so this needs no server-
+// provided origin or new prop threading.
+function activationLink(code: string): string {
+  return `${window.location.origin}/activate?code=${code}`
+}
+
 async function getToken(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession()
   return session?.access_token ?? null
@@ -115,6 +122,11 @@ export default function AdminInvitePanel() {
   // pattern as editResult below, just for the dedicated Resend button
   // rather than a save.
   const [resendResult, setResendResult] = useState<{ id: number; emailSent: boolean; emailError: string | null } | null>(null)
+  // Self-clearing "Copy link" confirmation — shared by the post-create
+  // success block and every pending row's own copy button, keyed by the
+  // invitation's numeric id (the just-created invitation and its later
+  // list row share the same id, so no separate "new" sentinel is needed).
+  const [copyFeedback, setCopyFeedback] = useState<{ id: number; ok: boolean } | null>(null)
 
   // Inline edit state — at most one row editable at a time.
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -303,6 +315,22 @@ export default function AdminInvitePanel() {
     }
   }
 
+  // Copies the full activation link (not just the bare code — /activate
+  // only ever reads it from ?code=, there's no manual entry field there)
+  // so manual sharing needs no more than one click + paste. Self-clears
+  // its own "Copied!"/error confirmation after a short delay rather than
+  // needing a separate dismiss action.
+  async function copyLink(inv: Invitation) {
+    try {
+      await navigator.clipboard.writeText(activationLink(inv.code))
+      setCopyFeedback({ id: inv.id, ok: true })
+    } catch {
+      setCopyFeedback({ id: inv.id, ok: false })
+    } finally {
+      setTimeout(() => setCopyFeedback((cur) => (cur?.id === inv.id ? null : cur)), 1600)
+    }
+  }
+
   async function revoke(id: number) {
     setRowError(null)
     setRowBusyId(id)
@@ -437,6 +465,17 @@ export default function AdminInvitePanel() {
                 ? `Emailed to ${created.invitation.email}.`
                 : `Created, but the email couldn't be sent${created.emailError ? ` (${created.emailError})` : ''} — share the code above manually.`}
             </p>
+            <button
+              type="button"
+              onClick={() => copyLink(created.invitation)}
+              className="text-xs font-semibold underline decoration-dotted underline-offset-2"
+            >
+              {copyFeedback?.id === created.invitation.id
+                ? copyFeedback.ok
+                  ? 'Copied!'
+                  : "Couldn't copy — copy the code above manually"
+                : 'Copy link'}
+            </button>
           </div>
         )}
 
@@ -574,6 +613,13 @@ export default function AdminInvitePanel() {
                     ) : (
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="font-mono">{inv.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyLink(inv)}
+                          className="underline decoration-dotted underline-offset-2"
+                        >
+                          {copyFeedback?.id === inv.id ? (copyFeedback.ok ? 'Copied!' : "Couldn't copy") : 'Copy link'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => resendInvite(inv)}
