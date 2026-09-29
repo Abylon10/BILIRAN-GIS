@@ -1613,6 +1613,18 @@ pattern as their missing hydrograph chart everywhere else in this app —
 not a new gap, the same one, now correctly inherited into the live path
 too.
 
+**A small countdown badge in the map's bottom-right corner** (`BiliranMap.tsx`'s
+new `NextForecastBadge`, "Next forecast update in Xm") shows when the
+live data above will next refresh — display-only, sitting just above
+`ZoomControls` in the same corner, same glass-chip styling, hidden under
+the same `showChrome && !compact` gating. It does NOT own a timer itself:
+`app/page.tsx`'s existing weather-refresh effect stamps a new
+`nextForecastUpdateAt = Date.now() + 15min` on every real refresh
+(including the initial one), passed down as a prop; the badge just
+re-renders its own countdown text every 15 seconds from that timestamp.
+`null` (the pre-login backdrop, or before the first weather fetch has
+even started) hides it entirely rather than showing a placeholder count.
+
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
 These affect the data pipeline that produces `barangay_dashboard_data.json`,

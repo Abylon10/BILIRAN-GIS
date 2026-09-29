@@ -111,6 +111,10 @@ export default function HomePage() {
   const [hydrographData, setHydrographData] = useState<RawHydrographData | null>(null)
   const [factorData, setFactorData] = useState<RawFactorData | null>(null)
   const [weatherByMunicipality, setWeatherByMunicipality] = useState<Record<string, WeatherData | null>>({})
+  // Display-only — BiliranMap's own corner countdown reads this to show
+  // "Next forecast update in Xm." The actual refresh is still driven
+  // entirely by the effect below; this is just stamped alongside it.
+  const [nextForecastUpdateAt, setNextForecastUpdateAt] = useState<number | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   // Two-way synced with the map: tapping a municipality on the map sets
   // this (via BiliranMap's onFocusMunicipality), and it also drives
@@ -296,6 +300,12 @@ export default function HomePage() {
     let cancelled = false
 
     function refresh() {
+      // Stamped on every call (including the immediate one below), not
+      // just once at effect-mount — this is what BiliranMap's corner
+      // countdown (nextForecastUpdateAt) actually counts down to, so it
+      // needs to reset each time a real refresh fires, same as the
+      // fetches themselves.
+      setNextForecastUpdateAt(Date.now() + 15 * 60 * 1000)
       for (const name of MONITORED_MUNICIPALITIES) {
         loadWeather(name).then((data) => {
           if (cancelled) return
@@ -668,6 +678,7 @@ export default function HomePage() {
                 listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
               }}
               resetToken={mapResetToken}
+              nextForecastUpdateAt={nextForecastUpdateAt}
             />
           )}
         </div>

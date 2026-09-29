@@ -77,6 +77,7 @@ export default function BiliranMap({
   compact = false,
   onCompactTap,
   resetToken = 0,
+  nextForecastUpdateAt = null,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -117,6 +118,14 @@ export default function BiliranMap({
   // by hand rather than by picking a municipality, neither prop change
   // would catch it.
   resetToken?: number
+  // Timestamp (Date.now()-style ms) of the next scheduled live-forecast
+  // refresh — app/page.tsx's own weather-fetch effect owns the actual
+  // timer and recomputation (lib/liveIslandState.ts); this is display-only,
+  // rendered as a small countdown in the map's bottom-right corner (see
+  // NextForecastBadge below). null hides it — the pre-login backdrop and
+  // any caller that hasn't wired up live weather yet just show nothing,
+  // same "don't invent a placeholder" pattern as the weather icons.
+  nextForecastUpdateAt?: number | null
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -689,6 +698,9 @@ export default function BiliranMap({
       )}
 
       {showChrome && !compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
+      {showChrome && !compact && nextForecastUpdateAt != null && (
+        <NextForecastBadge updateAt={nextForecastUpdateAt} />
+      )}
 
       {showChrome && !compact && (
         <WeatherBadge
@@ -974,6 +986,39 @@ function ZoomControls({
       >
         +
       </button>
+    </div>
+  )
+}
+
+/**
+ * Small countdown to the next live-forecast refresh (app/page.tsx's own
+ * weather-fetch effect owns the actual 15-minute timer — this only
+ * displays it). Sits just above ZoomControls, same corner, same glass-chip
+ * language, smaller/quieter since it's a readout, not a control. Ticks via
+ * its own re-render interval rather than recomputing the countdown from
+ * scratch each parent render, so the text stays live even while nothing
+ * else on the map changes.
+ */
+function NextForecastBadge({ updateAt }: { updateAt: number }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 15 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const msLeft = updateAt - now
+  const label =
+    msLeft <= 0
+      ? 'Refreshing forecast…'
+      : `Next forecast update in ${Math.max(1, Math.round(msLeft / 60000))}m`
+
+  return (
+    <div
+      className="absolute bottom-14 right-3 rounded-full border px-2.5 py-1 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }}
+    >
+      {label}
     </div>
   )
 }
