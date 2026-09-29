@@ -188,7 +188,7 @@ export default function UserDashboardModal({
   ) : (
     <div
       className="rounded-lg border px-3 py-2 text-xs"
-      style={{ background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: '#F2D9D5' }}
+      style={{ background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: 'var(--text-strong)' }}
     >
       Modeled from a single synthetic design storm, not a live rainfall feed — treat every
       countdown below as illustrative until a real forecast is wired in.
