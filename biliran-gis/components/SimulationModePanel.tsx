@@ -155,8 +155,17 @@ export default function SimulationModePanel({
             Exit
           </button>
         )}
+        {/*
+          Solid #B8860B, not the old translucent rgba(184,134,11,0.35) —
+          a translucent fill composites with whatever theme background
+          sits behind it, so the same #3D2B00 text read fine over the
+          light theme's card but was nearly illegible over the dark
+          theme's. A solid, fixed background gives this box the same
+          contrast regardless of theme, same reasoning for the banner
+          below.
+        */}
         {lastResults && (
-          <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(184, 134, 11, 0.35)', color: '#3D2B00' }}>
+          <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: '#B8860B', color: '#3D2B00' }}>
             SIMULATED
           </span>
         )}
@@ -164,7 +173,7 @@ export default function SimulationModePanel({
 
       <div
         className="rounded-lg border px-3 py-2 text-xs"
-        style={{ background: 'rgba(184, 134, 11, 0.35)', borderColor: '#B8860B', color: '#3D2B00' }}
+        style={{ background: '#B8860B', borderColor: '#B8860B', color: '#3D2B00' }}
       >
         SIMULATED — not real data. Runs this storm against the whole island at once:
         countdown times reuse the same real per-basin formula the static hydrographs use;

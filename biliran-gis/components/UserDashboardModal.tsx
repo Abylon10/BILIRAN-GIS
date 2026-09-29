@@ -242,11 +242,14 @@ export default function UserDashboardModal({
               simulation is active, however far the list is scrolled.
             */}
             {islandSim && (
+              // Solid #B8860B, not a translucent rgba fill — see
+              // SimulationModePanel.tsx's own comment on its matching
+              // chip for why (translucent + dark text broke in Night mode).
               <button
                 type="button"
                 onClick={() => setIslandSim(null)}
                 className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-                style={{ background: 'rgba(184, 134, 11, 0.35)', borderColor: '#B8860B', color: '#3D2B00' }}
+                style={{ background: '#B8860B', borderColor: '#B8860B', color: '#3D2B00' }}
               >
                 ⚠ SIMULATED · Clear
               </button>

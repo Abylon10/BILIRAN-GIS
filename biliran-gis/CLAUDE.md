@@ -2106,6 +2106,58 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## Night-mode banner contrast fix + mobile/phone responsive audit
+
+Two more rounds of feedback, both resolved this round:
+
+- **Night-mode SIMULATED banner was illegible**: `components/SimulationModePanel.tsx` (the "SIMULATED" chip and
+  the info banner below it) and `components/UserDashboardModal.tsx`'s "⚠ SIMULATED · Clear" header chip all used
+  a **translucent** amber background (`rgba(184, 134, 11, 0.35)`) with a hardcoded **dark** text color
+  (`#3D2B00`). In light theme this composited over a light card background and read fine; in dark theme it
+  composited over a dark background instead, producing a near-illegible dark-on-dark box — confirmed by a
+  screenshot. Fixed by switching all three spots to a **solid, fixed** `#B8860B` background instead of the
+  translucent rgba — a solid background gives the same fixed contrast ratio against the paired `#3D2B00` text
+  regardless of which theme it's compositing over, so no `theme` prop needed to thread through either component
+  for this. Same class of bug this codebase has hit before in the *opposite* direction (background too pale,
+  text too pale) — this is the first time it was made genuinely theme-independent rather than re-tuned for one
+  theme only.
+- **Mobile/phone responsive audit** (the user's own written proposal, actually executed rather than just filed):
+  a code audit (not a rendered viewport check) found the admin left sidebar (`components/AdminShell.tsx`) was
+  the one genuine structural blocker — a fixed `w-56` (224px), always-visible, zero responsive classes, leaving
+  only ~151px for the entire page at a 375px phone width. Everything else audited was already in better shape
+  than assumed: `UserDashboardModal.tsx`'s embedded two-column layout already stacks to one column below
+  `lg:` (1024px); `AdminBarangaysTab.tsx`/`AdminDashboardTab.tsx`/`AdminInvitePanel.tsx`'s stat-card grids
+  already had responsive breakpoints and their tables already sit inside `overflow-x-auto` wrappers; only
+  `AdminUsersTab.tsx`'s stat grid was a bare `grid-cols-3` with no responsive variant, the one inconsistency
+  among the four admin tabs — fixed to `grid-cols-1 sm:grid-cols-3` (a single-column stack below `sm:`, not a
+  2-up middle step like the others, since this tab only has 3 cards total and an uneven 2-up split reads worse
+  than a clean stack). `BiliranMap.tsx`'s pan/zoom already uses the Pointer Events API uniformly with
+  `touchAction: 'none'` — single-finger drag-to-pan already works correctly on a real phone; only two-finger
+  pinch-zoom is unimplemented, already a documented, deliberately-accepted rough edge (see "Open items" below),
+  reconfirmed out of scope here rather than newly found.
+  - **`components/AdminShell.tsx` sidebar fix**: the desktop `<aside>` is now `hidden md:flex` (off-canvas below
+    768px). Its inner content (logo/title, nav buttons, footer tagline) was extracted into a shared `SidebarNav`
+    component (`tab`/`onSelect`/`sidebarBg`/`theme` props) so the exact same JSX renders for both the
+    always-visible desktop sidebar and the new mobile drawer — not a second parallel nav definition. A new
+    `sidebarOpen` boolean state plus a hamburger icon button in the top bar (`md:hidden`) opens an
+    always-mounted, `fixed inset-y-0 left-0 z-[60]` drawer version of `SidebarNav`, transformed off-screen via
+    `data-open` + a CSS transition when closed (same technique as `UserDashboardModal.tsx`'s own slide-out
+    Simulation Mode sidebar, `.bfw-sim-sidebar`) — nothing to remount on repeated toggles. A semi-transparent
+    click-to-close backdrop (`.bfw-admin-drawer-backdrop`) sits behind the drawer, and selecting a nav item in
+    the drawer both navigates and auto-closes it (the desktop `<aside>`'s own `SidebarNav` just navigates,
+    no auto-close needed there). Body scroll is locked (`document.body.style.overflow = 'hidden'`) while the
+    drawer is open, same as any other full-screen overlay in this app. The top bar's title block got
+    `truncate`/`min-w-0` so long page titles don't force overflow next to the new hamburger button on narrow
+    screens.
+  - Verified at a real 375×812 Playwright viewport (not just static code review): the hamburger is visible and
+    the desktop `<aside>` is hidden below `md:`; the drawer opens, shows all 9 nav items, and both navigates and
+    closes itself on a nav click; no admin tab (Dashboard, Barangays, Rainfall & Scenarios, Users) produces
+    horizontal page overflow (`document.documentElement.scrollWidth` never exceeds `clientWidth`) — table/map
+    content scrolling within their own `overflow-x-auto`/fixed-height wrappers is expected and fine, only the
+    page itself was checked for overflow; the Users tab's stat cards visibly stack to one column. Re-ran the
+    same mocked-auth pass at a 1500px desktop viewport afterward and confirmed no regression: the sidebar still
+    always-visible, hamburger absent, Users tab still switches correctly.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
@@ -2115,4 +2167,4 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
 - Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
 - The "Invitations" tab (inside the admin shell — see "Full admin dashboard redesign" above) has create/list/edit/revoke **and expire-early** — `AdminInvitePanel.tsx`'s edit-row includes an `expires_at` field (`<input type="datetime-local">`, with a "Clear" button to null it back to "no expiry"), PATCHed via `app/api/admin/invite/[id]/route.ts`, which now accepts `expires_at` in its body alongside `email`/`office`. Can set/shorten/extend/clear freely (no one-way-only restriction — an arbitrary editable expiry isn't a meaningful new privilege given the admin already has full edit/revoke control over unredeemed rows). `app/api/activate/route.ts`'s existing expiry check (a plain `Date` comparison) needed no changes to honor it. A read-only Users tab now exists (real registered accounts, no edit/promote/demote) — full user management (promote/demote, deactivate) and a real audit log of admin actions are still open, deliberately deferred during the admin redesign above.
 - **`user_profiles`'s "read own row" and "update own row" RLS policies are now verified real, not just assumed** — confirmed directly against the live "Biliran-flood" Supabase project (`qlkkengqkyjljzvtuoqh`) via `pg_policies` (both exist, both scoped `auth.uid() = user_id`, matching `avatars-storage-setup.sql`'s source exactly) **and** by actually exercising them: `SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims = '{"sub": "<uuid>", ...}'` (simulating PostgREST's own JWT-claims mechanism) inside a read-only/rolled-back transaction — querying as the real admin's own `user_id` returned exactly their one row and nothing else; querying as a fabricated `user_id` returned zero rows; a rolled-back self-`UPDATE` under the same simulated claims succeeded for the real `user_id`. `storage.objects`'s `"avatars: users manage own folder"` policy was checked the same way (exists, matches its source file exactly) — though for this app's actual upload flow it's supplementary defense-in-depth, not the real enforcement boundary: `app/api/profile/avatar-upload-url/route.ts` mints a service-role-signed upload URL already scoped server-side to `{user.id}/avatar`, so the client never gets broad `storage.objects` access to begin with. `invitation_codes` has a blanket `"no client access"` deny-all policy, correct since every real access goes through `supabaseAdmin` in `app/api/admin/*`. `get_advisors(security)` surfaced one unrelated finding — "Leaked Password Protection Disabled" (HaveIBeenPwned check off) — a Supabase Dashboard Auth-settings toggle, not fixable via SQL/migration tools, worth flipping manually. **Still not verified**: the actual browser sign-in/session flow, the `/api/admin/invite` create/edit/revoke/expire cycle with a real admin JWT, and a real `/activate` redemption — those need a real signed-in session, still blocked on an invited account (abylonmonsales@gmail.com, code `5E6B059D`) being redeemed and its credentials shared.
-- The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.
+- The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature; reconfirmed still deliberately deferred during the mobile-responsive audit above.

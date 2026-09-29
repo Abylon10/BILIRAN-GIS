@@ -26,10 +26,23 @@
 // ever exists behind the admin auth gate already enforced by
 // app/page.tsx's own `showAdminPanel && isAdmin` condition, so there's
 // nothing here that needs to survive a reload/deep-link.
+//
+// Below `md:` (768px), the sidebar (`SidebarNav` below) is off-canvas by
+// default — at a real phone width the fixed 224px sidebar this shell
+// used to always render left only ~150px for the rest of the page,
+// confirmed unusable via a code audit before this was added. A hamburger
+// button in the top bar (`md:hidden`, so it only exists where the
+// always-visible desktop `<aside>` is itself hidden) opens the same nav
+// content as a slide-out drawer instead — same nav items/icons/handler,
+// via the shared `SidebarNav` component, not a second parallel nav
+// definition. The drawer is always mounted, transformed off-screen when
+// closed (same `data-open` + CSS-transition technique as
+// `UserDashboardModal.tsx`'s own slide-out Simulation Mode sidebar), so
+// there's nothing to remount/reinitialize on repeated open/close.
 
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { opaqueBg } from '@/lib/opaqueTheme'
 import HeaderProfileButton from '@/components/HeaderProfileButton'
 import AdminDashboardTab from '@/components/AdminDashboardTab'
@@ -90,6 +103,64 @@ const PAGE_SUBTITLE: Record<TabId, string> = {
   settings: 'Categories, thresholds, weights, and other configurable values',
 }
 
+// Shared nav content — rendered once by the always-visible desktop
+// `<aside>`, again by the mobile drawer. `onSelect` lets the drawer also
+// close itself on navigation (desktop just calls `setTab`).
+function SidebarNav({
+  tab,
+  onSelect,
+  sidebarBg,
+  theme,
+}: {
+  tab: TabId
+  onSelect: (id: TabId) => void
+  sidebarBg: string
+  theme: 'light' | 'dark'
+}) {
+  return (
+    <div className="flex h-full w-56 flex-col" style={{ background: sidebarBg }}>
+      <div className="flex items-center gap-2 border-b px-4 py-4" style={{ borderColor: 'rgba(255,255,255,0.15)' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'} alt="" className="h-7 w-7" />
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold" style={{ color: '#E7F1F5' }}>
+            Biliran — Admin
+          </div>
+          <div className="truncate text-[11px]" style={{ color: '#B7D2DE' }}>
+            Flood Risk Monitor
+          </div>
+        </div>
+      </div>
+
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2" aria-label="Admin sections">
+        {NAV.map((n) => (
+          <button
+            key={n.id}
+            type="button"
+            onClick={() => onSelect(n.id)}
+            aria-current={tab === n.id ? 'page' : undefined}
+            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
+            style={
+              tab === n.id
+                ? { background: 'rgba(232, 163, 61, 0.28)', color: '#FBFEFF' }
+                : { color: '#B7D2DE' }
+            }
+          >
+            <NavIcon d={ICONS[n.id]} />
+            {n.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="border-t px-4 py-3 text-[11px]" style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#B7D2DE' }}>
+        Biliran Flood Risk Monitor
+        <br />
+        Sa Ligtas na Komunidad
+      </div>
+    </div>
+  )
+}
+
 export default function AdminShell({
   theme,
   onToggleTheme,
@@ -114,9 +185,23 @@ export default function AdminShell({
   liveActive: boolean
 }) {
   const [tab, setTab] = useState<TabId>('dashboard')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const bg = opaqueBg(theme)
   const sidebarBg = theme === 'dark' ? '#032F30' : '#0A7075'
   const activeTab = NAV.find((n) => n.id === tab)!
+
+  // Body-scroll lock while the mobile drawer is open — same reasoning as
+  // any full-screen overlay in this app (the shell itself already sits
+  // above the real page via z-50, but the drawer's own backdrop should
+  // feel modal, not just decorative).
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [sidebarOpen])
 
   let content: ReactNode
   switch (tab) {
@@ -151,65 +236,85 @@ export default function AdminShell({
 
   return (
     <div className="fixed inset-0 z-50 flex" style={{ background: bg }}>
-      <aside
-        className="flex w-56 shrink-0 flex-col border-r"
-        style={{ background: sidebarBg, borderColor: '#0C969C' }}
-      >
-        <div className="flex items-center gap-2 border-b px-4 py-4" style={{ borderColor: 'rgba(255,255,255,0.15)' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'} alt="" className="h-7 w-7" />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold" style={{ color: '#E7F1F5' }}>
-              Biliran — Admin
-            </div>
-            <div className="truncate text-[11px]" style={{ color: '#B7D2DE' }}>
-              Flood Risk Monitor
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2" aria-label="Admin sections">
-          {NAV.map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              onClick={() => setTab(n.id)}
-              aria-current={tab === n.id ? 'page' : undefined}
-              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
-              style={
-                tab === n.id
-                  ? { background: 'rgba(232, 163, 61, 0.28)', color: '#FBFEFF' }
-                  : { color: '#B7D2DE' }
-              }
-            >
-              <NavIcon d={ICONS[n.id]} />
-              {n.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="border-t px-4 py-3 text-[11px]" style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#B7D2DE' }}>
-          Biliran Flood Risk Monitor
-          <br />
-          Sa Ligtas na Komunidad
-        </div>
+      <aside className="hidden w-56 shrink-0 flex-col border-r md:flex" style={{ borderColor: '#0C969C' }}>
+        <SidebarNav tab={tab} onSelect={setTab} sidebarBg={sidebarBg} theme={theme} />
       </aside>
+
+      {/* Mobile drawer — always mounted, transformed off-screen when
+          closed (same data-open + CSS-transition technique as
+          UserDashboardModal.tsx's own slide-out Simulation Mode
+          sidebar), so nothing needs to remount on repeated toggles. */}
+      <div
+        className="fixed inset-0 z-[60] md:hidden"
+        style={{ visibility: sidebarOpen ? 'visible' : 'hidden' }}
+        aria-hidden={!sidebarOpen}
+      >
+        <div
+          className="bfw-admin-drawer-backdrop absolute inset-0"
+          data-open={sidebarOpen}
+          onClick={() => setSidebarOpen(false)}
+        />
+        <aside
+          className="bfw-admin-drawer absolute inset-y-0 left-0 border-r"
+          data-open={sidebarOpen}
+          style={{ borderColor: '#0C969C' }}
+        >
+          <SidebarNav
+            tab={tab}
+            onSelect={(id) => {
+              setTab(id)
+              setSidebarOpen(false)
+            }}
+            sidebarBg={sidebarBg}
+            theme={theme}
+          />
+        </aside>
+      </div>
+
+      <style>{`
+        .bfw-admin-drawer-backdrop {
+          background: rgba(0, 0, 0, 0.4);
+          opacity: 0;
+          transition: opacity 250ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-admin-drawer-backdrop[data-open='true'] { opacity: 1; }
+        .bfw-admin-drawer {
+          transform: translateX(-100%);
+          transition: transform 250ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-admin-drawer[data-open='true'] { transform: translateX(0); }
+        @media (prefers-reduced-motion: reduce) {
+          .bfw-admin-drawer-backdrop, .bfw-admin-drawer { transition: none !important; }
+        }
+      `}</style>
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-6 py-4"
+          className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-4 md:px-6"
           style={{ background: bg, borderColor: 'var(--card-border)' }}
         >
-          <div>
-            <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
-              Admin <span aria-hidden>›</span> {activeTab.label}
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open admin menu"
+              className="bfw-btn shrink-0 rounded-full p-2 md:hidden"
+            >
+              <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                <path d="M3 5h14M3 10h14M3 15h14" />
+              </svg>
+            </button>
+            <div className="min-w-0">
+              <div className="truncate text-xs" style={{ color: 'var(--text-soft)' }}>
+                Admin <span aria-hidden>›</span> {activeTab.label}
+              </div>
+              <h1 className="truncate text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
+                {activeTab.label}
+              </h1>
+              <p className="truncate text-sm" style={{ color: 'var(--text-soft)' }}>
+                {PAGE_SUBTITLE[tab]}
+              </p>
             </div>
-            <h1 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
-              {activeTab.label}
-            </h1>
-            <p className="text-sm" style={{ color: 'var(--text-soft)' }}>
-              {PAGE_SUBTITLE[tab]}
-            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
