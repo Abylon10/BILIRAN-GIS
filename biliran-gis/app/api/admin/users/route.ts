@@ -50,6 +50,10 @@ export async function GET(req: NextRequest) {
       // ban and clears it (undefined) for an active user — a real signal
       // from Supabase Auth itself, not something this app tracks.
       disabled: Boolean(u.banned_until && new Date(u.banned_until).getTime() > Date.now()),
+      // Also real, straight from Supabase Auth — null for a user who has
+      // never signed in since account creation (possible right after
+      // /activate, before their first real sign-in).
+      lastLoginAt: u.last_sign_in_at ?? null,
       // Prefer the profile row's own created_at (when the account was
       // actually activated in this app) over the auth user's — for every
       // real account these come from the same /api/activate transaction

@@ -1894,6 +1894,270 @@ Supabase dashboard directly, not from this app.
 flagged above, all addable later if a real data source/feature exists to
 back them.
 
+## Admin UI polish round 2: left sidebar nav, stat cards, map highlighting, Rainfall & Scenarios redesign
+
+The user shared 4 more detailed mockups (Rainfall & Scenarios, Barangays,
+Users, Invitations) built around a persistent left sidebar, asking to
+apply what's applicable and neglect CRUD functions. Four real conflicts
+were confirmed directly before building, same no-fabrication discipline
+as every prior round:
+
+- **Nav layout**: switched from the top tab bar (previous round) to a
+  left sidebar. `components/AdminShell.tsx`'s `TabId` gained `'reports'
+  | 'activity' | 'settings'` alongside the 6 real ones — all three render
+  the new `components/AdminComingSoonTab.tsx` ("Not built yet — no real
+  data or feature exists behind this section"), a real nav entry with an
+  honest placeholder, not omitted and not faked. Icons are small
+  hand-rolled inline-SVG paths (`NavIcon`/`ICONS` in `AdminShell.tsx`) —
+  this repo has no icon library, same "no charting library" spirit as
+  `DischargeChart.tsx`'s own inline SVG.
+- **Revoked status**: the Invitations mockup showed a persisted
+  "Revoked" row, conflicting with the previous round's explicit decision
+  that revoke hard-deletes the row. **Re-confirmed staying with hard
+  delete** — `AdminInvitePanel.tsx`'s status badges/filter are still only
+  Pending/Accepted/Expired.
+- **Invite role selection**: the mockup lets the admin pick an account's
+  role at invite time; today every invite always creates a `'standard'`
+  account (`app/api/activate/route.ts`, hardcoded). **Skipped** — a real
+  new capability with security implications (granting admin access via
+  invite), not built.
+- **Rainfall & Scenarios**: approved a full two-column redesign (below).
+
+**Stat cards** — `components/AdminDashboardTab.tsx`'s `StatCard` is now
+`export`ed and reused (not duplicated) by `AdminBarangaysTab.tsx` (Total/
+Very High/High+Moderate/Low+Very Low risk counts), `AdminUsersTab.tsx`
+(Total/Active/Disabled), and `AdminInvitePanel.tsx` (Total/Pending/
+Accepted/Expired, computed client-side from the already-fetched
+`invitations` array via the existing `inviteStatus()` helper — no new
+fetch). No "With Data"/"Status: Active" cards anywhere — no real
+per-barangay active/inactive concept exists in this app to back one.
+
+**Municipality highlighting on the map** — `components/
+StaticIslandMap.tsx` gained an optional `highlightMunicipality?: string
+| null` prop: lazily fetches `/data/geo/municipalities.geojson` (same
+file/shape `BiliranMap.tsx`'s own `MunicipalityLayer` already uses —
+`MuniProps { pgc_prefix, municipality, barangay_count }`) only when the
+prop is first set, and draws that municipality's real boundary outline
+(thicker amber stroke, no fill change) above the barangay layer —
+`pointerEvents` stays `'none'` throughout, so this stays genuinely
+non-interactive; no zoom/pan/layer-toggle controls were added anywhere
+(those would imply real interactivity, which would reopen this app's
+"one persistent interactive map" rule — `BiliranMap.tsx` only). Wired up
+in `AdminBarangaysTab.tsx` (which had no map at all before this round)
+and in `UserDashboardModal.tsx`'s embedded layout, both passing the
+active municipality filter through.
+
+**`AdminBarangaysTab.tsx`** also gained a real text search box, wired to
+`filterBarangays(sorted, query, municipality)` — the `query` param
+already existed in `lib/dashboardData.ts` and was simply always called
+with `''` before this round. No "+ Add Barangay" button, no per-row
+Edit/Delete, no "Recent Activity" feed — barangay data comes from a
+fixed external pipeline (see "Deliberately still not built" above), not
+an admin-editable database, and Activity Logs are their own deferred
+placeholder (above).
+
+**`AdminUsersTab.tsx`** gained a real "Last Login" column —
+`app/api/admin/users/route.ts` now also returns `lastLoginAt:
+u.last_sign_in_at ?? null`, Supabase Auth's own real field (same
+confirmation method as `banned_until` last round: checked
+`@supabase/auth-js`'s own types), shown as "Never" when null (possible
+right after `/activate`, before a first real sign-in) — plus a search
+box and an access-level filter dropdown. Still fully read-only, no "+
+Add User", no row-actions menu.
+
+**Rainfall & Scenarios — full two-column redesign.**
+`components/UserDashboardModal.tsx`'s embedded case (the non-embedded
+case is untouched, kept for any future non-embedded caller) now renders
+a `lg:grid-cols-[1fr_360px]` layout instead of the old single-column
+stack: left column is the map (with the new municipality highlight) plus
+a new `BarangayRankingTable` (a real `<table>`, same column pattern as
+`AdminDashboardTab.tsx`'s own "Recent FSI by barangay" table — #,
+Barangay, Municipality, FSI Score, Class, Countdown, no "Status" column
+— replacing `BarangayList`'s row-button rendering for this tab
+specifically; `BarangayList`'s other callers are unaffected) plus a
+search box; right column is `SimulationModePanel`, now **always
+visible** instead of a dismissable slide-out sidebar for the embedded
+case (the non-embedded case still uses the original `fixed right-0
+top-0` slide-out — `SimulationModePanel` itself branches on whichever of
+`onExit`/`onReset` its caller passes, both now optional), plus a new
+`SelectedBarangayCard` — a compact summary (small map thumbnail, FSI
+score, predicted countdown, and — only while a simulation is active —
+the scenario's rainfall range/duration) with a "View full details"
+toggle that expands the real `BarangayDetailPanel` below it, rather than
+duplicating its content. Every field on this card is already available
+on the `Barangay`/`SimulationRunResult`/`islandSim` objects this
+component already computes — nothing new is fetched or invented.
+
+`SimulationModePanel.tsx` gained a **"Scenario name"** text field (local
+component state only — never sent to `onSimulate`, never persisted
+anywhere; a session-only label for the admin's own reference, cleared on
+Reset) and a **"Predicted alert count"** breakdown: real counts of Very
+Low/Low/Moderate/High/Very High derived from the same
+`Map<string, IslandSimResult>` `simulateIsland()` already returns
+(`lastResults`, a local copy kept purely to render this summary — the
+full map is still handed to the caller via `onSimulate` as before). A
+new **"Reset"** button (alongside "Start simulation") restores the
+default inputs, clears this local summary, and — via the new optional
+`onReset` callback the embedded caller passes — tells
+`UserDashboardModal` to clear `islandSim` too, consolidating what used
+to be a separate "⚠ SIMULATED · Clear" header chip (only relevant to the
+old always-in-view sidebar arrangement) into this one action. The
+non-embedded slide-out sidebar still passes `onExit` instead (closes
+without running anything, unchanged behavior).
+
+## Profile: capitalized name/office, viewable photo, bigger avatar circle
+
+Three small fixes to the profile UI (`components/ProfilePanel.tsx`,
+`components/HeaderProfileButton.tsx`, `lib/profile.ts`):
+
+- **Capitalization**: `lib/profile.ts` gained `capitalizeFirst(s)` —
+  uppercases only the first character, leaving the rest untouched
+  (deliberately not a "capitalize every word" title-case, which would
+  mangle an acronym like "MDRRMO" into "Mdrrmo" if it was already typed
+  correctly). Applied in three places: `fetchOwnProfile()` now
+  capitalizes `title`/`first_name`/`family_name`/`office` before
+  returning (so older rows saved before this change, or edited directly
+  in Supabase, still display correctly — no data migration needed);
+  `formatDisplayName()` applies it again to whatever it's given, a cheap
+  second layer for any caller that builds a name from state that didn't
+  come through `fetchOwnProfile` (e.g. `ProfilePanel`'s own just-saved
+  `fields` object, passed straight to it via `onProfileFieldsChange`);
+  and `ProfilePanel.tsx`'s 4 `FieldInput`s wrap their `onChange` with it
+  too, so it capitalizes live as typed, and `handleSaveFields` runs the
+  same transform before saving, not just relying on the live-typing path.
+- **Viewable photo**: the avatar circle used to be *only* a file-picker
+  trigger — clicking it always immediately opened the OS file dialog to
+  replace the photo, with no way to just look at the current one bigger.
+  Now it's conditional: if a photo exists, clicking the circle opens a
+  lightbox (`viewingPhoto` state) instead; the separate "Change photo"/
+  "Upload photo" text link is the only trigger for the file picker now.
+  No photo yet → the circle still opens the file picker directly (same
+  as before — nothing to view). The lightbox itself is rendered as a
+  **sibling of `<Modal>`**, not nested inside it — `Modal`'s own dialog
+  box animates via a CSS `transform`, which establishes a new containing
+  block for any `position: fixed` descendant (the same class of bug this
+  app already hit once with `backdrop-filter` elsewhere), so a `fixed
+  inset-0` lightbox placed inside it would be boxed into the dialog
+  instead of covering the viewport — confirmed via Playwright before
+  shipping (the lightbox's image only rendered full-size once moved
+  outside `<Modal>`).
+- **Circle vs. trapezoid sizing**: `HeaderProfileButton.tsx`'s
+  `.bfw-header-profile-avatar` (the circle) grew from 32px/44px
+  (not-revealed/revealed) to 50px/68px — roughly +55-56%, tuned to read
+  as clearly bigger than `.bfw-header-profile-tab` (the reverse-trapezoid
+  name/office tab) beside it. `.bfw-header-profile-tab` itself (240px
+  max-width, padding, clip-path, the `-14px` seam-hiding overlap) is
+  completely unchanged — the seam overlap only needs to cover the seam
+  width, not scale with the circle, and `align-items: center` keeps both
+  shapes vertically centered together as the circle grows past the tab's
+  own height.
+
+## Three follow-up fixes from live-site testing: legend size, FSI/hydrograph separation, real user disable toggle
+
+Testing the deployed build (PR #21) surfaced 3 more issues:
+
+- **Size-aware `Legend`**: `components/BiliranMap.tsx`'s `Legend` only
+  had two variants — a large labeled column tuned for ~280px+ maps, and
+  a dots-only `compact` pill tuned for BiliranMap's own ~144-192px
+  compact state. `components/StaticIslandMap.tsx` always rendered the
+  large variant regardless of its own `height`, so at the Barangays
+  tab's 220px map the legend (≈272px tall) was literally taller than the
+  map — confirmed by a screenshot of the live site. `Legend` gained a
+  `size?: 'lg' | 'md'` prop (default `'lg'`, so `BiliranMap.tsx`'s own
+  two call sites are unaffected — neither passes it): `'md'` is a
+  smaller labeled column (14px dots, tighter gaps/padding/text), not the
+  dots-only `compact` pill — Barangays-tab-sized maps still want real
+  labels, just sized to fit. `StaticIslandMap.tsx` now picks the variant
+  from its own `height` automatically (`< 150` → `compact`, `< 250` →
+  `size="md"`, else the unchanged `'lg'` default) rather than a prop
+  every caller has to remember — this also fixes a legend-vs-map-size
+  bug the 120px "Selected Barangay" thumbnail (below) would otherwise
+  have hit, never separately reported but real.
+- **FSI summary and full detail are separate cards again**: the
+  Rainfall & Scenarios two-column redesign had nested the full
+  `BarangayDetailPanel` (hydrograph, factor breakdown) *inside*
+  `SelectedBarangayCard`'s own bordered box in
+  `components/UserDashboardModal.tsx`, behind a "View full details"
+  toggle. Per direct feedback ("separate the FSI and hydrograph, just
+  like before"), that toggle/nesting is gone —
+  `SelectedBarangayCard` is back to being only the compact summary
+  (thumbnail, FSI score, countdown, rainfall range while simulated), and
+  `BarangayDetailPanel` renders as its own separate sibling card
+  immediately after it once a barangay is selected, always visible, no
+  toggle. `BarangayDetailPanel` itself is unchanged.
+- **Users tab: Active/Disabled is a real toggle now**: a status label
+  with nothing to change it read as broken next to columns that are real
+  data. New `app/api/admin/users/[id]/route.ts` (`PATCH`, admin-gated):
+  uses Supabase Auth's own real ban mechanism —
+  `supabaseAdmin.auth.admin.updateUserById(id, { ban_duration })`,
+  confirmed via `@supabase/auth-js`'s own types (`'none'` lifts a ban,
+  any other duration string bans; this route uses `'876000h'`, ~100
+  years, as the conventional "indefinite" value) — the same field the
+  `GET` route already reads back as `disabled`
+  (`banned_until` in the future). **Guarded against self-lockout twice**:
+  server-side, the route rejects `disabled: true` when the target id
+  matches the calling admin's own id; client-side,
+  `components/AdminUsersTab.tsx` simply disables the toggle button on
+  the signed-in admin's own row (with an explanatory `title`) rather
+  than letting them click into a guaranteed error. No guard against
+  disabling a *different* admin — this app has no "protected account"
+  concept beyond "not yourself," matching its otherwise-flat
+  `access_level`-gated admin model. Name/email/office/access level stay
+  non-editable — only status is actionable now, so the tab's own
+  explanatory copy was reworded away from a blanket "Read-only" claim.
+
+## Night-mode banner contrast fix + mobile/phone responsive audit
+
+Two more rounds of feedback, both resolved this round:
+
+- **Night-mode SIMULATED banner was illegible**: `components/SimulationModePanel.tsx` (the "SIMULATED" chip and
+  the info banner below it) and `components/UserDashboardModal.tsx`'s "⚠ SIMULATED · Clear" header chip all used
+  a **translucent** amber background (`rgba(184, 134, 11, 0.35)`) with a hardcoded **dark** text color
+  (`#3D2B00`). In light theme this composited over a light card background and read fine; in dark theme it
+  composited over a dark background instead, producing a near-illegible dark-on-dark box — confirmed by a
+  screenshot. Fixed by switching all three spots to a **solid, fixed** `#B8860B` background instead of the
+  translucent rgba — a solid background gives the same fixed contrast ratio against the paired `#3D2B00` text
+  regardless of which theme it's compositing over, so no `theme` prop needed to thread through either component
+  for this. Same class of bug this codebase has hit before in the *opposite* direction (background too pale,
+  text too pale) — this is the first time it was made genuinely theme-independent rather than re-tuned for one
+  theme only.
+- **Mobile/phone responsive audit** (the user's own written proposal, actually executed rather than just filed):
+  a code audit (not a rendered viewport check) found the admin left sidebar (`components/AdminShell.tsx`) was
+  the one genuine structural blocker — a fixed `w-56` (224px), always-visible, zero responsive classes, leaving
+  only ~151px for the entire page at a 375px phone width. Everything else audited was already in better shape
+  than assumed: `UserDashboardModal.tsx`'s embedded two-column layout already stacks to one column below
+  `lg:` (1024px); `AdminBarangaysTab.tsx`/`AdminDashboardTab.tsx`/`AdminInvitePanel.tsx`'s stat-card grids
+  already had responsive breakpoints and their tables already sit inside `overflow-x-auto` wrappers; only
+  `AdminUsersTab.tsx`'s stat grid was a bare `grid-cols-3` with no responsive variant, the one inconsistency
+  among the four admin tabs — fixed to `grid-cols-1 sm:grid-cols-3` (a single-column stack below `sm:`, not a
+  2-up middle step like the others, since this tab only has 3 cards total and an uneven 2-up split reads worse
+  than a clean stack). `BiliranMap.tsx`'s pan/zoom already uses the Pointer Events API uniformly with
+  `touchAction: 'none'` — single-finger drag-to-pan already works correctly on a real phone; only two-finger
+  pinch-zoom is unimplemented, already a documented, deliberately-accepted rough edge (see "Open items" below),
+  reconfirmed out of scope here rather than newly found.
+  - **`components/AdminShell.tsx` sidebar fix**: the desktop `<aside>` is now `hidden md:flex` (off-canvas below
+    768px). Its inner content (logo/title, nav buttons, footer tagline) was extracted into a shared `SidebarNav`
+    component (`tab`/`onSelect`/`sidebarBg`/`theme` props) so the exact same JSX renders for both the
+    always-visible desktop sidebar and the new mobile drawer — not a second parallel nav definition. A new
+    `sidebarOpen` boolean state plus a hamburger icon button in the top bar (`md:hidden`) opens an
+    always-mounted, `fixed inset-y-0 left-0 z-[60]` drawer version of `SidebarNav`, transformed off-screen via
+    `data-open` + a CSS transition when closed (same technique as `UserDashboardModal.tsx`'s own slide-out
+    Simulation Mode sidebar, `.bfw-sim-sidebar`) — nothing to remount on repeated toggles. A semi-transparent
+    click-to-close backdrop (`.bfw-admin-drawer-backdrop`) sits behind the drawer, and selecting a nav item in
+    the drawer both navigates and auto-closes it (the desktop `<aside>`'s own `SidebarNav` just navigates,
+    no auto-close needed there). Body scroll is locked (`document.body.style.overflow = 'hidden'`) while the
+    drawer is open, same as any other full-screen overlay in this app. The top bar's title block got
+    `truncate`/`min-w-0` so long page titles don't force overflow next to the new hamburger button on narrow
+    screens.
+  - Verified at a real 375×812 Playwright viewport (not just static code review): the hamburger is visible and
+    the desktop `<aside>` is hidden below `md:`; the drawer opens, shows all 9 nav items, and both navigates and
+    closes itself on a nav click; no admin tab (Dashboard, Barangays, Rainfall & Scenarios, Users) produces
+    horizontal page overflow (`document.documentElement.scrollWidth` never exceeds `clientWidth`) — table/map
+    content scrolling within their own `overflow-x-auto`/fixed-height wrappers is expected and fine, only the
+    page itself was checked for overflow; the Users tab's stat cards visibly stack to one column. Re-ran the
+    same mocked-auth pass at a 1500px desktop viewport afterward and confirmed no regression: the sidebar still
+    always-visible, hamburger absent, Users tab still switches correctly.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
@@ -1903,4 +2167,4 @@ back them.
 - Profile photo upload (`supabase/avatars-storage-setup.sql`) is written but not verified against a real Supabase project — only linted, type-checked, and built (same caveat as the rest of this repo's Supabase-dependent code). Someone with dashboard/CLI access needs to run the SQL once before it works end to end.
 - The "Invitations" tab (inside the admin shell — see "Full admin dashboard redesign" above) has create/list/edit/revoke **and expire-early** — `AdminInvitePanel.tsx`'s edit-row includes an `expires_at` field (`<input type="datetime-local">`, with a "Clear" button to null it back to "no expiry"), PATCHed via `app/api/admin/invite/[id]/route.ts`, which now accepts `expires_at` in its body alongside `email`/`office`. Can set/shorten/extend/clear freely (no one-way-only restriction — an arbitrary editable expiry isn't a meaningful new privilege given the admin already has full edit/revoke control over unredeemed rows). `app/api/activate/route.ts`'s existing expiry check (a plain `Date` comparison) needed no changes to honor it. A read-only Users tab now exists (real registered accounts, no edit/promote/demote) — full user management (promote/demote, deactivate) and a real audit log of admin actions are still open, deliberately deferred during the admin redesign above.
 - **`user_profiles`'s "read own row" and "update own row" RLS policies are now verified real, not just assumed** — confirmed directly against the live "Biliran-flood" Supabase project (`qlkkengqkyjljzvtuoqh`) via `pg_policies` (both exist, both scoped `auth.uid() = user_id`, matching `avatars-storage-setup.sql`'s source exactly) **and** by actually exercising them: `SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims = '{"sub": "<uuid>", ...}'` (simulating PostgREST's own JWT-claims mechanism) inside a read-only/rolled-back transaction — querying as the real admin's own `user_id` returned exactly their one row and nothing else; querying as a fabricated `user_id` returned zero rows; a rolled-back self-`UPDATE` under the same simulated claims succeeded for the real `user_id`. `storage.objects`'s `"avatars: users manage own folder"` policy was checked the same way (exists, matches its source file exactly) — though for this app's actual upload flow it's supplementary defense-in-depth, not the real enforcement boundary: `app/api/profile/avatar-upload-url/route.ts` mints a service-role-signed upload URL already scoped server-side to `{user.id}/avatar`, so the client never gets broad `storage.objects` access to begin with. `invitation_codes` has a blanket `"no client access"` deny-all policy, correct since every real access goes through `supabaseAdmin` in `app/api/admin/*`. `get_advisors(security)` surfaced one unrelated finding — "Leaked Password Protection Disabled" (HaveIBeenPwned check off) — a Supabase Dashboard Auth-settings toggle, not fixable via SQL/migration tools, worth flipping manually. **Still not verified**: the actual browser sign-in/session flow, the `/api/admin/invite` create/edit/revoke/expire cycle with a real admin JWT, and a real `/activate` redemption — those need a real signed-in session, still blocked on an invited account (abylonmonsales@gmail.com, code `5E6B059D`) being redeemed and its credentials shared.
-- The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature.
+- The map's pan/zoom has no two-finger pinch-zoom yet (single-finger touch drag-to-pan works via Pointer Events) — an accepted rough edge of the hand-rolled implementation, not a rejected feature; reconfirmed still deliberately deferred during the mobile-responsive audit above.

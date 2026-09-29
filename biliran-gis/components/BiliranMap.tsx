@@ -1027,7 +1027,20 @@ function NextForecastBadge({ updateAt }: { updateAt: number }) {
   )
 }
 
-export function Legend({ compact = false }: { compact?: boolean }) {
+export function Legend({
+  compact = false,
+  size = 'lg',
+}: {
+  compact?: boolean
+  // 'lg' (default, unchanged) is tuned for a map around this app's usual
+  // ~280px+ heights (the Dashboard tab, BiliranMap.tsx's own two call
+  // sites — neither passes this, so both stay byte-for-byte unaffected).
+  // 'md' is a smaller labeled variant for StaticIslandMap.tsx's
+  // medium-height uses (e.g. the Barangays tab's 220px map), where 'lg'
+  // measured taller than the map itself. Distinct from `compact`
+  // (dots-only, no labels at all) — this still shows text, just smaller.
+  size?: 'lg' | 'md'
+}) {
   const stops: [string, number][] = [
     ['Very Low', 0.1],
     ['Low', 0.3],
@@ -1052,6 +1065,31 @@ export function Legend({ compact = false }: { compact?: boolean }) {
             style={{ background: fsiScoreColor(score), boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
             title={label}
           />
+        ))}
+      </div>
+    )
+  }
+
+  // A scaled-down version of the 'lg' variant below (same left-edge,
+  // vertically-centered, labeled-column layout), not the dots-only
+  // `compact` pill — StaticIslandMap.tsx's medium-height uses still want
+  // real labels, just sized to actually fit inside a ~200-250px map
+  // instead of overflowing taller than it.
+  if (size === 'md') {
+    return (
+      <div
+        className="absolute left-2 top-1/2 flex -translate-y-1/2 flex-col items-start gap-1.5 rounded-xl border px-3 py-2 text-xs shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+        style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
+      >
+        {stops.map(([label, score]) => (
+          <span key={label} className="flex items-center gap-1.5">
+            <span
+              className="inline-block h-3.5 w-3.5 shrink-0 rounded-full"
+              style={{ background: fsiScoreColor(score), boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
+              aria-hidden
+            />
+            {label}
+          </span>
         ))}
       </div>
     )

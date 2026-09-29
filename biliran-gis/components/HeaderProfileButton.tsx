@@ -83,15 +83,20 @@ export default function HeaderProfileButton({
           transition-delay: 0.15s, 0.2s;
         }
         .bfw-header-profile-avatar {
-          width: 32px;
-          height: 32px;
+          /* ~56% bigger than the original 32px — sized to read as
+             clearly bigger than .bfw-header-profile-tab beside it
+             (which keeps its own original size/shape unchanged), not
+             computed from anything the tab itself measures. */
+          width: 50px;
+          height: 50px;
           background: linear-gradient(145deg, var(--btn-from), var(--btn-to));
           box-shadow: 0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25);
           transition: width 0.35s cubic-bezier(0.22,1,0.36,1), height 0.35s cubic-bezier(0.22,1,0.36,1);
         }
         .bfw-header-profile[data-revealed='true'] .bfw-header-profile-avatar {
-          width: 44px;
-          height: 44px;
+          /* ~55% bigger than the original 44px, same reasoning as above. */
+          width: 68px;
+          height: 68px;
         }
         @media (prefers-reduced-motion: reduce) {
           .bfw-header-profile-tab, .bfw-header-profile-avatar { transition: none !important; }
