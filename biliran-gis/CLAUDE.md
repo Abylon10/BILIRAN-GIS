@@ -664,15 +664,24 @@ display changes nothing about authorization, only what the user sees.
 `access_level` still drives every real check (`lib/requireAdmin.ts`, the
 post-login admin-panel auto-open in `app/page.tsx`) exactly as before.
 
-**Dashboard data** is a static file, `public/data/barangay_dashboard_data.json`
-— one JSON object keyed by `"Barangay (PGC prefix)"`, 115 barangays, each
-combining an FSI score/label with runoff threshold crossing times
-(`warning_time_hours`, `alert_time_hours`, `danger_time_hours`) produced by
-the external Python pipeline. It's fetched client-side with a plain cached
-`fetch()` (`lib/dashboardData.ts`, `loadBarangays()`) — no DB wiring for this
-yet. Known limitation: a `public/` file only updates on redeploy; a real
-rainfall-driven refresh would need to move this into Supabase Storage or a
-table. That loader also repairs the two barangay names hit by the known
+**Dashboard data**'s baseline is a static file, `public/data/
+barangay_dashboard_data.json` — one JSON object keyed by `"Barangay (PGC
+prefix)"`, 115 barangays, each combining an FSI score/label with runoff
+threshold crossing times (`warning_time_hours`, `alert_time_hours`,
+`danger_time_hours`) produced by the external Python pipeline. It's
+fetched client-side with a plain cached `fetch()` (`lib/dashboardData.ts`,
+`loadBarangays()`) — no DB wiring for this yet. **This baseline is what's
+actually shown only until live data arrives, or for the 2 basin-less
+barangays' countdown fields specifically** — `app/page.tsx` now overrides
+every other field with a live-forecast-computed one by default; see
+`lib/liveIslandState.ts` and its own extensive documentation further down
+this file for the full mechanism. Known limitation of the static file
+itself: a `public/` file only updates on redeploy; that's no longer the
+active constraint for FSI/countdown (those are recomputed live client-side
+on every load now) but still applies to anything not yet covered by the
+live path — e.g. the barangay roster/geometry itself, which would still
+need a redeploy to add/remove a barangay. That loader also repairs the two
+barangay names hit by the known
 source-level double-UTF-8 bug ("Capiñahan," "Santo Niño") — see
 `fixMojibake()` — but the fix is cosmetic and client-side only; the
 underlying `barangay_biliran.geojson` bug (outside this repo) is still open.
@@ -1007,10 +1016,17 @@ asked why they're missing.
 **Deliberately still not built**, because the data honestly doesn't exist in
 this repo — building fake versions would mislead the officials this app is
 for:
-- **Full per-basin FSI recompute** (rainfall + HAND/TWI/LC combined) is
-  still blocked on raster-to-barangay aggregation and the original design
-  storm's rainfall baseline; `mean_fsi_score` stays a static pipeline
-  output.
+- **The canonical, raster-based full per-basin FSI recompute** (re-running
+  the pipeline's own raster-to-barangay zonal aggregation against a live
+  rainfall raster) is still blocked on that aggregation and the original
+  design storm's rainfall baseline — nobody has rebuilt the actual GIS
+  pipeline's raster workflow to accept live input. **This is different
+  from the live, ratio-based FSI approximation that now drives the real
+  dashboard by default** (see `lib/liveIslandState.ts` above) — that one
+  reuses the already-computed, already-validated `fsi_factors.json`
+  zonal averages and scales just the rainfall term by a live/design-storm
+  ratio; it was accepted by the user as a disclosed approximation, not a
+  substitute for eventually building the real thing.
 
 Add the corresponding fields/UI before building any of these.
 
@@ -1417,12 +1433,26 @@ explicitly documented as "not a separately fabricated weather value."
 That function is gone; `weatherConditionForBucket()` replaces it, driven
 by real Open-Meteo data instead (fetched once for all 7 municipalities on
 mount, refreshed every ~15 minutes, via a `weatherByMunicipality` state in
-the main `BiliranMap` component). The modeled Alert/Danger countdown text
-(`LiveUpdateBanner.tsx`, `WeatherBadge`'s tooltip) stays exactly as it
-was — the two signals were decoupled on purpose (confirmed with the
-user, who chose this over adding a second parallel weather element) so
-the icon stops silently proxying flood risk as weather; `WeatherBadge`'s
-tooltip now names both signals separately so neither implies the other.
+the main `BiliranMap` component). At the time this was written, the
+modeled Alert/Danger countdown text (`LiveUpdateBanner.tsx`,
+`WeatherBadge`'s tooltip) stayed exactly as it was — the two signals
+were deliberately decoupled (confirmed with the user, who chose this
+over adding a second parallel weather element) so the icon would stop
+silently proxying flood risk as weather; `WeatherBadge`'s tooltip named
+both signals separately so neither implied the other. **The countdown
+side of that decoupling no longer holds** — see the live-forecast
+section further down this file: the real dashboard's Alert/Danger times
+are now also live-computed by default. The two are still genuinely
+separate code paths, though, computing different things from the same
+underlying Open-Meteo data: this icon derives a coarse Calm/Cloudy/Rain
+*bucket* for a representative location from `weatherByMunicipality`
+(`BiliranMap.tsx`'s own state), while the countdown is a precise
+per-basin discharge-threshold crossing time from
+`lib/liveIslandState.ts` (`app/page.tsx`'s separate state) — so seeing,
+say, "Light rain" on the icon while a specific barangay's Danger
+countdown reads differently is expected, not a bug: one is an ambient
+readout, the other is that barangay's own basin's actual modeled
+response to its own municipality's forecast.
 A municipality whose weather hasn't loaded yet (or whose fetch failed)
 simply shows no icon that pass — no placeholder/fake condition invented.
 
@@ -1469,6 +1499,120 @@ manually; not exercised against a live browser render in this session —
 same blocked-network limitation as the rest of this section, and no
 mocked-auth Playwright harness was set up for this small an addition.
 
+**The real (non-admin) dashboard's FSI/countdown numbers are now
+live-forecast-driven by default — a deliberate reversal of this file's
+earlier framing that they'd stay static/synthetic "until a real forecast
+is wired in."** The user explicitly asked for this once live weather was
+confirmed reachable from a real deployment (see the Open-Meteo
+verification note above) — not an admin-only sandbox like Simulation
+Mode, but the actual default view every signed-in user sees.
+`lib/liveIslandState.ts`'s `computeLiveIslandState()` is the new
+orchestration point; `app/page.tsx` now eagerly loads
+`basin_hydrographs.json`/`fsi_factors.json` (previously lazy, fetched
+only once a barangay was selected — `BarangayDetailPanel.tsx` still does
+that independently for its own factor-breakdown display and as a
+fallback, sharing the same cached loaders) plus live weather for all 7
+monitored municipalities (`lib/liveWeather.ts`, same 15-minute refresh
+`BiliranMap.tsx`'s own icon fetch already uses — a separate fetch/state,
+not shared, though `loadWeather()`'s own client cache means this doesn't
+double the real network traffic), and overlays every barangay's
+`mean_fsi_score`/`dominant_fsi_label`/`warning_time_hours`/
+`alert_time_hours`/`danger_time_hours` with the live-computed ones —
+exactly the same override pattern Simulation Mode's `displayBarangays`
+already established (`UserDashboardModal.tsx`), just applied to the main
+`app/page.tsx`/`DashboardShell.tsx`/`BiliranMap.tsx` path instead of an
+admin-only modal, so the barangay list, its ranking, and the map's
+polygon colors all update for free — no changes needed to
+`BarangayList.tsx`, `sortBySeverity()`, or `BiliranMap.tsx`'s own
+coloring logic.
+
+**Countdown times reuse the exact same real, disclosed formula
+Simulation Mode already established** — `crossingTimeHours()` and
+`recomputeHydrograph()` (both already existed, in
+`lib/islandSimulation.ts`/`lib/simulationMode.ts`) are called unchanged;
+the only difference from Simulation Mode is the rainfall series fed in:
+each barangay's own municipality's real Open-Meteo hourly forecast
+(`dtHours = 1`, the recurrence is unconditionally stable at any step
+size — no change needed there either) instead of an admin-typed
+synthetic hyetograph. `crossingTimeHours()` already guarded
+`max(q) ~ 0` (no rain) by returning the window's end rather than `0`;
+that guard is exactly what keeps a dry-forecast municipality from
+misreporting "Danger in 0 hours."
+
+**FSI score is still an approximation — same honest limitation as
+before, now generalized rather than solved.** No real formula exists
+that turns live rainfall into the terrain-factor recombination directly
+(the "Deliberately still not built" full per-basin recompute below is
+about the *canonical, raster-based* version of this, which remains
+unbuilt). What's live now is the same kind of approximation Simulation
+Mode's island-wide recompute already used and the user already accepted
+once — generalized from "one ratio for the whole island" (an admin's
+single typed scenario) to **one ratio per municipality** (real per-
+municipality forecasts are now available, so this is strictly more
+spatially faithful, not less): each barangay's own real, static rainfall
+factor (`fsi_factors.json`) is scaled by
+`liveTotalMm(barangay's municipality, next 6h) / designStormTotalMm`
+(the real design storm's own total rainfall, computed analytically as
+`0.5 * peak_mm_hr * duration_hours` — a symmetric triangle's area, exact
+regardless of time-step) and reclamped to `[0, 1]`; `hand`/`twi`/`lclu`
+stay untouched, since terrain doesn't respond to weather. Self-consistent
+by construction, same as Simulation Mode's version: a municipality
+forecasting exactly the design storm's own total reproduces `ratio = 1`
+unchanged. **Verified working end-to-end**, not just written and shipped
+— mocked-auth Playwright with a fabricated heavy-rain forecast (25mm/hr
+for 6 hours) produced Esperanza's FSI moving from its static `0.5734` to
+a live `0.661` (label Moderate → High), matching the hand-computed
+expected value exactly (`0.3·0.9831 + 0.3·0.1649 + 0.2·0.5816 +
+0.2·1.0` — the rainfall term clamped to `1.0` at that rain level); the
+barangay list re-sorted, the map recolored, and the selected barangay's
+hydrograph/precipitation charts and factor-breakdown "rainfall" row all
+showed the same live numbers, not a mix of live and stale static ones
+(see below).
+
+**No message-tone disclaimer, per the user's own explicit choice** — a
+plain informational banner (`DashboardShell.tsx`, replacing the old red
+"not a live rainfall feed" framing) instead: *"Computed from today's live
+Open-Meteo forecast — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·live
+rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast
+peak discharge."* Neutral teal styling, not the old alarm-red — this
+isn't a caution, it's a factual note on computation basis, which the
+user asked for directly ("no need [for a warning], maybe just a message
+that it is from this and that computation from the files"). Falls back
+to the old red "loading" framing (worded honestly — "showing the static
+synthetic design-storm baseline until it arrives," not silently showing
+stale numbers with the live banner already up) for the brief window
+before the first weather fetch resolves, or if it fails entirely.
+
+**A real inconsistency was caught and fixed during verification, not
+shipped**: an early version left `BarangayDetailPanel.tsx`'s factor-
+breakdown "rainfall" row showing the *pre-scaling* static value while the
+headline FSI score above it was already built from the *live-scaled,
+clamped* one — e.g. a real static factor of `0.6045` scaled by a live
+ratio of `3.0` clamps to `1.0` for the actual score, but the row still
+read `0.60`, a visible contradiction a careful reader would notice.
+Fixed by exposing `liveRainfallFactor` on `lib/liveIslandState.ts`'s
+`LiveComputedState` (the same number that fed `liveFsi`) and threading it
+down (`app/page.tsx` → `DashboardShell.tsx` → `BarangayDetailPanel.tsx`)
+to override just that one row — `hand`/`twi`/`lclu` stay the static
+values, correctly, since only rainfall is live-scaled. The row's label
+also switches ("Today's live rainfall forecast" vs. the original
+"6-hour rainfall forecast") so it's clear which mode is showing. The
+panel's own countdown caption ("Times are hours into...") was similarly
+stale in an early version — read "not a live countdown" directly
+contradicting the live banner above it — now conditioned on the same
+`liveHydrograph != null` signal the charts above it already use, so it
+stays in sync with them for free rather than needing a separate flag.
+
+**The 2 genuinely basin-less barangays (Kawayan/Burabod, Kawayan/
+Poblacion) keep their real static countdown times even with live data
+active** — `app/page.tsx`'s override falls back to each barangay's own
+static `warning_time_hours`/etc. specifically when
+`liveIslandState.get(key)?.warningTimeHours` is `null` (no discharge
+curve to derive a live crossing time from at all), same honest-absence
+pattern as their missing hydrograph chart everywhere else in this app —
+not a new gap, the same one, now correctly inherited into the live path
+too.
+
 ## Known gotchas from the external GIS pipeline (context only, not this repo's code)
 
 These affect the data pipeline that produces `barangay_dashboard_data.json`,
@@ -1498,7 +1642,7 @@ names like "Capiñahan," "Santo Niño").
 
 ## Open items
 
-- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, see above) instead of proxying modeled flood risk — full per-basin FSI recompute is still not built — see "Deliberately still not built" above. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared; full per-basin FSI recompute (item 2) needs its own scoped investigation into aggregation method + rainfall baseline first — the planned Open-Meteo-vs-`fsi_factors.json` research pass toward that is still outstanding too, blocked on this session's own sandboxed network access (see above); the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
+- Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, launched from `AdminInvitePanel.tsx`'s "Open User Dashboard" button — see `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and broader admin-panel direction (item 4) are deferred per the user's own sequencing.
 - No regeneration path for `public/data/geo/*.geojson` exists in this repo (the join/simplify/dissolve script was one-off and not checked in) — if `barangay_biliran.geojson`, `waterways_biliran.geojson`, or the barangay set in `barangay_dashboard_data.json` change, these need to be rebuilt by hand.
 - Naval's Libertad and Mabini barangays are absent from `barangay_dashboard_data.json` entirely, so they're invisible everywhere in this app, including the map — see "Known geo-data gap" above.
 - Production refresh mechanism for `barangay_dashboard_data.json` (move off static `public/` file) is undecided.

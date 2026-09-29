@@ -23,6 +23,7 @@ import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/d
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
 import { loadFsiFactors, factorsForBarangay, type BarangayFactors } from '@/lib/fsiFactorData'
 import type { SimulationRunResult } from '@/lib/simulationMode'
+import type { LiveHydrograph } from '@/lib/liveIslandState'
 import DischargeChart from '@/components/DischargeChart'
 
 interface HydrographEntry {
@@ -38,9 +39,25 @@ interface FactorEntry {
 
 export default function BarangayDetailPanel({
   barangay,
+  liveHydrograph,
+  liveRainfallFactor,
   simulationResult,
 }: {
   barangay: Barangay | null
+  // The real (non-admin) dashboard's live-forecast-driven discharge curve
+  // for this barangay — computed synchronously in app/page.tsx from
+  // already-loaded data (lib/liveIslandState.ts), not fetched here, so
+  // there's no separate loading race to guard against the way the static
+  // entry/factorEntry state below has to. Supersedes the static
+  // entry.hydrograph chart below when present; null while live data
+  // hasn't loaded yet (falls back to the static chart) or for the 2
+  // basin-less barangays (same honest absence as always).
+  liveHydrograph?: LiveHydrograph | null
+  // The same live-scaled rainfall factor that actually fed liveFsi above,
+  // for the factor-breakdown bar below — without this it would silently
+  // show the pre-scaling static value beside a live score built from a
+  // different (often clamped) number.
+  liveRainfallFactor?: number | null
   // Admin-only, from UserDashboardModal's Simulation Mode sidebar — the
   // real dashboard (DashboardShell.tsx) never passes this, so it's
   // optional and renders nothing extra there. Owned by the caller, not
@@ -128,26 +145,39 @@ export default function BarangayDetailPanel({
         </div>
       </div>
 
-      {isCurrent && entry?.hydrograph ? (
-        <>
-          <DischargeChart
-            timeHours={entry.hydrograph.timeHours}
-            q={entry.hydrograph.q}
-            title="Hydrograph"
-            metaLabel={`basin ${entry.hydrograph.basinId} · peak ${Math.max(...entry.hydrograph.q, 0.001).toFixed(1)} m³/s`}
-            captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
-          />
-          <DischargeChart
-            timeHours={entry.hydrograph.timeHours}
-            q={entry.hydrograph.rainfallMmHr}
-            title="Precipitation"
-            metaLabel={`peak ${Math.max(...entry.hydrograph.rainfallMmHr, 0.001).toFixed(0)} mm/hr`}
-            captionText={`Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`}
-            color="#0891B2"
-            ariaLabel="Rainfall over time"
-          />
-        </>
-      ) : null}
+      {(() => {
+        // Prefer the live-forecast curve (real, non-admin dashboard's
+        // default now) over the static design-storm one — falls back to
+        // the static chart only while live data hasn't loaded yet, same
+        // graceful-degradation pattern used everywhere else in this app.
+        const hydro = liveHydrograph ?? (isCurrent ? entry?.hydrograph ?? null : null)
+        if (!hydro) return null
+        const captionText = liveHydrograph
+          ? `Computed from today's live Open-Meteo forecast${barangay ? ` for ${barangay.municipality}` : ''}.`
+          : entry?.stormParams
+            ? `Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`
+            : ''
+        return (
+          <>
+            <DischargeChart
+              timeHours={hydro.timeHours}
+              q={hydro.q}
+              title="Hydrograph"
+              metaLabel={`basin ${hydro.basinId} · peak ${Math.max(...hydro.q, 0.001).toFixed(1)} m³/s`}
+              captionText={captionText}
+            />
+            <DischargeChart
+              timeHours={hydro.timeHours}
+              q={hydro.rainfallMmHr}
+              title="Precipitation"
+              metaLabel={`peak ${Math.max(...hydro.rainfallMmHr, 0.001).toFixed(0)} mm/hr`}
+              captionText={captionText}
+              color="#0891B2"
+              ariaLabel="Rainfall over time"
+            />
+          </>
+        )
+      })()}
 
       {simulationResult && (
         <DischargeChart
@@ -183,7 +213,15 @@ export default function BarangayDetailPanel({
       )}
 
       {isFactorsCurrent && factorEntry?.factors && (
-        <FactorBreakdown factors={factorEntry.factors} />
+        <FactorBreakdown
+          factors={factorEntry.factors}
+          // Only the rainfall row is live-scaled — hand/twi/lclu are
+          // static terrain properties, genuinely unaffected by weather.
+          // liveHydrograph doubles as "live data is active for this
+          // barangay" here (same condition the hydrograph charts above
+          // already key off), so this stays in sync with them for free.
+          liveRainfallFactor={liveHydrograph ? liveRainfallFactor : null}
+        />
       )}
 
       <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -194,19 +232,29 @@ export default function BarangayDetailPanel({
       </dl>
 
       <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-        Times are hours into a modeled design storm, not a live countdown — see the
-        banner above for the honesty note on this.
+        {liveHydrograph
+          ? "Times are hours into today's live Open-Meteo forecast — see the banner above for the computation basis."
+          : 'Times are hours into a modeled design storm, not a live countdown — see the banner above for the honesty note on this.'}
       </p>
     </div>
   )
 }
 
-function FactorBreakdown({ factors }: { factors: BarangayFactors }) {
+function FactorBreakdown({
+  factors,
+  liveRainfallFactor,
+}: {
+  factors: BarangayFactors
+  liveRainfallFactor?: number | null
+}) {
   const rows: { label: string; value: number }[] = [
     { label: 'HAND (elevation above drainage)', value: factors.hand },
     { label: 'TWI (wetness index)', value: factors.twi },
     { label: 'Land cover runoff', value: factors.lclu },
-    { label: '6-hour rainfall forecast', value: factors.rainfall },
+    {
+      label: liveRainfallFactor != null ? "Today's live rainfall forecast" : '6-hour rainfall forecast',
+      value: liveRainfallFactor ?? factors.rainfall,
+    },
   ]
 
   return (
