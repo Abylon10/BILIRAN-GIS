@@ -993,11 +993,15 @@ function ZoomControls({
 /**
  * Small countdown to the next live-forecast refresh (app/page.tsx's own
  * weather-fetch effect owns the actual 15-minute timer — this only
- * displays it). Sits just above ZoomControls, same corner, same glass-chip
- * language, smaller/quieter since it's a readout, not a control. Ticks via
- * its own re-render interval rather than recomputing the countdown from
- * scratch each parent render, so the text stays live even while nothing
- * else on the map changes.
+ * displays it). Bottom-left, below the full-size Legend (which is
+ * vertically centered via top-1/2 — a fixed bottom-left anchor sits below
+ * it in practice at this map's typical proportions, same "eyeballed
+ * corner slot" approach as this file's other fixed-position overlays,
+ * not a measured/computed offset), same glass-chip language, smaller/
+ * quieter since it's a readout, not a control. Ticks via its own
+ * re-render interval rather than recomputing the countdown from scratch
+ * each parent render, so the text stays live even while nothing else on
+ * the map changes.
  */
 function NextForecastBadge({ updateAt }: { updateAt: number }) {
   const [now, setNow] = useState(() => Date.now())
@@ -1015,7 +1019,7 @@ function NextForecastBadge({ updateAt }: { updateAt: number }) {
 
   return (
     <div
-      className="absolute bottom-14 right-3 rounded-full border px-2.5 py-1 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      className="absolute bottom-3 left-3 rounded-full border px-2.5 py-1 text-[10px] shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }}
     >
       {label}
