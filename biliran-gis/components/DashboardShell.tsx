@@ -34,6 +34,7 @@
 
 import { useMemo, useRef, type RefObject } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
+import type { LiveHydrograph } from '@/lib/liveIslandState'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
@@ -67,6 +68,9 @@ export default function DashboardShell({
   listScrolled,
   onListScrolledChange,
   theme,
+  liveActive,
+  liveHydrograph,
+  liveRainfallFactor,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
@@ -91,6 +95,19 @@ export default function DashboardShell({
   // can't read those CSS variables via normal inheritance and needs the
   // theme as an explicit prop instead.
   theme: 'light' | 'dark'
+  // True once app/page.tsx's live-forecast recompute (lib/liveIslandState.ts)
+  // has real data for at least one municipality — swaps the banner below
+  // from the old "synthetic storm" framing to a live-computation notice.
+  // False (or still loading) falls back to the original honest framing,
+  // since the numbers really are still the static synthetic-storm ones
+  // until live data arrives.
+  liveActive: boolean
+  // The currently-selected barangay's live-forecast discharge curve, or
+  // null (not loaded yet, or one of the 2 basin-less barangays) — forwarded
+  // straight through to BarangayDetailPanel, computed once in app/page.tsx
+  // rather than per-render here.
+  liveHydrograph?: LiveHydrograph | null
+  liveRainfallFactor?: number | null
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -131,10 +148,15 @@ export default function DashboardShell({
     <div className="flex h-full flex-col gap-4">
       <div
         className="rounded-lg border px-3 py-2 text-xs"
-        style={{ background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: '#F2D9D5' }}
+        style={
+          liveActive
+            ? { background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }
+            : { background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: '#F2D9D5' }
+        }
       >
-        Modeled from a single synthetic design storm, not a live rainfall feed — treat every
-        countdown below as illustrative until a real forecast is wired in.
+        {liveActive
+          ? "Computed from today's live Open-Meteo forecast — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
+          : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
       </div>
 
       {loadError && (
@@ -224,7 +246,7 @@ export default function DashboardShell({
                 />
               </div>
               <div className="hidden min-h-0 overflow-y-auto md:block">
-                <BarangayDetailPanel barangay={selected} />
+                <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
               </div>
             </div>
           </div>
@@ -232,7 +254,7 @@ export default function DashboardShell({
           {/* Selected detail, inline on small screens where the sidebar is hidden. */}
           {selected && (
             <div className="md:hidden">
-              <BarangayDetailPanel barangay={selected} />
+              <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
             </div>
           )}
         </>

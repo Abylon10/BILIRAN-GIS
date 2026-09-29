@@ -22,11 +22,16 @@
 
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { fetchOwnProfile, formatDisplayName, getAvatarUrl } from '@/lib/profile'
 import { loadBarangays, type Barangay } from '@/lib/dashboardData'
+import { loadBasinHydrographs, type RawHydrographData } from '@/lib/hydrographData'
+import { loadFsiFactors, type RawFactorData } from '@/lib/fsiFactorData'
+import { loadWeather, type WeatherData } from '@/lib/liveWeather'
+import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
+import { computeLiveIslandState } from '@/lib/liveIslandState'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
@@ -96,6 +101,20 @@ export default function HomePage() {
   // and a single selection, instead of each owning their own copy.
   const [barangays, setBarangays] = useState<Barangay[] | null>(null)
   const [mapLoadError, setMapLoadError] = useState<string | null>(null)
+  // The three inputs lib/liveIslandState.ts needs to drive the real
+  // dashboard's FSI/countdown numbers from today's live Open-Meteo
+  // forecast instead of the static synthetic design storm — see that
+  // file's own header comment for the full reasoning. All three load
+  // independently of barangays/mapLoadError above (different files,
+  // different fetches); the live recompute below simply waits for
+  // whichever of these hasn't arrived yet.
+  const [hydrographData, setHydrographData] = useState<RawHydrographData | null>(null)
+  const [factorData, setFactorData] = useState<RawFactorData | null>(null)
+  const [weatherByMunicipality, setWeatherByMunicipality] = useState<Record<string, WeatherData | null>>({})
+  // Display-only — BiliranMap's own corner countdown reads this to show
+  // "Next forecast update in Xm." The actual refresh is still driven
+  // entirely by the effect below; this is just stamped alongside it.
+  const [nextForecastUpdateAt, setNextForecastUpdateAt] = useState<number | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   // Two-way synced with the map: tapping a municipality on the map sets
   // this (via BiliranMap's onFocusMunicipality), and it also drives
@@ -237,6 +256,125 @@ export default function HomePage() {
       cancelled = true
     }
   }, [authState])
+
+  // basin_hydrographs.json + fsi_factors.json — same early-fetch tradeoff
+  // as barangays above, except these two used to be fetched lazily, only
+  // once a barangay was selected (components/BarangayDetailPanel.tsx still
+  // does that on its own, for the factor-breakdown bars and as a fallback
+  // before live data arrives). The live-forecast recompute below needs
+  // them for EVERY barangay up front, not just whichever one is selected,
+  // so they're loaded here too now. Both loaders cache themselves
+  // (loadBasinHydrographs/loadFsiFactors), so this doesn't duplicate
+  // BarangayDetailPanel's own fetch — it's the same in-flight promise/cache.
+  useEffect(() => {
+    if (authState === 'checking') return
+    let cancelled = false
+    loadBasinHydrographs()
+      .then((data) => {
+        if (!cancelled) setHydrographData(data)
+      })
+      .catch(() => {
+        // Live recompute below just stays unavailable — the static
+        // fields/charts already have their own honest fallback.
+      })
+    loadFsiFactors()
+      .then((data) => {
+        if (!cancelled) setFactorData(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [authState])
+
+  // Live weather for all 7 monitored municipalities — same source
+  // (lib/liveWeather.ts) and refresh cadence (15 min) BiliranMap.tsx
+  // already uses for its own icon, but this is a SEPARATE fetch/state:
+  // that one derives a decorative WeatherCondition (icon/cloud config),
+  // this one keeps the raw WeatherData (hourly precipitation) the live
+  // FSI/countdown recompute actually needs. loadWeather()'s own client
+  // cache means calling it from both places doesn't double the real
+  // network traffic.
+  useEffect(() => {
+    if (authState === 'checking') return
+    let cancelled = false
+
+    function refresh() {
+      // Stamped on every call (including the immediate one below), not
+      // just once at effect-mount — this is what BiliranMap's corner
+      // countdown (nextForecastUpdateAt) actually counts down to, so it
+      // needs to reset each time a real refresh fires, same as the
+      // fetches themselves.
+      setNextForecastUpdateAt(Date.now() + 15 * 60 * 1000)
+      for (const name of MONITORED_MUNICIPALITIES) {
+        loadWeather(name).then((data) => {
+          if (cancelled) return
+          setWeatherByMunicipality((prev) => ({ ...prev, [name]: data }))
+        })
+      }
+    }
+
+    refresh()
+    const interval = setInterval(refresh, 15 * 60 * 1000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [authState])
+
+  const municipalityByBarangayKey = useMemo(() => {
+    const m = new Map<string, string>()
+    if (barangays) for (const b of barangays) m.set(b.key, b.municipality)
+    return m
+  }, [barangays])
+
+  // Waits for at least one municipality's weather to have actually loaded
+  // before computing anything — otherwise every barangay would silently
+  // show a live FSI computed from zero rainfall (ratio=0), misrepresenting
+  // "hasn't loaded yet" as "confirmed no rain," which is exactly the kind
+  // of invented-looking number this app's whole design avoids elsewhere.
+  const liveIslandState = useMemo(() => {
+    if (!hydrographData || !factorData || !barangays) return null
+    const hasAnyWeather = Object.values(weatherByMunicipality).some((w) => w != null)
+    if (!hasAnyWeather) return null
+    return computeLiveIslandState(hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey)
+  }, [hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey, barangays])
+
+  // Overlays each barangay's real static FSI/countdown fields with its
+  // live-forecast-computed ones — every downstream consumer (sort, filter,
+  // list rows, map polygon color, detail panel) only ever reads whatever
+  // Barangay[] it's handed, so this one override is what actually makes
+  // the ranking/map/countdowns respond to live weather, with zero changes
+  // needed in BarangayList.tsx/BiliranMap.tsx's own coloring logic. Falls
+  // back to each barangay's own real static countdown fields for the 2
+  // basin-less barangays specifically (no discharge curve to derive a
+  // live crossing time from at all) — same honest-absence pattern as
+  // their missing hydrograph chart.
+  const displayBarangays = useMemo(() => {
+    if (!barangays || !liveIslandState) return barangays
+    return barangays.map((b) => {
+      const live = liveIslandState.get(b.key)
+      if (!live) return b
+      return {
+        ...b,
+        mean_fsi_score: live.liveFsi,
+        dominant_fsi_label: live.liveLabel,
+        warning_time_hours: live.warningTimeHours ?? b.warning_time_hours,
+        alert_time_hours: live.alertTimeHours ?? b.alert_time_hours,
+        danger_time_hours: live.dangerTimeHours ?? b.danger_time_hours,
+      }
+    })
+  }, [barangays, liveIslandState])
+
+  // The selected barangay's own live discharge curve, forwarded to
+  // BarangayDetailPanel (via DashboardShell) — null while live data hasn't
+  // loaded yet, or for the 2 basin-less barangays, both of which fall back
+  // to the static chart inside that component.
+  const liveHydrograph = selectedKey ? liveIslandState?.get(selectedKey)?.hydrograph ?? null : null
+  // Same live entry's rainfall factor — forwarded to the detail panel's
+  // factor-breakdown bar so it shows the same number liveFsi was actually
+  // built from, not the pre-scaling static value.
+  const liveRainfallFactor = selectedKey ? liveIslandState?.get(selectedKey)?.liveRainfallFactor ?? null : null
 
   // Measures where the map should sit: mapSlotRef's on-screen position when
   // revealed (DashboardShell's empty spacer for it — sized/positioned by
@@ -526,9 +664,9 @@ export default function HomePage() {
           className="bfw-map-shell"
           style={{ top: mapRect.top, left: mapRect.left, width: mapRect.width, height: mapRect.height }}
         >
-          {barangays && (
+          {displayBarangays && (
             <BiliranMap
-              barangays={barangays}
+              barangays={displayBarangays}
               selectedKey={selectedKey}
               onSelect={(b) => selectBarangay(b.key)}
               showChrome={revealed}
@@ -540,6 +678,7 @@ export default function HomePage() {
                 listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
               }}
               resetToken={mapResetToken}
+              nextForecastUpdateAt={nextForecastUpdateAt}
             />
           )}
         </div>
@@ -728,7 +867,7 @@ export default function HomePage() {
         </div>
         <div className="min-h-0 flex-1 p-6" style={{ background: 'var(--body-bg)' }}>
           <DashboardShell
-            barangays={barangays}
+            barangays={displayBarangays}
             loadError={mapLoadError}
             selectedKey={selectedKey}
             onSelectKey={selectBarangay}
@@ -739,6 +878,9 @@ export default function HomePage() {
             listScrolled={listScrolled}
             onListScrolledChange={setListScrolled}
             theme={theme}
+            liveActive={liveIslandState != null}
+            liveHydrograph={liveHydrograph}
+            liveRainfallFactor={liveRainfallFactor}
           />
         </div>
       </div>
