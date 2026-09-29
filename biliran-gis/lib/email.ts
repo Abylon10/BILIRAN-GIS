@@ -59,9 +59,25 @@ This code is single-use and tied to this email address. If you weren't expecting
 <p><a href="${activateUrl}">Activate your account</a></p>
 <p style="color:#666;font-size:0.85em">This code is single-use and tied to this email address. If you weren't expecting this, you can ignore this message.</p>`
 
+  // Explicit timeout — the Resend SDK's own fetch call has none, so a
+  // slow/hung network response would otherwise block this whole request
+  // for as long as the serverless platform allows, risking a platform-
+  // level timeout that returns a non-JSON error page instead of this
+  // function's own graceful { ok: false } — which is exactly what left
+  // the admin panel's "Creating…" button stuck with no error shown.
+  // Racing against a bounded timeout guarantees this always resolves
+  // well within any reasonable platform limit, invitation creation
+  // succeeding either way regardless of how the email send goes.
+  const EMAIL_TIMEOUT_MS = 8000
+
   try {
-    const { error } = await resend.emails.send({ from: FROM_ADDRESS, to, subject, text, html })
-    if (error) return { ok: false, error: error.message ?? 'Resend returned an error.' }
+    const result = await Promise.race([
+      resend.emails.send({ from: FROM_ADDRESS, to, subject, text, html }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Email send timed out.')), EMAIL_TIMEOUT_MS)
+      ),
+    ])
+    if (result.error) return { ok: false, error: result.error.message ?? 'Resend returned an error.' }
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown error sending email.' }

@@ -511,6 +511,34 @@ success, or "Created/Updated, but the email couldn't be sent (...) —
 share the code manually" on failure, with the raw code always still
 shown either way (that fallback already existed and must never regress).
 
+**A real bug shipped after the first real deployment, found and fixed
+this session**: `resend.emails.send()` has no built-in timeout — the SDK
+just awaits its own `fetch()` indefinitely. Once a real `RESEND_API_KEY`
+was actually configured for the first time (previously this sandbox
+could never reach `api.resend.com` at all, so this path was never
+exercised for real), a slow real network round trip could run this
+route's whole response past the serverless platform's own timeout,
+which then returns a non-JSON error page instead of this route's own
+`NextResponse.json(...)`. `components/AdminInvitePanel.tsx`'s
+`handleSubmit`/`saveEdit`/`revoke` had no `try/catch` around their
+`fetch`/`res.json()` calls, so that thrown parse error skipped past
+`setLoading(false)`/`setRowBusyId(null)` entirely — the "Creating…"
+button (or the edit/revoke row) got stuck forever with no error shown,
+reported directly from the live site. Fixed two ways: (1) `lib/email.ts`
+now races `resend.emails.send()` against an explicit 8-second timeout
+(`Promise.race`), so this route always responds well within any
+reasonable platform limit regardless of how the real network call goes
+— invitation creation/edit still always succeeds either way, per the
+graceful-degradation design above, just faster and more predictably now;
+(2) all three handlers in `AdminInvitePanel.tsx` now wrap their
+fetch/parse logic in `try/catch/finally`, so ANY thrown failure (network
+drop, malformed response, anything) always clears the busy/loading state
+and shows a plain "Could not reach the server — check your connection
+and try again" message, never hangs silently again. Verified via mocked
+Playwright: a route mocked to return a non-JSON 504 (reproducing the
+exact failure mode) no longer leaves the button stuck — it resets and
+shows the new error message within seconds.
+
 The email is personalized by an optional **recipient name** — a new
 nullable `invitee_name` column (`supabase/invitation-name-field-setup.sql`,
 same "not auto-applied, run by hand in the Supabase SQL editor" pattern
@@ -739,10 +767,20 @@ space.
 Ranking is **highest FSI score first** (`sortBySeverity()` in
 `lib/dashboardData.ts`, mean_fsi_score descending, tie-broken by soonest
 `danger_time_hours`) — an explicit product decision, not the time-based
-"soonest crossing" order used earlier. The LIVE UPDATE banner still uses the
-time-based `mostUrgentCrossing()` signal; the two are deliberately different
-questions ("who's worst" vs. "what happens soonest") and aren't meant to
-agree.
+"soonest crossing" order used earlier. **The LIVE UPDATE/MODELED ALERT
+banner now uses the same risk-based criterion as the list**
+(`highestRiskCrossing()`, `lib/dashboardData.ts` — reuses
+`sortBySeverity()[0]`, paired with whichever of that one barangay's own
+Alert/Danger crossings comes sooner) — originally this banner used the
+time-based `mostUrgentCrossing()` signal instead, deliberately answering a
+different question ("what happens soonest" vs. the list's "who's worst");
+the user later asked for the banner to show the highest-risk barangay
+too, so it no longer disagrees with the list on purpose. `BiliranMap.tsx`'s
+`WeatherBadge` still uses the original time-based `mostUrgentCrossing()`
+unchanged, for its own separate purpose (picking which municipality's
+real-weather icon appears in the corner ribbon) — that one wasn't asked
+to change and still deliberately answers "what happens soonest," not
+"who's worst."
 
 The map's `WeatherBadge` condition (Calm/Cloudy/Light rain/Rain/Heavy rain)
 is driven by that same `mostUrgentCrossing()` call, not a separate or

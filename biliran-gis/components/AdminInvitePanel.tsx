@@ -127,34 +127,44 @@ export default function AdminInvitePanel({
     setCreated(null)
     setLoading(true)
 
-    const token = await getToken()
-    if (!token) {
+    // Wrapped in try/catch/finally — without it, a network failure, a
+    // timed-out request, or any non-JSON response (e.g. a platform
+    // timeout page instead of real JSON) throws before setLoading(false)
+    // ever runs, leaving the button stuck on "Creating…" forever with no
+    // error shown. finally guarantees the loading state always clears,
+    // success or failure.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch('/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email, office, invitee_name: inviteeName || null }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error ?? 'Could not create invitation.')
+        return
+      }
+
+      setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
+      setEmail('')
+      setOffice('')
+      setInviteeName('')
+      await refresh()
+    } catch {
+      setError('Could not reach the server — check your connection and try again.')
+    } finally {
       setLoading(false)
-      setError('Your session expired — sign in again.')
-      return
     }
-
-    const res = await fetch('/api/admin/invite', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ email, office, invitee_name: inviteeName || null }),
-    })
-    const data = await res.json()
-    setLoading(false)
-
-    if (!res.ok) {
-      setError(data.error ?? 'Could not create invitation.')
-      return
-    }
-
-    setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
-    setEmail('')
-    setOffice('')
-    setInviteeName('')
-    await refresh()
   }
 
   function startEdit(inv: Invitation) {
@@ -175,63 +185,77 @@ export default function AdminInvitePanel({
     setRowError(null)
     setRowBusyId(id)
 
-    const token = await getToken()
-    if (!token) {
+    // Same try/catch/finally reasoning as handleSubmit above — a thrown
+    // network/parse error must never leave rowBusyId stuck on this row.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: editEmail,
+          office: editOffice,
+          invitee_name: editInviteeName || null,
+          expires_at: fromDatetimeLocalValue(editExpiresAt),
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setRowError(data.error ?? 'Could not update invitation.')
+        return
+      }
+
+      setEditResult({ id, emailSent: data.emailSent, emailError: data.emailError })
+      setEditingId(null)
+      await refresh()
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
       setRowBusyId(null)
-      setRowError('Your session expired — sign in again.')
-      return
     }
-
-    const res = await fetch(`/api/admin/invite/${id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        email: editEmail,
-        office: editOffice,
-        invitee_name: editInviteeName || null,
-        expires_at: fromDatetimeLocalValue(editExpiresAt),
-      }),
-    })
-    const data = await res.json()
-    setRowBusyId(null)
-
-    if (!res.ok) {
-      setRowError(data.error ?? 'Could not update invitation.')
-      return
-    }
-
-    setEditResult({ id, emailSent: data.emailSent, emailError: data.emailError })
-    setEditingId(null)
-    await refresh()
   }
 
   async function revoke(id: number) {
     setRowError(null)
     setRowBusyId(id)
 
-    const token = await getToken()
-    if (!token) {
+    // Same try/catch/finally reasoning as handleSubmit/saveEdit above —
+    // this already guarded the res.json() parse on failure, but not a
+    // thrown fetch() itself (e.g. a network drop), which would have left
+    // rowBusyId stuck the same way.
+    try {
+      const token = await getToken()
+      if (!token) {
+        setRowError('Your session expired — sign in again.')
+        return
+      }
+
+      const res = await fetch(`/api/admin/invite/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setRowError(data.error ?? 'Could not revoke invitation.')
+        return
+      }
+
+      await refresh()
+    } catch {
+      setRowError('Could not reach the server — check your connection and try again.')
+    } finally {
       setRowBusyId(null)
-      setRowError('Your session expired — sign in again.')
-      return
     }
-
-    const res = await fetch(`/api/admin/invite/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    setRowBusyId(null)
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      setRowError(data.error ?? 'Could not revoke invitation.')
-      return
-    }
-
-    await refresh()
   }
 
   // Renders the User Dashboard view instead of (never alongside) the
