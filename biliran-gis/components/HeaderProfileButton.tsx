@@ -101,6 +101,22 @@ export default function HeaderProfileButton({
         @media (prefers-reduced-motion: reduce) {
           .bfw-header-profile-tab, .bfw-header-profile-avatar { transition: none !important; }
         }
+        /*
+          Phone-only scale-back — the desktop sizing above (68px revealed
+          avatar, 240px tab) was deliberately enlarged in an earlier round;
+          this doesn't undo that, it just keeps the combined control from
+          eating most of a ~400px-wide phone screen next to the day/night
+          toggle (see app/page.tsx's own header-overlap fix).
+        */
+        @media (max-width: 480px) {
+          .bfw-header-profile[data-revealed='true'] .bfw-header-profile-tab {
+            max-width: 150px;
+          }
+          .bfw-header-profile[data-revealed='true'] .bfw-header-profile-avatar {
+            width: 54px;
+            height: 54px;
+          }
+        }
       `}</style>
 
       <span className="bfw-header-profile-tab text-left">
