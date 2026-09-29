@@ -978,7 +978,7 @@ function ZoomControls({
   )
 }
 
-function Legend({ compact = false }: { compact?: boolean }) {
+export function Legend({ compact = false }: { compact?: boolean }) {
   const stops: [string, number][] = [
     ['Very Low', 0.1],
     ['Low', 0.3],

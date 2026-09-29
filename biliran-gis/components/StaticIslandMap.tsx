@@ -22,6 +22,7 @@ import {
   type GeoFeatureCollection,
 } from '@/lib/geo'
 import { fsiScoreColor, type Barangay } from '@/lib/dashboardData'
+import { Legend } from '@/components/BiliranMap'
 
 interface BrgyProps {
   key: string
@@ -74,7 +75,7 @@ export default function StaticIslandMap({
   const barangaysByKey = new Map(barangays.map((b) => [b.key, b]))
 
   return (
-    <div className="overflow-hidden rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
+    <div className="relative overflow-hidden rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
       <svg viewBox={viewBoxOf(bounds)} width="100%" height={height} role="img" aria-label="Island-wide flood susceptibility map (read-only)">
         {geo.features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
@@ -93,6 +94,13 @@ export default function StaticIslandMap({
           )
         })}
       </svg>
+      {/*
+        Same FSI-severity Legend the real BiliranMap uses (reused, not
+        reimplemented) — this map has exactly one caller (UserDashboardModal,
+        height=320), always tall enough for the full labeled variant, so
+        no compact (dots-only) mode is needed here.
+      */}
+      <Legend />
     </div>
   )
 }

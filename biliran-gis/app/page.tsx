@@ -288,11 +288,16 @@ export default function HomePage() {
       // in, so the account's own access_level can never quietly bypass the
       // toggle. Non-admin accounts are unaffected either way — loginMode
       // never gates them, admin or not.
+      //
+      // Deliberately generic wording ("No user account exists.") rather
+      // than naming this an administrator account — the same message a
+      // wrong email/password gets, so a regular-mode sign-in attempt can't
+      // be used to fingerprint which emails are admin accounts.
       const profile = await fetchOwnProfile(authData.user.id)
       if (profile?.access_level === 'admin' && loginMode !== 'admin') {
         await supabase.auth.signOut()
         setLoading(false)
-        setError('This is an administrator account — switch to "Welcome, Administrator" above to sign in.')
+        setError('No user account exists.')
         return
       }
 
