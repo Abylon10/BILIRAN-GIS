@@ -43,7 +43,7 @@ interface BasinHydrographRecord {
   }
 }
 
-interface RawHydrographData {
+export interface RawHydrographData {
   description: string
   storm_params: StormParams
   barangays: Record<string, BarangayBasinInfo>

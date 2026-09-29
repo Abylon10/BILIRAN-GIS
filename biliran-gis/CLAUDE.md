@@ -1136,29 +1136,27 @@ changes it.
 fixed dark scene — see `.bfw-root[data-theme='light'][data-revealed='true']
 .bfw-sky` vs. the `[data-theme='dark']` variant in `app/page.tsx`.
 
-**Simulation Mode is real now too — admin-launched, client-side, ephemeral.**
-`AdminInvitePanel.tsx` has an "Open User Dashboard" button (a right-
-aligned pill, same `bfw-btn rounded-full` treatment as
-`MunicipalityFilterDropdown`'s trigger — reads as this panel's own "top-
-right corner" action) that swaps the Invitations modal out for
-`components/UserDashboardModal.tsx`: a self-contained snapshot of the real
-dashboard (map + barangay list + detail panel, including the real
+**Simulation Mode is real now too — admin-launched, client-side, ephemeral,
+and island-wide.** `AdminInvitePanel.tsx` has an "Open User Dashboard"
+button (a right-aligned pill, same `bfw-btn rounded-full` treatment as
+`MunicipalityFilterDropdown`'s trigger) that swaps the Invitations landing
+out for `components/UserDashboardModal.tsx`: a self-contained snapshot of
+the real dashboard (map + barangay list + detail panel, including the real
 hydrograph and factor breakdown, via the same `BarangayList`/
 `BarangayDetailPanel` components the live dashboard uses, reused as-is)
 plus a "Simulation Mode" button that opens a slide-out sidebar containing
-`components/SimulationModePanel.tsx` for whichever barangay is selected in
-that view's own list. There an admin types a min/max rain rate (mm/hr)
-and a storm duration (hours, capped at 12 via both the input's `max` and a
-clamping `onChange`) and clicks "Start simulation" to get a client-side-
-recomputed discharge curve — clearly banner-labeled `SIMULATED — not real
-data` (a deliberately higher-contrast amber than the first version shipped
-— see "Redesigned as a full-screen view" below) — rendered via the shared
-`components/DischargeChart.tsx` (extracted from what used to be a local
-`HydrographChart` function inside `BarangayDetailPanel.tsx`) in a distinct
-stroke color (`#D97706`, vs. the real chart's `#3B82C4`), alongside the
-real hydrograph in the detail panel — not inside the sidebar itself, so
-it's directly comparable and still visible after the sidebar auto-closes
-(see below).
+`components/SimulationModePanel.tsx`. There an admin types a min/max rain
+rate (mm/hr) and a storm duration (hours, capped at 12 via both the
+input's `max` and a clamping `onChange`, plus an explicit `minRate >= 0 &&
+maxRate >= minRate && durationHours > 0` guard before "Start simulation"
+is even enabled — a bad input used to only break one barangay's chart; now
+it drives the whole island's ranking, so it needed a real check, not just
+a soft clamp) and clicks "Start simulation" to run that storm against
+**every barangay at once** (`lib/islandSimulation.ts`'s `simulateIsland()`
+— see its own extensive header comment for the full reasoning), not just
+whichever one happened to be selected. Output is clearly banner-labeled
+`SIMULATED` throughout (a deliberately higher-contrast amber than the
+first version shipped — see "Redesigned as a full-screen view" below).
 
 **The recompute reuses the real basin and the real formula, not a new
 one.** `lib/simulationMode.ts`'s `simulateForBarangay()` calls the exact
@@ -1185,6 +1183,74 @@ static hydrograph's 43.3 m³/s for the same basin — close, as expected
 given the floor-vs-zero-tail and narrower-ramp-range differences, not
 suspiciously identical or wildly off. Confirms the basin/`A`/formula
 plumbing is correct end to end.
+
+**Island-wide countdown times reuse a real, disclosed formula — FSI
+recompute is a disclosed approximation the user explicitly chose, after
+being told plainly no real one exists.** Two genuinely different claims,
+not one: CLAUDE.md already documents the real pipeline's Warning/Alert/
+Danger method as "relative to each basin's own modeled peak Q (50%/75%/
+95%, not 100%)" — `lib/islandSimulation.ts`'s `crossingTimeHours()` reuses
+that exact same relative-threshold method against a simulated discharge
+curve instead of the real one, which is a legitimate reuse of a real
+formula, not an invention (no code implementing this crossing-time scan
+existed anywhere before this — it's newly written, but the *formula* was
+already real). Guards `max(q) ~ 0` (a flat/no-rain simulation) by
+returning the end of the modeled window rather than `0` — without this, a
+barangay simulated with zero rain would trivially "cross" a 0 threshold
+at `t=0` and misreport "Danger in 0 hours," actively misleading for a
+disaster-response tool.
+
+FSI score/label is different: the real formula
+(`0.30·hand + 0.30·twi + 0.20·lclu + 0.20·rainfall`, confirmed by reading
+`fsi_factors.json` directly) combines three genuinely storm-independent
+terrain factors (elevation, wetness, land cover — static rasters, don't
+change with a storm) with a rainfall factor that's already stored
+pre-normalized 0-1, with no raw mm total anywhere in this repo to rescale
+a simulated value against. This was disclosed to the user plainly before
+building anything — full per-basin FSI recompute has been flagged
+"deliberately still not built" elsewhere in this doc for exactly this
+reason — and they chose to build an approximate recompute anyway,
+understanding it's an approximation layered on an approximation (the
+existing `fsi_recomputed` in `fsi_factors.json` is itself already
+disclosed as not replacing the authoritative `mean_fsi_score`). The
+approach: build the real design storm's own hyetograph (reconstructed
+from its own stored `storm_params`, not hardcoded numbers) and the
+simulated one the same way over the identical 6-hour window, so their
+total rainfall depths are directly comparable; `ratio =
+simulatedTotalMm / realTotalMm`. Each barangay's own **real** rainfall
+factor is scaled by that one island-wide ratio (not replaced by a single
+flat value for all 115 — that would erase the real per-municipality
+spatial variation the stored factor already encodes) and reclamped to
+[0,1]; `hand`/`twi`/`lclu` stay untouched. This is self-consistent by
+construction, not just asserted: an admin who inputs the real design
+storm's own exact parameters gets `ratio = 1` and reproduces the existing
+`fsi_recomputed` value exactly — verified directly (Esperanza's real
+`fsi_recomputed` is `0.5816`; running the simulation with
+`minRate=0, maxRate=50, duration=2` — the real storm's own params —
+produced a displayed score of `0.582`, matching to the UI's own 3-decimal
+rounding). `dominant_fsi_label` reuses the exact class thresholds already
+documented elsewhere in this file (0.2/0.4/0.6/0.8 — see
+`fsiLabelForScore()` in `lib/dashboardData.ts`), not invented boundaries.
+
+**How the override actually reaches the UI — zero changes needed in
+`BarangayList.tsx`/`BarangayDetailPanel.tsx`/`StaticIslandMap.tsx`.**
+`UserDashboardModal.tsx` builds a `displayBarangays` array (a `useMemo`
+over the real `barangays` + the active `islandSim` result, if any) that
+clones each barangay and overwrites its `mean_fsi_score`/
+`dominant_fsi_label`/`warning_time_hours`/`alert_time_hours`/
+`danger_time_hours` with the simulated ones — falling back to the real
+countdown values for the 2 basin-less barangays specifically (no
+discharge curve to derive a crossing time from at all; same honest-
+absence pattern as their missing hydrograph chart). Every downstream
+consumer (`sortBySeverity`, `filterBarangays`, the list rows, the map's
+`fsiScoreColor`) only ever reads whatever `Barangay[]` it's handed — so
+re-sorting the list and re-coloring the map by the simulated scenario
+falls out for free from this one override, no changes needed to any of
+those shared components. **Disclosure**: a persistent "⚠ SIMULATED ·
+Clear" chip lives in `UserDashboardModal`'s header row (never scrolls out
+of view, unlike the fuller amber banner in the scrollable body below it)
+the entire time a simulation is active — clicking it resets to the real
+static data without needing to reopen the sidebar.
 
 **Why a second map component (`components/StaticIslandMap.tsx`) doesn't
 reopen the "one persistent map" decision** (see below): it is a
@@ -1223,10 +1289,12 @@ not "dismiss a dialog").
 every other panel) — using `var(--card-bg)` for this new full-screen
 view's own background (an early draft did) let the still-mounted
 persistent dashboard/map bleed through visibly underneath it. Fixed with
-explicit, fully-opaque colors keyed by the `theme` prop directly (`DAY_BG`/
-`NIGHT_BG` — same reasoning as `MunicipalityFilterDropdown`'s own
-`DAY_COLORS`/`NIGHT_COLORS`, and same RGB channels as `--card-bg` at
-alpha 1), rather than any of this app's normal translucent tokens.
+explicit, fully-opaque colors keyed by the theme, now factored into a
+small shared `lib/opaqueTheme.ts` (`DAY_BG`/`NIGHT_BG`/`opaqueBg(theme)`
+— same reasoning as `MunicipalityFilterDropdown`'s own `DAY_COLORS`/
+`NIGHT_COLORS`, same RGB channels as `--card-bg` at alpha 1) once
+`AdminInvitePanel.tsx` needed the identical technique for its own landing
+(see below) — extracted rather than duplicated a second time.
 
 **The Simulation Mode sidebar** (`fixed right-0 top-0 h-full w-80`,
 slide-in-from-the-right transition, same `data-open` + CSS-transition
@@ -1236,15 +1304,55 @@ values survive being closed and reopened, matching the requested "auto-
 close after Start simulation, reopen by pressing Simulation Mode again"
 behavior without losing whatever the admin had typed. Its own "Exit"
 button (top of the sidebar, `bfw-btn` pill) closes without running
-anything; "Start simulation" computes the result, hands it to
-`UserDashboardModal` via an `onSimulate` callback, and the parent closes
-the sidebar itself. Results are stored keyed by `barangay.key`
-(`{ barangayKey, result }`) and only passed down to `BarangayDetailPanel`
-when that key still matches the currently selected barangay — so
-switching to a different barangay never shows a stale simulated chart for
-the one before it, without needing a synchronous reset effect (same
-key-gated-state pattern used elsewhere in this app, e.g.
-`BarangayDetailPanel`'s own hydrograph-loading state).
+anything; "Start simulation" runs the whole-island recompute (see above)
+and hands the full `Map<barangayKey, IslandSimResult>` up to
+`UserDashboardModal` via `onSimulate`, which stores it and closes the
+sidebar itself. No longer gated on a selected barangay at all — the
+button used to be `disabled={!selected}` back when a simulation only
+targeted one; now it's `disabled={!barangays}` (just needs the roster
+loaded), since the recompute always covers the whole island regardless of
+what's currently selected in the list.
+
+**Admin sign-in now lands directly on a full-screen "Invitations"
+view — not a modal over the live map.** Reported bug: the shared `Modal`
+`AdminInvitePanel.tsx` used to render with is translucent by design (same
+class of bug as above), so the live map/dashboard visibly bled through
+behind the Invitations dialog. Fixed the same way `UserDashboardModal`
+already was: `AdminInvitePanel.tsx` is now its own `fixed inset-0 z-[18]
+flex flex-col` opaque takeover (`opaqueBg(theme)`, no shared `Modal`) —
+**`z-18`, deliberately not `z-50`**: a full z-index inventory of
+`app/page.tsx` (`.bfw-map-shell` 15, `.bfw-dash` 10, the persistent header
+row with Profile/sign-out/day-night 20) confirmed nothing occupies 16-19,
+so this sits above the map+dashboard (fully occluding them) but *below*
+the header, which stays reachable the whole time an admin is on this
+landing — unlike `UserDashboardModal`, which still fully occludes the
+header while open (an accepted, pre-existing tradeoff for a temporary
+snapshot view, not changed here). No close/X on this landing itself —
+closing `UserDashboardModal` (its own top-left `×`) already returns here,
+never to the raw map/dashboard, so there's nothing else to close back to;
+the `onClose` prop was dropped from `AdminInvitePanel` entirely, not left
+unused. **A real layout bug found via Playwright, not assumed away**:
+the admin landing's own header row initially put "Open User Dashboard" at
+the same top-right screen position as the persistent Profile/day-night
+row (`z-20`, `absolute right-5 top-5`) — since that row sits *above* the
+landing's `z-18`, it silently intercepted every click meant for the
+button underneath it, confirmed by an actual failed automated click, not
+a visual guess. Fixed with a `paddingRight: 260` reservation on the
+landing's header row, sized with margin to spare for every name/office
+length this app actually shows (eyeballed, not computed exactly — same
+style as this file's other hand-tuned layout constants, e.g.
+`COMPACT_MAP_WIDTH`).
+
+Also: the admin landing now opens for **any** admin session reveal, not
+just a fresh interactive admin-toggle sign-in. The old condition
+(`loginMode === 'admin' && admin`) meant a *returning* admin whose session
+auto-revealed (daily login gate already satisfied, login card and its
+toggle skipped entirely) never got the admin landing at all — `loginMode`
+is local, unpersisted, copy/branding-only state that resets to `'user'`
+on every mount, so it could never be `'admin'` on that path. Now keyed on
+`admin` alone (`app/page.tsx`'s post-login effect), the real, durable
+signal — `loginMode` still exists purely for the login card's own "Sign
+in" vs. "Welcome, Administrator" copy, unrelated to this now.
 
 **The real (non-admin) dashboard had a genuine height-mismatch bug too**,
 reported alongside the above: `DashboardShell.tsx`'s barangay-list column

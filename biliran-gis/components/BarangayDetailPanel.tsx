@@ -22,7 +22,7 @@ import { useEffect, useState } from 'react'
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
 import { loadFsiFactors, factorsForBarangay, type BarangayFactors } from '@/lib/fsiFactorData'
-import type { SimulationRunResult } from '@/components/SimulationModePanel'
+import type { SimulationRunResult } from '@/lib/simulationMode'
 import DischargeChart from '@/components/DischargeChart'
 
 interface HydrographEntry {

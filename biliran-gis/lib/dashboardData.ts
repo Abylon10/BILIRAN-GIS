@@ -143,6 +143,19 @@ export function urgencyTierColor(label: FsiLabel): string {
   }
 }
 
+// The same fixed class boundaries as SCORE_COLOR_STOPS below, exposed as a
+// discrete score->label function — used by Simulation Mode's island-wide
+// recompute (lib/islandSimulation.ts) to derive a dominant_fsi_label for a
+// simulated FSI score, reusing the pipeline's real thresholds rather than
+// inventing new ones.
+export function fsiLabelForScore(score: number): FsiLabel {
+  if (score < 0.2) return 'Very Low'
+  if (score < 0.4) return 'Low'
+  if (score < 0.6) return 'Moderate'
+  if (score < 0.8) return 'High'
+  return 'Very High'
+}
+
 // Matches the pipeline's fixed FSI class thresholds (0.2/0.4/0.6/0.8 — see
 // CLAUDE.md): Very Low/Low/Moderate/High/Very High, one color stop at each
 // band's center so the gradient blends smoothly but still reads as that

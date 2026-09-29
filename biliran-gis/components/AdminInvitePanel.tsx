@@ -10,12 +10,25 @@
 // an existing unredeemed invite's expires_at — app/api/activate/route.ts's
 // existing expiry check (a plain Date comparison) needs no changes to
 // honor whatever this sets.
+//
+// This is the admin landing now — app/page.tsx opens it for any admin
+// reveal (see its own comment there), not a modal reachable from the
+// normal dashboard. It's a full-screen opaque takeover (fixed inset-0
+// z-[18], same explicit-opaque-background technique as
+// UserDashboardModal — the shared Modal's backdrop is translucent by
+// design, which used to let the live map/dashboard bleed through behind
+// this exact panel), sitting ABOVE .bfw-map-shell (z-15) and .bfw-dash
+// (z-10) so it fully occludes them, but BELOW the persistent header row
+// (z-20, Profile/sign-out/day-night) so that chrome stays reachable the
+// entire time an admin is here — a deliberate choice, since there's no
+// close button on this view itself (see below). No map/dashboard
+// visible at all until "Open User Dashboard" is pressed.
 
 'use client'
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Modal } from '@/components/ProfilePanel'
+import { opaqueBg } from '@/lib/opaqueTheme'
 import UserDashboardModal from '@/components/UserDashboardModal'
 
 interface Invitation {
@@ -58,10 +71,8 @@ async function fetchInvitations(token: string): Promise<Invitation[]> {
 }
 
 export default function AdminInvitePanel({
-  onClose,
   theme,
 }: {
-  onClose: () => void
   theme: 'light' | 'dark'
 }) {
   const [email, setEmail] = useState('')
@@ -224,26 +235,36 @@ export default function AdminInvitePanel({
   }
 
   // Renders the User Dashboard view instead of (never alongside) the
-  // Invitations modal — stacking both used to be exactly what produced a
-  // compounding double-blur backdrop behind it (each Modal instance
-  // paints its own bg-black/40 + backdrop-blur-xl at the same z-50). See
-  // UserDashboardModal.tsx's own header comment for the rest of that fix.
+  // Invitations landing — closing it (top-left ×) returns to this
+  // landing, never to the raw map/dashboard directly, since there's
+  // nothing else to fall back to (see this file's own header comment).
   if (showUserDashboard) {
     return <UserDashboardModal onClose={() => setShowUserDashboard(false)} theme={theme} />
   }
 
   return (
-    <Modal title="Invitations" onClose={onClose}>
+    <div className="fixed inset-0 z-[18] flex flex-col" style={{ background: opaqueBg(theme) }}>
       {/*
-        Right-aligned pill, same treatment as MunicipalityFilterDropdown's
-        trigger button — reads as this panel's own "top-right corner"
-        action, not a full-width primary action competing with "Create
-        invitation" below.
+        pr reserves space for the persistent header row (app/page.tsx's
+        Profile button + day/night toggle, absolute right-5 top-5 z-20,
+        which stays visible/clickable above this panel by design — see
+        this file's own header comment). Without it, "Open User
+        Dashboard" renders underneath that always-on-top chrome and
+        becomes unclickable — found via Playwright, not a guess: the
+        persistent header measures well under this at every name length
+        this app actually shows, eyeballed with margin to spare rather
+        than computed exactly.
       */}
-      <div className="mb-4 flex justify-end">
+      <div
+        className="flex shrink-0 items-center justify-between border-b py-4 pl-6"
+        style={{ borderColor: 'var(--card-border)', paddingRight: 260 }}
+      >
+        <h2 className="text-lg font-semibold" style={{ color: 'var(--text-strong)' }}>
+          Invitations
+        </h2>
         <button
           type="button"
-          className="bfw-btn rounded-full px-3 py-2 text-sm font-semibold"
+          className="bfw-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold"
           onClick={() => setShowUserDashboard(true)}
         >
           Open User Dashboard
@@ -267,6 +288,7 @@ export default function AdminInvitePanel({
           .bfw-edit-row-enter { animation: none; }
         }
       `}</style>
+      <div className="mx-auto min-h-0 w-full max-w-xl flex-1 overflow-y-auto p-6">
       <form onSubmit={handleSubmit} className="space-y-3">
         <label className="block">
           <span className="text-sm font-medium" style={{ color: 'var(--text-strong)' }}>Email</span>
@@ -458,6 +480,7 @@ export default function AdminInvitePanel({
           </ul>
         </div>
       )}
-    </Modal>
+      </div>
+    </div>
   )
 }
