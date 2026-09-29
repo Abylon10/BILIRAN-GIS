@@ -1426,19 +1426,21 @@ tooltip now names both signals separately so neither implies the other.
 A municipality whose weather hasn't loaded yet (or whose fetch failed)
 simply shows no icon that pass — no placeholder/fake condition invented.
 
-**Known limitation of this session's own verification**: this sandbox's
-outbound network policy blocks `api.open-meteo.com` (confirmed via the
-proxy's own diagnostic as an organization-policy 403, not a bug —
-per its own guidance, not something to retry). Everything above was
-verified end-to-end against **mocked** `/api/weather` responses via
-Playwright (icon rendering, the decoupling, the Simulation Mode prefill,
-all confirmed working) — but live connectivity to the real Open-Meteo
-endpoint from *this* environment couldn't be exercised. The code follows
-Open-Meteo's actual documented response shape and this app's own
-external pipeline's prior successful use of the same API, and should work
-unmodified in the real deployed environment, which has no such
-restriction — but a real end-to-end pass (hit `/api/weather?municipality=
-Naval` from a real deployment) is still worth doing once one exists.
+**Live Open-Meteo connectivity is now confirmed for real, not just
+expected.** This sandbox's own outbound network policy blocks
+`api.open-meteo.com` (confirmed via the proxy's own diagnostic as an
+organization-policy 403, not a bug), so everything through the previous
+paragraph was only verified against **mocked** `/api/weather` responses
+via Playwright. Once the app was actually deployed (Vercel, first
+production deploy this session), hitting the real route directly —
+`GET /api/weather?municipality=Naval` against the live deployment —
+returned genuine Open-Meteo data: `weatherCode: 3`, `temperatureC: 28.4`,
+`precipitationProbability: 92`, plus 24 hourly entries with naturally
+varying (not placeholder/flat) `precipitationMm`/`precipitationProbability`/
+`weatherCode` values. Confirms the route, the WMO-code mapping, and the
+whole fetch/cache path all work unmodified outside this sandbox — the
+"should work once deployed" hedge above is resolved, not just still
+believed.
 
 **A planned research pass didn't happen this session, for the same
 reason**: comparing real Open-Meteo data against `fsi_factors.json`'s
