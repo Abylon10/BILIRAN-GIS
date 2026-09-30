@@ -197,7 +197,7 @@ export default function UserDashboardModal({
 
   return (
     <div
-      className={embedded ? 'flex flex-col' : 'bfw-user-dashboard fixed inset-0 z-50 flex flex-col'}
+      className={embedded ? 'flex h-full min-h-0 flex-col' : 'bfw-user-dashboard fixed inset-0 z-50 flex flex-col'}
       data-open={open}
       style={embedded ? undefined : { background: bg }}
     >
@@ -298,8 +298,18 @@ export default function UserDashboardModal({
       )}
 
       {embedded && displayBarangays && (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-[1fr_360px]">
-          <div className="flex flex-col gap-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
+          {/*
+            min-h-0 overflow-y-auto on each column separately (not a shared
+            scroll on the outer grid) — matches the non-embedded "Open User
+            Dashboard" path's own list/detail split below, which already
+            does this. Without it, once the right column's content (inputs
+            + FSI corner + up to 4 stacked charts) outgrows the visible
+            area, the only way to see the rest was scrolling the whole
+            grid — taking the map/list out of view too, rather than each
+            side scrolling on its own.
+          */}
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             {disclosureBanner}
 
             <StaticIslandMap barangays={displayBarangays} selectedKey={selectedKey} highlightMunicipality={municipality} height={MAP_HEIGHT} />
@@ -332,7 +342,7 @@ export default function UserDashboardModal({
             />
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             <SimulationModePanel
               selectedBarangay={selected}
               onReset={() => setIslandSim(null)}

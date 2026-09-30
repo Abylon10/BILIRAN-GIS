@@ -2106,6 +2106,28 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## Independent scroll for each column in Rainfall & Scenarios
+
+The user reported the FSI corner + simulated charts as "still not present" — actually just scroll behavior:
+`components/UserDashboardModal.tsx`'s embedded two-column grid had `overflow-y-auto` on the **outer** grid
+only, so both columns (map/search/list on the left; Simulation Mode/FSI-corner/detail-charts on the right)
+scrolled together as one shared unit — once the right column's content grew taller than the visible area,
+seeing the rest meant scrolling the whole grid, taking the map/list out of view too. Fixed by moving
+`overflow-y-auto` onto each column individually (`min-h-0 overflow-y-auto` on both inner `<div>`s instead of
+the shared one on the grid) — matching the non-embedded "Open User Dashboard" path's own list/detail split,
+which already did this correctly.
+
+That alone wasn't sufficient, though: the columns' own `min-h-0`/`overflow-y-auto` only creates a real
+scroll region if every ancestor in the flex chain also constrains height rather than just growing to fit
+content. `UserDashboardModal`'s own root wrapper div (`className={embedded ? 'flex flex-col' : ...}`) had
+neither `h-full` nor `min-h-0` — so it simply grew to its natural content height (confirmed via a DOM-chain
+inspection: `scrollHeight` matched `clientHeight` all the way up until `AdminShell.tsx`'s own generic
+per-tab content wrapper, which ended up being the thing that actually scrolled, sharing scroll across both
+columns exactly as before — just one level higher up than originally suspected). Added `h-full min-h-0` to
+that root wrapper (embedded case only) so it respects the height `AdminShell` actually gives it, propagating
+the constraint down to the grid and finally to each column's own scroll region. Verified via Playwright:
+scrolling the right column independently leaves the left column's `scrollTop` at 0, and vice versa.
+
 ## SelectedBarangayCard's FSI corner + Simulated precipitation chart
 
 Two more small additions to Rainfall & Scenarios, per direct feedback:
