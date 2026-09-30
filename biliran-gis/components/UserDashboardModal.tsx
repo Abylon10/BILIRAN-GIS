@@ -400,9 +400,8 @@ function BarangayRankingTable({
             <th className="px-3 py-2 font-medium">#</th>
             <th className="px-3 py-2 font-medium">Barangay</th>
             <th className="px-3 py-2 font-medium">Municipality</th>
-            <th className="px-3 py-2 font-medium">FSI score</th>
             <th className="px-3 py-2 font-medium">Class</th>
-            <th className="px-3 py-2 font-medium">Countdown</th>
+            <th className="px-3 py-2 text-right font-medium">FSI / Countdown</th>
           </tr>
         </thead>
         <tbody>
@@ -418,7 +417,6 @@ function BarangayRankingTable({
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{i + 1}</td>
                 <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{b.barangay}</td>
                 <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{b.municipality}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{b.mean_fsi_score.toFixed(2)}</td>
                 <td className="px-3 py-2">
                   <span
                     className="rounded-full px-2 py-0.5 text-xs font-semibold"
@@ -427,7 +425,21 @@ function BarangayRankingTable({
                     {b.dominant_fsi_label}
                   </span>
                 </td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{formatHoursAsCountdown(b.danger_time_hours)} to Danger</td>
+                {/*
+                  FSI score + Countdown grouped as one right-aligned stacked
+                  block — matching BarangayList.tsx's own row markup exactly
+                  (the "Open User Dashboard" path's list), per direct
+                  feedback that these two should read as separated from the
+                  rest of the row the same way they already do there, not
+                  as two more flat columns alongside Barangay/Municipality/
+                  Class.
+                */}
+                <td className="px-3 py-2 text-right text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
+                  {b.mean_fsi_score.toFixed(2)}
+                  <span className="block font-normal" style={{ color: 'var(--text-soft)' }}>
+                    {formatHoursAsCountdown(b.danger_time_hours)} to Danger
+                  </span>
+                </td>
               </tr>
             )
           })}
