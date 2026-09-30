@@ -316,10 +316,19 @@ export default function UserDashboardModal({
               <MunicipalityFilterDropdown value={municipality} onChange={setMunicipality} theme={theme} />
             </div>
 
-            <BarangayRankingTable
+            {/*
+              Same BarangayList row component the non-embedded "Open User
+              Dashboard" path already uses (below) — per direct feedback,
+              this tab's own ranking list should look like that one, not
+              like a distinct flat table (BarangayRankingTable, which this
+              replaces — see its own removed definition's history in
+              CLAUDE.md for why it existed before this).
+            */}
+            <BarangayList
               barangays={filtered}
               selectedKey={selectedKey}
-              onSelect={(key) => setSelectedKey(key)}
+              onSelect={(b) => setSelectedKey(b.key)}
+              onSelectMunicipality={setMunicipality}
             />
           </div>
 
@@ -370,73 +379,6 @@ export default function UserDashboardModal({
   )
 }
 
-// "Barangay Ranking" table for the embedded two-column layout — same
-// columns/styling pattern as AdminDashboardTab.tsx's own "Recent FSI by
-// barangay" table, replacing BarangayList's row-button rendering for
-// this tab specifically (BarangayList's other callers are unaffected).
-// No "Status" column — no real per-barangay active/inactive concept
-// exists to back one.
-function BarangayRankingTable({
-  barangays,
-  selectedKey,
-  onSelect,
-}: {
-  barangays: Barangay[]
-  selectedKey: string | null
-  onSelect: (key: string) => void
-}) {
-  if (barangays.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm" style={{ color: 'var(--text-soft)' }}>
-        No barangays match.
-      </p>
-    )
-  }
-  return (
-    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr style={{ color: 'var(--text-soft)' }}>
-            <th className="px-3 py-2 font-medium">#</th>
-            <th className="px-3 py-2 font-medium">Barangay</th>
-            <th className="px-3 py-2 font-medium">Municipality</th>
-            <th className="px-3 py-2 font-medium">FSI score</th>
-            <th className="px-3 py-2 font-medium">Class</th>
-            <th className="px-3 py-2 font-medium">Countdown</th>
-          </tr>
-        </thead>
-        <tbody>
-          {barangays.map((b, i) => {
-            const selected = b.key === selectedKey
-            return (
-              <tr
-                key={b.key}
-                className="cursor-pointer border-t"
-                style={{ borderColor: 'var(--card-border)', background: selected ? 'rgba(232, 163, 61, 0.18)' : undefined }}
-                onClick={() => onSelect(b.key)}
-              >
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{i + 1}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{b.barangay}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{b.municipality}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{b.mean_fsi_score.toFixed(2)}</td>
-                <td className="px-3 py-2">
-                  <span
-                    className="rounded-full px-2 py-0.5 text-xs font-semibold"
-                    style={{ background: `${urgencyTierColor(b.dominant_fsi_label)}33`, color: urgencyTierColor(b.dominant_fsi_label) }}
-                  >
-                    {b.dominant_fsi_label}
-                  </span>
-                </td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{formatHoursAsCountdown(b.danger_time_hours)} to Danger</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 // "Selected Barangay" compact summary card for the embedded layout's
 // right column — every field here is already computed/available on
 // `barangay`/`islandSim`, nothing new is fetched or invented. The real
@@ -454,52 +396,54 @@ function SelectedBarangayCard({
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3" style={{ borderColor: 'var(--card-border)' }}>
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-          Selected barangay
-        </h3>
-        <p className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{barangay.barangay}</p>
-        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{barangay.municipality}, Biliran</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+            Selected barangay
+          </h3>
+          <p className="truncate text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{barangay.barangay}</p>
+          <p className="truncate text-xs" style={{ color: 'var(--text-soft)' }}>{barangay.municipality}, Biliran</p>
+        </div>
+        {/*
+          FSI score + countdown as one right-aligned "corner" block —
+          same stacked-block treatment BarangayList.tsx's own rows use,
+          applied here too per direct feedback, rather than sitting as
+          two more flat grid cells alongside Rainfall/Duration below.
+        */}
+        <div className="shrink-0 text-right text-xs">
+          <span className="text-base font-semibold" style={{ color: 'var(--text-strong)' }}>{barangay.mean_fsi_score.toFixed(2)}</span>
+          <span
+            className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+            style={{ background: `${urgencyTierColor(barangay.dominant_fsi_label)}33`, color: urgencyTierColor(barangay.dominant_fsi_label) }}
+          >
+            {barangay.dominant_fsi_label}
+          </span>
+          <div className="font-normal" style={{ color: 'var(--text-soft)' }}>
+            {formatHoursAsCountdown(barangay.danger_time_hours)} to Danger
+          </div>
+        </div>
       </div>
 
       <StaticIslandMap barangays={[barangay]} selectedKey={barangay.key} height={THUMBNAIL_HEIGHT} />
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <div style={{ color: 'var(--text-soft)' }}>FSI score</div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-base font-semibold" style={{ color: 'var(--text-strong)' }}>{barangay.mean_fsi_score.toFixed(2)}</span>
-            <span
-              className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-              style={{ background: `${urgencyTierColor(barangay.dominant_fsi_label)}33`, color: urgencyTierColor(barangay.dominant_fsi_label) }}
-            >
-              {barangay.dominant_fsi_label}
-            </span>
+      {islandSim && (
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <div style={{ color: 'var(--text-soft)' }}>Rainfall (mm/hr)</div>
+            <div className="font-semibold" style={{ color: 'var(--text-strong)' }}>
+              {islandSim.params.minRate}–{islandSim.params.maxRate}
+              <span className="ml-1 font-normal" style={{ color: 'var(--text-soft)' }}>(scenario range)</span>
+            </div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-soft)' }}>Simulation duration</div>
+            <div className="font-semibold" style={{ color: 'var(--text-strong)' }}>
+              {islandSim.params.durationHours}h
+              <span className="ml-1 font-normal" style={{ color: 'var(--text-soft)' }}>(scenario)</span>
+            </div>
           </div>
         </div>
-        <div>
-          <div style={{ color: 'var(--text-soft)' }}>Predicted countdown</div>
-          <div className="font-semibold" style={{ color: 'var(--text-strong)' }}>{formatHoursAsCountdown(barangay.danger_time_hours)} to Danger</div>
-        </div>
-        {islandSim && (
-          <>
-            <div>
-              <div style={{ color: 'var(--text-soft)' }}>Rainfall (mm/hr)</div>
-              <div className="font-semibold" style={{ color: 'var(--text-strong)' }}>
-                {islandSim.params.minRate}–{islandSim.params.maxRate}
-                <span className="ml-1 font-normal" style={{ color: 'var(--text-soft)' }}>(scenario range)</span>
-              </div>
-            </div>
-            <div>
-              <div style={{ color: 'var(--text-soft)' }}>Simulation duration</div>
-              <div className="font-semibold" style={{ color: 'var(--text-strong)' }}>
-                {islandSim.params.durationHours}h
-                <span className="ml-1 font-normal" style={{ color: 'var(--text-soft)' }}>(scenario)</span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      )}
 
       <p className="text-[10px]" style={{ color: 'var(--text-soft)' }}>
         {islandSim

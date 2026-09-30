@@ -2106,6 +2106,44 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
+## SelectedBarangayCard's FSI corner + Simulated precipitation chart
+
+Two more small additions to Rainfall & Scenarios, per direct feedback:
+
+- **`SelectedBarangayCard`** (`components/UserDashboardModal.tsx`): FSI score + Predicted countdown moved out
+  of the 2-column stat grid and into a right-aligned "corner" block next to the barangay name/municipality
+  header — the exact same stacked treatment (bold score, class badge, muted countdown beneath) `BarangayList`'s
+  own rows and the ranking list already use, applied here too for consistency. The stat grid below now only
+  ever shows Rainfall/Duration, and only while a simulation is active.
+- **`BarangayDetailPanel`**: Precipitation gained its own "Simulated precipitation" chart alongside the
+  existing "Simulated hydrograph" — previously only the hydrograph got a simulated counterpart, so
+  Precipitation stayed showing only the real/live rainfall curve even while a scenario was running.
+  `SimulatedHydrograph` (`lib/simulationMode.ts`) already carries `rainfallMmHr` (the same raised-triangular
+  hyetograph `simulationResult.sim.q` was itself recomputed from) — no new computation needed, just a second
+  `DischargeChart` reading that existing field.
+
+Verified via a mocked-auth Playwright pass: selecting a barangay and running a simulation shows both new
+"Simulated hydrograph" and "Simulated precipitation" charts (confirmed via direct DOM queries, not
+`.innerText()` — this session hit the documented CSS-`uppercase`-transform false-negative pitfall again
+partway through verifying this, self-corrected the same way as before).
+
+## Rainfall & Scenarios' ranking list now reuses BarangayList directly (BarangayRankingTable removed)
+
+The admin's Rainfall & Scenarios tab originally showed a distinct `BarangayRankingTable` (a real `<table>`,
+`#`/Barangay/Municipality/Class/FSI/Countdown as flat columns) instead of the `BarangayList.tsx` rows every
+other barangay list in this app uses (Barangays tab, the "Open User Dashboard" path). A first round grouped
+FSI score + Countdown into one merged table column to read as more separated from the rest of the row; the
+user then clarified they wanted the full row treatment `BarangayList.tsx` already has elsewhere (shown via
+a screenshot of the Barangays tab, which already renders `BarangayList`) — colored severity dot, barangay
+name + "{municipality} · {class}" on the left, and the FSI score (bold) + countdown (muted, beneath it)
+stacked as one block on the right, each row its own bordered/rounded item, not a table.
+
+Rather than re-implement that look a second time, `components/UserDashboardModal.tsx`'s embedded layout now
+renders `BarangayList` directly (already imported in this file for the non-embedded "Open User Dashboard"
+path) in place of `BarangayRankingTable`, which was deleted entirely — same `barangays`/`selectedKey`/
+`onSelect`/`onSelectMunicipality` wiring the non-embedded path already used, so both paths' ranking lists
+are now the exact same component, not two components trying to look alike.
+
 ## Real-device phone fixes: header overlap, oversized map chrome, pan/zoom lag
 
 A phone screenshot showed the public (non-admin) dashboard's header title/subtitle overlapping the Day/Night
