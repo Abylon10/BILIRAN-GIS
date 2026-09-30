@@ -2356,6 +2356,18 @@ independently, clicking one shows its explanation (framing + factor sentence + c
 second collapses the first (only one open at a time), re-clicking the same one collapses it, and the caption
 now reads the shared framing sentence.
 
+**Follow-up: per-factor text shortened.** The initial version above prepended the full shared
+`FACTOR_SCORE_FRAMING` sentence in front of every factor's own explanation, so tapping through all four in one
+session meant reading that same long sentence four times in a row. Each factor's `explanation` string now
+stands on its own (no shared-framing prefix at render time), folding the "relative 0-1 rank" idea directly
+into its own shorter sentence and dropping the "not a measurement in X" comparison entirely (per direct
+confirmation — the caption beneath all four rows already carries that framing once, so the per-factor text
+doesn't need to repeat it). The weight clause is unchanged (still `Math.round(row.weight * 100)`, computed,
+never hardcoded). `FACTOR_SCORE_FRAMING` itself is untouched and keeps its one remaining use: the group's own
+caption. Confirmed via mocked-auth Playwright: the framing sentence now appears exactly once in the panel
+regardless of which row (if any) is open — never duplicated per-row — while each factor's shortened
+explanation + correct weight percentage still renders correctly on click.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

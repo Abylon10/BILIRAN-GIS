@@ -290,8 +290,8 @@ function FactorBreakdown({
       value: factors.hand,
       weight: weights.hand,
       explanation:
-        'Measures elevation above the nearest drainage channel — a lower HAND value means the barangay sits ' +
-        'closer to a stream/drainage, typically raising flood risk.',
+        "A relative score (0-1) ranking this barangay's elevation above the nearest drainage channel against " +
+        'every other barangay on the island. Lower means closer to a stream/drainage, typically raising flood risk.',
     },
     {
       key: 'twi',
@@ -299,8 +299,8 @@ function FactorBreakdown({
       value: factors.twi,
       weight: weights.twi,
       explanation:
-        'Measures how much water tends to accumulate here based on slope and upstream contributing area — ' +
-        'higher values mean water pools more easily.',
+        'A relative score (0-1) ranking how much water tends to accumulate here — based on slope and upstream ' +
+        'contributing area — against every other barangay on the island. Higher means water pools more easily.',
     },
     {
       key: 'lclu',
@@ -308,15 +308,16 @@ function FactorBreakdown({
       value: factors.lclu,
       weight: weights.lclu,
       explanation:
-        'Derived from land cover type — paved/built-up areas shed rainfall as runoff much faster than ' +
-        'forested or vegetated ones, raising this factor.',
+        "A relative score (0-1) ranking this barangay's runoff potential from its land cover type against " +
+        'every other barangay on the island. Paved/built-up areas shed rainfall faster than forested or ' +
+        'vegetated ones, raising this factor.',
     },
     {
       key: 'rainfall',
       label: liveRainfallFactor != null ? "Today's live rainfall forecast" : '6-hour rainfall forecast',
       value: liveRainfallFactor ?? factors.rainfall,
       weight: weights.rainfall,
-      explanation: "This barangay's own rainfall input into the FSI formula, normalized against the island-wide range.",
+      explanation: "This barangay's own rainfall input into the FSI formula, scored 0-1 against the island-wide range.",
     },
   ]
 
@@ -368,8 +369,7 @@ function FactorBreakdown({
             </div>
             {openFactor === row.key && (
               <div className="rounded-md px-2 py-1.5 text-[10px] leading-snug" style={{ background: 'var(--card-border)', color: 'var(--text-soft)' }}>
-                {FACTOR_SCORE_FRAMING} {row.explanation} This factor contributes {Math.round(row.weight * 100)}% to
-                the FSI score.
+                {row.explanation} This factor contributes {Math.round(row.weight * 100)}% to the FSI score.
               </div>
             )}
           </div>
