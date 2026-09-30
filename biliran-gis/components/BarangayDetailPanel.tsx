@@ -180,15 +180,36 @@ export default function BarangayDetailPanel({
       })()}
 
       {simulationResult && (
-        <DischargeChart
-          timeHours={simulationResult.sim.timeHours}
-          q={simulationResult.sim.q}
-          title="Simulated hydrograph"
-          metaLabel={`basin ${simulationResult.sim.basinId} · peak ${Math.max(...simulationResult.sim.q, 0.001).toFixed(1)} m³/s`}
-          captionText={`Simulated: ${simulationResult.minRate}-${simulationResult.maxRate}mm/hr rain, ${simulationResult.durationHours}-hour duration.`}
-          color="#D97706"
-          ariaLabel="Simulated basin discharge over time"
-        />
+        <>
+          <DischargeChart
+            timeHours={simulationResult.sim.timeHours}
+            q={simulationResult.sim.q}
+            title="Simulated hydrograph"
+            metaLabel={`basin ${simulationResult.sim.basinId} · peak ${Math.max(...simulationResult.sim.q, 0.001).toFixed(1)} m³/s`}
+            captionText={`Simulated: ${simulationResult.minRate}-${simulationResult.maxRate}mm/hr rain, ${simulationResult.durationHours}-hour duration.`}
+            color="#D97706"
+            ariaLabel="Simulated basin discharge over time"
+          />
+          {/*
+            Precipitation's own simulated counterpart — the real chart
+            above already gets one (Simulated hydrograph), but
+            Precipitation never did, so it stayed showing only the real/
+            live rainfall curve even while a scenario was active.
+            rainfallMmHr is the same raised-triangular hyetograph
+            simulationResult.sim.q was itself recomputed from
+            (lib/simulationMode.ts's buildRaisedTriangularHyetograph),
+            already present on this object — no new computation needed.
+          */}
+          <DischargeChart
+            timeHours={simulationResult.sim.timeHours}
+            q={simulationResult.sim.rainfallMmHr}
+            title="Simulated precipitation"
+            metaLabel={`peak ${Math.max(...simulationResult.sim.rainfallMmHr, 0.001).toFixed(0)} mm/hr`}
+            captionText={`Simulated: ${simulationResult.minRate}-${simulationResult.maxRate}mm/hr rain, ${simulationResult.durationHours}-hour duration.`}
+            color="#D97706"
+            ariaLabel="Simulated rainfall over time"
+          />
+        </>
       )}
 
       {!(isCurrent && entry?.hydrograph) && (
