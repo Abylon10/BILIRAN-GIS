@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Biliran Flood Watch — a flood early-warning web app for MDRRMO officials in
+Biliran Flood Risk Monitor — a flood early-warning web app for MDRRMO officials in
 Biliran province, Philippines. **Not public-facing**: access is restricted to
 MDRRMO personnel and barangay presidents across 7 of Biliran's 8 municipalities
 (Naval, Almeria, Biliran, Cabucgayan, Caibiran, Culaba, Kawayan — **Maripipi is

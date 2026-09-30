@@ -17,7 +17,7 @@ const resend = apiKey ? new Resend(apiKey) : null
 // Resend's shared sender needs no domain verification — fine for v1.
 // Swap to a verified custom-domain address later via this env var alone,
 // no code change needed.
-const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS || 'Biliran Flood Watch <onboarding@resend.dev>'
+const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS || 'Biliran Flood Risk Monitor <onboarding@resend.dev>'
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
@@ -41,11 +41,11 @@ export async function sendInvitationEmail({
   }
 
   const greeting = name ? `Hi ${name},` : 'Hello,'
-  const subject = 'Your Biliran Flood Watch invitation'
+  const subject = 'Your Biliran Flood Risk Monitor invitation'
 
   const text = `${greeting}
 
-You've been invited to Biliran Flood Watch as ${office}.
+You've been invited to Biliran Flood Risk Monitor as ${office}.
 
 Your invitation code: ${code}
 
@@ -54,7 +54,7 @@ Activate your account: ${activateUrl}
 This code is single-use and tied to this email address. If you weren't expecting this, you can ignore this message.`
 
   const html = `<p>${escapeHtml(greeting)}</p>
-<p>You've been invited to Biliran Flood Watch as <strong>${escapeHtml(office)}</strong>.</p>
+<p>You've been invited to Biliran Flood Risk Monitor as <strong>${escapeHtml(office)}</strong>.</p>
 <p>Your invitation code: <strong style="font-family:monospace;font-size:1.1em">${escapeHtml(code)}</strong></p>
 <p><a href="${activateUrl}">Activate your account</a></p>
 <p style="color:#666;font-size:0.85em">This code is single-use and tied to this email address. If you weren't expecting this, you can ignore this message.</p>`

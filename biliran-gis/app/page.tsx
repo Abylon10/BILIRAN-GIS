@@ -733,7 +733,7 @@ export default function HomePage() {
               >
                 <img
                   src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
-                  alt="Biliran Flood Watch"
+                  alt="Biliran Flood Risk Monitor"
                   className="h-16 w-auto select-none"
                   draggable={false}
                 />
@@ -741,7 +741,7 @@ export default function HomePage() {
             ) : (
               <img
                 src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
-                alt="Biliran Flood Watch"
+                alt="Biliran Flood Risk Monitor"
                 className="h-16 w-auto select-none"
                 draggable={false}
               />
@@ -755,7 +755,7 @@ export default function HomePage() {
                 ? 'Welcome, Administrator'
                 : 'Sign in'}
           </h2>
-          <p className="text-center mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Biliran Flood Watch</p>
+          <p className="text-center mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Biliran Flood Risk Monitor</p>
 
           {activated && authMode === 'signin' && (
             <p className="mt-4 rounded-md bg-[#E7F3E9] px-3 py-2 text-center text-sm text-[#2C5F3E]">
