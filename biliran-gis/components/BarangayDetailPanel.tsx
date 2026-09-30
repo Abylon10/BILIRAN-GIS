@@ -21,7 +21,7 @@
 import { useEffect, useState } from 'react'
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
-import { loadFsiFactors, factorsForBarangay, type BarangayFactors } from '@/lib/fsiFactorData'
+import { loadFsiFactors, factorsForBarangay, type BarangayFactors, type FactorWeights } from '@/lib/fsiFactorData'
 import type { SimulationRunResult } from '@/lib/simulationMode'
 import type { LiveHydrograph } from '@/lib/liveIslandState'
 import DischargeChart from '@/components/DischargeChart'
@@ -35,6 +35,7 @@ interface HydrographEntry {
 interface FactorEntry {
   key: string
   factors: BarangayFactors | null
+  weights: FactorWeights | null
 }
 
 export default function BarangayDetailPanel({
@@ -91,7 +92,7 @@ export default function BarangayDetailPanel({
     loadFsiFactors()
       .then((data) => {
         if (cancelled) return
-        setFactorEntry({ key: barangay.key, factors: factorsForBarangay(data, barangay.key) })
+        setFactorEntry({ key: barangay.key, factors: factorsForBarangay(data, barangay.key), weights: data.factor_weights })
       })
       .catch(() => {
         // Supplementary data — no dedicated error UI, same as "not available".
@@ -233,9 +234,10 @@ export default function BarangayDetailPanel({
         </div>
       )}
 
-      {isFactorsCurrent && factorEntry?.factors && (
+      {isFactorsCurrent && factorEntry?.factors && factorEntry.weights && (
         <FactorBreakdown
           factors={factorEntry.factors}
+          weights={factorEntry.weights}
           // Only the rainfall row is live-scaled — hand/twi/lclu are
           // static terrain properties, genuinely unaffected by weather.
           // liveHydrograph doubles as "live data is active for this
@@ -261,20 +263,60 @@ export default function BarangayDetailPanel({
   )
 }
 
+// Shared across every factor's own "?" explanation and the group caption
+// below, so both say the same thing about what these 0-1 numbers actually
+// are (a relative island-wide rank, not a physical unit) rather than
+// drifting into slightly different wording in two places.
+const FACTOR_SCORE_FRAMING =
+  "These aren't measurements in meters or millimeters — they're relative scores from 0 to 1, showing where " +
+  'each barangay ranks compared to every other barangay on the island for that particular factor. 0 means ' +
+  'lowest on the island for that factor, 1 means highest.'
+
 function FactorBreakdown({
   factors,
+  weights,
   liveRainfallFactor,
 }: {
   factors: BarangayFactors
+  weights: FactorWeights
   liveRainfallFactor?: number | null
 }) {
-  const rows: { label: string; value: number }[] = [
-    { label: 'HAND (elevation above drainage)', value: factors.hand },
-    { label: 'TWI (wetness index)', value: factors.twi },
-    { label: 'Land cover runoff', value: factors.lclu },
+  const [openFactor, setOpenFactor] = useState<string | null>(null)
+
+  const rows: { key: string; label: string; value: number; weight: number; explanation: string }[] = [
     {
+      key: 'hand',
+      label: 'HAND (elevation above drainage)',
+      value: factors.hand,
+      weight: weights.hand,
+      explanation:
+        'Measures elevation above the nearest drainage channel — a lower HAND value means the barangay sits ' +
+        'closer to a stream/drainage, typically raising flood risk.',
+    },
+    {
+      key: 'twi',
+      label: 'TWI (wetness index)',
+      value: factors.twi,
+      weight: weights.twi,
+      explanation:
+        'Measures how much water tends to accumulate here based on slope and upstream contributing area — ' +
+        'higher values mean water pools more easily.',
+    },
+    {
+      key: 'lclu',
+      label: 'Land cover runoff',
+      value: factors.lclu,
+      weight: weights.lclu,
+      explanation:
+        'Derived from land cover type — paved/built-up areas shed rainfall as runoff much faster than ' +
+        'forested or vegetated ones, raising this factor.',
+    },
+    {
+      key: 'rainfall',
       label: liveRainfallFactor != null ? "Today's live rainfall forecast" : '6-hour rainfall forecast',
       value: liveRainfallFactor ?? factors.rainfall,
+      weight: weights.rainfall,
+      explanation: "This barangay's own rainfall input into the FSI formula, normalized against the island-wide range.",
     },
   ]
 
@@ -288,25 +330,53 @@ function FactorBreakdown({
       </div>
       <div className="flex flex-col gap-1.5">
         {rows.map((row) => (
-          <div key={row.label} className="flex items-center gap-2">
-            <div className="w-36 shrink-0 text-xs" style={{ color: 'var(--text-soft)' }}>
-              {row.label}
+          <div key={row.key} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <div className="flex w-36 shrink-0 items-center gap-1 text-xs" style={{ color: 'var(--text-soft)' }}>
+                <span className="truncate">{row.label}</span>
+                {/*
+                  A real tap target (not hover-only) — this needs to work on
+                  phone too, per the proposal this was built from. Toggles
+                  this row's own explanation below; opening one closes any
+                  other that was already open (openFactor holds at most one
+                  key), keeping the panel from growing too tall.
+                */}
+                <button
+                  type="button"
+                  onClick={() => setOpenFactor((cur) => (cur === row.key ? null : row.key))}
+                  aria-expanded={openFactor === row.key}
+                  aria-label={`What is ${row.label}?`}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold"
+                  style={{
+                    borderColor: 'var(--card-border)',
+                    color: openFactor === row.key ? 'var(--card-bg)' : 'var(--text-soft)',
+                    background: openFactor === row.key ? 'var(--text-soft)' : 'transparent',
+                  }}
+                >
+                  ?
+                </button>
+              </div>
+              <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--card-border)' }}>
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${Math.round(row.value * 100)}%`, background: '#3B82C4' }}
+                />
+              </div>
+              <div className="w-9 shrink-0 text-right text-xs" style={{ color: 'var(--text-soft)' }}>
+                {row.value.toFixed(2)}
+              </div>
             </div>
-            <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--card-border)' }}>
-              <div
-                className="h-full rounded-full"
-                style={{ width: `${Math.round(row.value * 100)}%`, background: '#3B82C4' }}
-              />
-            </div>
-            <div className="w-9 shrink-0 text-right text-xs" style={{ color: 'var(--text-soft)' }}>
-              {row.value.toFixed(2)}
-            </div>
+            {openFactor === row.key && (
+              <div className="rounded-md px-2 py-1.5 text-[10px] leading-snug" style={{ background: 'var(--card-border)', color: 'var(--text-soft)' }}>
+                {FACTOR_SCORE_FRAMING} {row.explanation} This factor contributes {Math.round(row.weight * 100)}% to
+                the FSI score.
+              </div>
+            )}
           </div>
         ))}
       </div>
       <div className="text-[10px]" style={{ color: 'var(--text-soft)' }}>
-        Each factor normalized 0-1 across the island; an approximate breakdown, not a
-        replacement for the score above.
+        {FACTOR_SCORE_FRAMING} Not a replacement for the score above.
       </div>
     </div>
   )

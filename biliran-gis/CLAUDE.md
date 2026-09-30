@@ -2330,6 +2330,32 @@ Two more rounds of feedback, both resolved this round:
     same mocked-auth pass at a 1500px desktop viewport afterward and confirmed no regression: the sidebar still
     always-visible, hamburger absent, Users tab still switches correctly.
 
+## "?" explainer buttons on each Factor Breakdown row
+
+`components/BarangayDetailPanel.tsx`'s `FactorBreakdown` (HAND/TWI/Land cover runoff/rainfall) previously
+showed only a label + 0-1 bar/value with one short caption below the whole group — nothing explained what
+those numbers actually represent unless someone asked directly. Each row now has a small `h-4 w-4` (16px)
+circular "?" button next to its label (`aria-expanded`/`aria-label` wired, tap-to-expand only — no
+hover-only behavior, so it works identically on phone and desktop) that toggles a short explanation block
+directly under that row, using the same `useState<string | null>(null)` "at most one open" pattern already
+used elsewhere in this app (`AdminInvitePanel.tsx`'s `editingId`, `AdminUsersTab.tsx`'s `busyId`). Rows are
+keyed by a stable `'hand'`/`'twi'`/`'lclu'`/`'rainfall'` string (not the row's own display `label`, since the
+rainfall row's label text changes between "6-hour rainfall forecast" and "Today's live rainfall forecast"
+depending on whether live weather is active, so it isn't safe to key toggle state on).
+
+Each expansion shows a shared general-framing sentence (explaining these are relative 0-1 island-wide ranks,
+not physical units — also now used to replace the group's own shorter caption, so the two don't say slightly
+different things) plus a factor-specific sentence, plus a weight clause built from the real, loaded
+`factor_weights` (`{ hand: 0.30, twi: 0.30, lclu: 0.20, rainfall: 0.20 }`, from `lib/fsiFactorData.ts`'s
+`RawFactorData.factor_weights` — already fetched by the existing `loadFsiFactors()` call, just not previously
+captured into this component's own state) — e.g. `"This factor contributes 30% to the FSI score."` — computed
+from the real value (`Math.round(weight * 100)`), never a hardcoded "30%"/"20%" string, so it can't drift from
+the actual data (same "not hardcoded, in case the data ever changes" discipline `lib/islandSimulation.ts`
+already established for these same weights). Confirmed via mocked-auth Playwright: all four buttons render
+independently, clicking one shows its explanation (framing + factor sentence + correct weight %), clicking a
+second collapses the first (only one open at a time), re-clicking the same one collapses it, and the caption
+now reads the shared framing sentence.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
