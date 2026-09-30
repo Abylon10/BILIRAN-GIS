@@ -2106,17 +2106,22 @@ Testing the deployed build (PR #21) surfaced 3 more issues:
   non-editable — only status is actionable now, so the tab's own
   explanatory copy was reworded away from a blanket "Read-only" claim.
 
-## Barangay Ranking table: FSI score + Countdown grouped as one block
+## Rainfall & Scenarios' ranking list now reuses BarangayList directly (BarangayRankingTable removed)
 
-The admin's Rainfall & Scenarios tab's "Barangay Ranking" table (`BarangayRankingTable` in
-`components/UserDashboardModal.tsx`) had FSI score and Countdown as two separate flat columns, alongside
-Barangay/Municipality/Class. Per direct feedback, restyled to match the exact pattern the "Open User
-Dashboard" path's own `BarangayList.tsx` already uses for its rows: one merged `<th>`/`<td>` ("FSI /
-Countdown", right-aligned) with the FSI score bolded on top and the countdown ("X to Danger") in smaller
-muted text directly beneath it — the same stacked-block markup `BarangayList.tsx` already had, not a new
-pattern. `#`/Barangay/Municipality/Class stayed separate flat columns, unchanged — only FSI score and
-Countdown needed to visually group together and read as set apart from the rest of the row, matching what
-the reference "user dashboard" list already did.
+The admin's Rainfall & Scenarios tab originally showed a distinct `BarangayRankingTable` (a real `<table>`,
+`#`/Barangay/Municipality/Class/FSI/Countdown as flat columns) instead of the `BarangayList.tsx` rows every
+other barangay list in this app uses (Barangays tab, the "Open User Dashboard" path). A first round grouped
+FSI score + Countdown into one merged table column to read as more separated from the rest of the row; the
+user then clarified they wanted the full row treatment `BarangayList.tsx` already has elsewhere (shown via
+a screenshot of the Barangays tab, which already renders `BarangayList`) — colored severity dot, barangay
+name + "{municipality} · {class}" on the left, and the FSI score (bold) + countdown (muted, beneath it)
+stacked as one block on the right, each row its own bordered/rounded item, not a table.
+
+Rather than re-implement that look a second time, `components/UserDashboardModal.tsx`'s embedded layout now
+renders `BarangayList` directly (already imported in this file for the non-embedded "Open User Dashboard"
+path) in place of `BarangayRankingTable`, which was deleted entirely — same `barangays`/`selectedKey`/
+`onSelect`/`onSelectMunicipality` wiring the non-embedded path already used, so both paths' ranking lists
+are now the exact same component, not two components trying to look alike.
 
 ## Real-device phone fixes: header overlap, oversized map chrome, pan/zoom lag
 

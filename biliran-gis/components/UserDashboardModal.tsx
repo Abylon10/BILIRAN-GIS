@@ -316,10 +316,19 @@ export default function UserDashboardModal({
               <MunicipalityFilterDropdown value={municipality} onChange={setMunicipality} theme={theme} />
             </div>
 
-            <BarangayRankingTable
+            {/*
+              Same BarangayList row component the non-embedded "Open User
+              Dashboard" path already uses (below) — per direct feedback,
+              this tab's own ranking list should look like that one, not
+              like a distinct flat table (BarangayRankingTable, which this
+              replaces — see its own removed definition's history in
+              CLAUDE.md for why it existed before this).
+            */}
+            <BarangayList
               barangays={filtered}
               selectedKey={selectedKey}
-              onSelect={(key) => setSelectedKey(key)}
+              onSelect={(b) => setSelectedKey(b.key)}
+              onSelectMunicipality={setMunicipality}
             />
           </div>
 
@@ -366,85 +375,6 @@ export default function UserDashboardModal({
           />
         </div>
       )}
-    </div>
-  )
-}
-
-// "Barangay Ranking" table for the embedded two-column layout — same
-// columns/styling pattern as AdminDashboardTab.tsx's own "Recent FSI by
-// barangay" table, replacing BarangayList's row-button rendering for
-// this tab specifically (BarangayList's other callers are unaffected).
-// No "Status" column — no real per-barangay active/inactive concept
-// exists to back one.
-function BarangayRankingTable({
-  barangays,
-  selectedKey,
-  onSelect,
-}: {
-  barangays: Barangay[]
-  selectedKey: string | null
-  onSelect: (key: string) => void
-}) {
-  if (barangays.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm" style={{ color: 'var(--text-soft)' }}>
-        No barangays match.
-      </p>
-    )
-  }
-  return (
-    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--card-border)' }}>
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr style={{ color: 'var(--text-soft)' }}>
-            <th className="px-3 py-2 font-medium">#</th>
-            <th className="px-3 py-2 font-medium">Barangay</th>
-            <th className="px-3 py-2 font-medium">Municipality</th>
-            <th className="px-3 py-2 font-medium">Class</th>
-            <th className="px-3 py-2 text-right font-medium">FSI / Countdown</th>
-          </tr>
-        </thead>
-        <tbody>
-          {barangays.map((b, i) => {
-            const selected = b.key === selectedKey
-            return (
-              <tr
-                key={b.key}
-                className="cursor-pointer border-t"
-                style={{ borderColor: 'var(--card-border)', background: selected ? 'rgba(232, 163, 61, 0.18)' : undefined }}
-                onClick={() => onSelect(b.key)}
-              >
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{i + 1}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-strong)' }}>{b.barangay}</td>
-                <td className="px-3 py-2" style={{ color: 'var(--text-soft)' }}>{b.municipality}</td>
-                <td className="px-3 py-2">
-                  <span
-                    className="rounded-full px-2 py-0.5 text-xs font-semibold"
-                    style={{ background: `${urgencyTierColor(b.dominant_fsi_label)}33`, color: urgencyTierColor(b.dominant_fsi_label) }}
-                  >
-                    {b.dominant_fsi_label}
-                  </span>
-                </td>
-                {/*
-                  FSI score + Countdown grouped as one right-aligned stacked
-                  block — matching BarangayList.tsx's own row markup exactly
-                  (the "Open User Dashboard" path's list), per direct
-                  feedback that these two should read as separated from the
-                  rest of the row the same way they already do there, not
-                  as two more flat columns alongside Barangay/Municipality/
-                  Class.
-                */}
-                <td className="px-3 py-2 text-right text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
-                  {b.mean_fsi_score.toFixed(2)}
-                  <span className="block font-normal" style={{ color: 'var(--text-soft)' }}>
-                    {formatHoursAsCountdown(b.danger_time_hours)} to Danger
-                  </span>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
     </div>
   )
 }
