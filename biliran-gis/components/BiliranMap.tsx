@@ -12,7 +12,7 @@
 
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   boundsOf,
   clampCenter,
@@ -66,6 +66,18 @@ const MAX_SCALE = 9
 // keep adjusting if the map still feels too twitchy on a given device.
 const WHEEL_ZOOM_COEFFICIENT = 0.0008
 const DRAG_DAMPING = 0.7
+
+// Module-level (not declared inside the component): pure given its own
+// arguments — only touches the module-level MAX_SCALE constant and the
+// imported clampCenter utility, nothing from component state/props — so
+// it's already a stable reference by construction, with no useCallback
+// needed, and callers (applyMuniFocus/focusMuni below) can be memoized
+// without it ever invalidating their own dependency arrays.
+function clampView(next: View, bounds: Bounds): View {
+  const scale = Math.min(MAX_SCALE, Math.max(1, next.scale))
+  const [cx, cy] = clampCenter([next.cx, next.cy], bounds, 0.15)
+  return { cx, cy, scale }
+}
 
 export default function BiliranMap({
   barangays,
@@ -150,6 +162,15 @@ export default function BiliranMap({
   const [isNarrowViewport, setIsNarrowViewport] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 480px)').matches
   )
+  // Drives the `bfw-anim-paused` class below (Page Visibility API) — the sea
+  // shimmer, drifting clouds, and per-municipality weather-icon drift/rain
+  // are all continuous CSS animations with no natural stopping point, so
+  // this pauses them while the tab is backgrounded/screen-locked (zero
+  // visual difference while actually looking at the map, pure CPU/battery
+  // saving while not).
+  const [animationsPaused, setAnimationsPaused] = useState(
+    () => typeof document !== 'undefined' && document.hidden
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -186,6 +207,12 @@ export default function BiliranMap({
     const listener = (e: MediaQueryListEvent) => setIsNarrowViewport(e.matches)
     mq.addEventListener('change', listener)
     return () => mq.removeEventListener('change', listener)
+  }, [])
+
+  useEffect(() => {
+    const onVisibilityChange = () => setAnimationsPaused(document.hidden)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [])
 
   useEffect(() => {
@@ -322,18 +349,14 @@ export default function BiliranMap({
     }
 
     refresh()
-    const interval = setInterval(refresh, 15 * 60 * 1000)
+    // 30 min (not 15) — a deliberate lower-background-cost tradeoff, see
+    // app/page.tsx's matching interval for the same reasoning.
+    const interval = setInterval(refresh, 30 * 60 * 1000)
     return () => {
       cancelled = true
       clearInterval(interval)
     }
   }, [])
-
-  function clampView(next: View, bounds: Bounds): View {
-    const scale = Math.min(MAX_SCALE, Math.max(1, next.scale))
-    const [cx, cy] = clampCenter([next.cx, next.cy], bounds, 0.15)
-    return { cx, cy, scale }
-  }
 
   function focusBarangay(feature: GeoFeature<BrgyProps>, bounds: Bounds) {
     const b = expandBounds(boundsOf([feature], project), 0.35)
@@ -354,12 +377,43 @@ export default function BiliranMap({
   // e.g. the dashboard's municipality filter) — both just need a prefix +
   // the current island bounds to move the view, neither needs anything
   // that's only available after the loading guard.
-  function applyMuniFocus(prefix: string, bounds: Bounds) {
-    const focus = muniFocusByPrefix[prefix]
-    if (!focus) return
-    setInteracting(false)
-    setView(clampView(focus, bounds))
-  }
+  // useCallback (not a plain function): this is passed down as
+  // MunicipalityLayer's onSelect prop (via focusMuni below), and
+  // MunicipalityLayer is React.memo-wrapped — an unstable reference here
+  // would silently defeat that memoization on every render.
+  const applyMuniFocus = useCallback(
+    (prefix: string, bounds: Bounds) => {
+      const focus = muniFocusByPrefix[prefix]
+      if (!focus) return
+      setInteracting(false)
+      setView(clampView(focus, bounds))
+    },
+    [muniFocusByPrefix],
+  )
+
+  // Both below moved above the early returns further down (rules-of-hooks:
+  // useCallback must run unconditionally on every render, unlike the plain
+  // functions these replaced, which didn't care about hook-call ordering).
+  // Same reasoning as applyMuniFocus above — useCallback so MunicipalityLayer's
+  // React.memo isn't defeated by a fresh onSelect reference every render.
+  const focusMuni = useCallback(
+    (prefix: string) => {
+      if (!islandBounds) return
+      applyMuniFocus(prefix, islandBounds)
+      onFocusMunicipality?.(municipalityForPrefix(prefix))
+    },
+    [islandBounds, applyMuniFocus, onFocusMunicipality],
+  )
+
+  // Same reasoning as focusMuni above — stabilized so BarangayLayer's
+  // React.memo isn't defeated by a fresh onSelect reference every render.
+  const handleBarangaySelect = useCallback(
+    (key: string) => {
+      const b = barangaysByKey.get(key)
+      if (b) onSelect(b)
+    },
+    [barangaysByKey, onSelect],
+  )
 
   // Keep the map in sync when a barangay is selected from elsewhere (e.g.
   // the list): adjust state during render off a previous-value comparison,
@@ -464,12 +518,6 @@ export default function BiliranMap({
   const ty = islandCy - currentView.scale * currentView.cy
   const transform = `translate(${tx},${ty}) scale(${currentView.scale})`
 
-  function focusMuni(prefix: string) {
-    if (!islandBounds) return
-    applyMuniFocus(prefix, islandBounds)
-    onFocusMunicipality?.(municipalityForPrefix(prefix))
-  }
-
   function resetView() {
     setInteracting(false)
     setView({ cx: islandCx, cy: islandCy, scale: 1 })
@@ -565,7 +613,7 @@ export default function BiliranMap({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10"
+      className={`bfw-map-root relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10${animationsPaused ? ' bfw-anim-paused' : ''}`}
       style={{ borderColor: 'var(--card-border)' }}
     >
       <style>{`
@@ -576,6 +624,27 @@ export default function BiliranMap({
           50% { transform: translate(${(islandBounds.maxX - islandBounds.minX) * 0.02}px, ${(islandBounds.maxY - islandBounds.minY) * 0.015}px); }
         }
         .bfw-sea-shimmer { animation: bfw-sea-shimmer 16s ease-in-out infinite; }
+
+        /* Page Visibility pause — tab backgrounded/screen locked. Every
+           continuous ambient animation in this map (sea shimmer, drifting
+           clouds, per-municipality weather-icon drift/rain — see
+           DriftingClouds/WeatherIconStyles below) is driven by a CSS
+           animation-name, so pausing them all is one blanket rule here
+           rather than touching each @keyframes definition individually. */
+        .bfw-anim-paused, .bfw-anim-paused * { animation-play-state: paused !important; }
+
+        /* prefers-reduced-motion: reduce — an explicit OS-level opt-in, not
+           the default experience for anyone else. Same universal
+           animation-play-state trick as the visibility-pause rule above
+           (works regardless of whether a given animation is driven by a
+           className or an inline style="animation:..."), plus swaps the
+           two feDropShadow filters (one of the costlier SVG filter
+           primitives) for a flat fill, matching what a user who's told
+           their OS they want less motion is actually asking for. */
+        @media (prefers-reduced-motion: reduce) {
+          .bfw-map-root, .bfw-map-root * { animation-play-state: paused !important; }
+          .bfw-shadow-group { filter: none !important; }
+        }
       `}</style>
       <svg
         ref={svgRef}
@@ -735,6 +804,7 @@ export default function BiliranMap({
             nearestPrefix={nearestPrefix}
             barangayOpacity={barangayOpacity}
             weatherByMunicipality={weatherByMunicipality}
+            showWeatherIcons={currentView.scale < 1.3}
           />
           <g
             style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }}
@@ -745,10 +815,7 @@ export default function BiliranMap({
               nearestPrefix={nearestPrefix}
               barangaysByKey={barangaysByKey}
               selectedKey={selectedKey}
-              onSelect={(key) => {
-                const b = barangaysByKey.get(key)
-                if (b) onSelect(b)
-              }}
+              onSelect={handleBarangaySelect}
             />
           </g>
         </g>
@@ -806,7 +873,15 @@ export default function BiliranMap({
  * directly into the keyframe, not a CSS custom property) so it scales
  * with the actual map extent rather than a guessed pixel value.
  */
-function DriftingClouds({ bounds }: { bounds: Bounds }) {
+// React.memo-wrapped (here and MunicipalityLayer/BarangayLayer/
+// WeatherIconSVG below): these can render a large SVG subtree (up to ~500
+// nodes combined at worst case), and without memo, any unrelated parent
+// re-render (a weather-poll tick, a viewport resize) forces React to
+// reconcile that whole tree even when none of a given layer's own props
+// changed. Relies on their callers passing stable prop references
+// (useCallback/useMemo) — see focusMuni/handleBarangaySelect above and
+// municipalityPaths/barangayPaths/waterwayPaths elsewhere in this file.
+const DriftingClouds = memo(function DriftingClouds({ bounds }: { bounds: Bounds }) {
   const width = bounds.maxX - bounds.minX
   const height = bounds.maxY - bounds.minY
   const travel = width * 1.3
@@ -841,9 +916,9 @@ function DriftingClouds({ bounds }: { bounds: Bounds }) {
       </g>
     </g>
   )
-}
+})
 
-function MunicipalityLayer({
+const MunicipalityLayer = memo(function MunicipalityLayer({
   municipalities,
   municipalityPaths,
   barangays,
@@ -851,6 +926,7 @@ function MunicipalityLayer({
   nearestPrefix,
   barangayOpacity,
   weatherByMunicipality,
+  showWeatherIcons,
 }: {
   municipalities: GeoFeatureCollection<MuniProps>
   // Precomputed by the parent (BiliranMap) via useMemo, keyed only on the
@@ -870,6 +946,12 @@ function MunicipalityLayer({
   nearestPrefix: string | null
   barangayOpacity: number
   weatherByMunicipality: Record<string, WeatherCondition | null>
+  // Same scale < 1.3 threshold DriftingClouds already uses (approved
+  // decorative-cost trade-off) — up to 7 icons' worth of continuous
+  // cloud-drift + rain-drop CSS animation isn't the visual focus once a
+  // user has zoomed into a municipality, so they're skipped entirely past
+  // that threshold rather than staying mounted (and animating) underneath.
+  showWeatherIcons: boolean
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   const bounds = useMemo(() => boundsOf(municipalities.features, project), [municipalities, project])
@@ -881,7 +963,7 @@ function MunicipalityLayer({
   }
   return (
     <g>
-      <g filter="url(#bfw-land-shadow)">
+      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)">
         {municipalities.features.map((f) => {
           const score = municipalityWorstScore(barangays, f.properties.municipality)
           const d = municipalityPaths.get(f.properties.pgc_prefix)
@@ -914,24 +996,28 @@ function MunicipalityLayer({
         loading (or whose fetch failed) simply renders no icon this pass,
         rather than a fake/placeholder condition.
       */}
-      <WeatherIconStyles />
-      {municipalities.features.map((f) => {
-        const condition = weatherByMunicipality[f.properties.municipality]
-        if (!condition) return null
-        const [lon, lat] = geometryCentroid(f.geometry)
-        const [cx, cy] = project(lon, lat)
-        return (
-          <g
-            key={`weather-${f.properties.pgc_prefix}`}
-            pointerEvents="none"
-            opacity={fadeFor(f.properties.pgc_prefix)}
-            style={{ transition: 'opacity 0.4s ease' }}
-            transform={`translate(${cx - 21 * iconScale},${cy - iconOffsetY - 16 * iconScale}) scale(${iconScale})`}
-          >
-            <WeatherIconSVG condition={condition} />
-          </g>
-        )
-      })}
+      {showWeatherIcons && (
+        <>
+          <WeatherIconStyles />
+          {municipalities.features.map((f) => {
+            const condition = weatherByMunicipality[f.properties.municipality]
+            if (!condition) return null
+            const [lon, lat] = geometryCentroid(f.geometry)
+            const [cx, cy] = project(lon, lat)
+            return (
+              <g
+                key={`weather-${f.properties.pgc_prefix}`}
+                pointerEvents="none"
+                opacity={fadeFor(f.properties.pgc_prefix)}
+                style={{ transition: 'opacity 0.4s ease' }}
+                transform={`translate(${cx - 21 * iconScale},${cy - iconOffsetY - 16 * iconScale}) scale(${iconScale})`}
+              >
+                <WeatherIconSVG condition={condition} />
+              </g>
+            )
+          })}
+        </>
+      )}
       {municipalities.features.map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const projected = project(lon, lat)
@@ -954,9 +1040,9 @@ function MunicipalityLayer({
       })}
     </g>
   )
-}
+})
 
-function BarangayLayer({
+const BarangayLayer = memo(function BarangayLayer({
   brgyGeo,
   nearestPrefix,
   barangaysByKey,
@@ -992,7 +1078,7 @@ function BarangayLayer({
   )
   return (
     <g>
-      <g filter="url(#bfw-land-shadow)">
+      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)">
         {features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
           const selected = f.properties.key === selectedKey
@@ -1041,7 +1127,7 @@ function BarangayLayer({
       })}
     </g>
   )
-}
+})
 
 /**
  * Zoom slider + +/- buttons, driving the same view.scale as wheel-zoom and
@@ -1284,7 +1370,7 @@ function dropX(count: number, index: number): number {
  * down inside a <g transform>, at each municipality's centroid on the
  * overview map (see MunicipalityLayer).
  */
-function WeatherIconSVG({ condition }: { condition: WeatherCondition }) {
+const WeatherIconSVG = memo(function WeatherIconSVG({ condition }: { condition: WeatherCondition }) {
   return (
     <>
       <g className="bfw-weather-cloud">
@@ -1317,7 +1403,7 @@ function WeatherIconSVG({ condition }: { condition: WeatherCondition }) {
       })}
     </>
   )
-}
+})
 
 /** Shared keyframes for WeatherIconSVG instances — cloud drift + rain-drop fall. */
 function WeatherIconStyles() {

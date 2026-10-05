@@ -20,7 +20,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   boundsOf,
   expandBounds,
@@ -97,7 +97,21 @@ export default function StaticIslandMap({
     }
   }, [highlightMunicipality, muniGeo])
 
-  if (!geo) {
+  // project/bounds/paths are expensive to rebuild (a full projector +
+  // bounds scan + 115 SVG path strings) and only actually depend on `geo`
+  // itself, which never changes after its one fetch — memoized so an
+  // unrelated re-render (e.g. a sibling SimulationModePanel input keystroke
+  // in the same modal tree) doesn't re-stringify all 115 polygons every
+  // time. Must stay above the `!geo` early return below (Rules of Hooks).
+  const project = useMemo(() => makeProjector(11.58), [])
+  const bounds = useMemo(() => (geo ? expandBounds(boundsOf(geo.features, project), 0.04) : null), [geo, project])
+  const barangayPaths = useMemo(
+    () => (geo ? new Map(geo.features.map((f) => [f.properties.key, geometryToPath(f.geometry, project)])) : null),
+    [geo, project],
+  )
+  const barangaysByKey = useMemo(() => new Map(barangays.map((b) => [b.key, b])), [barangays])
+
+  if (!geo || !bounds || !barangayPaths) {
     return (
       <div
         className="flex h-40 items-center justify-center rounded-lg border text-xs"
@@ -107,10 +121,6 @@ export default function StaticIslandMap({
       </div>
     )
   }
-
-  const project = makeProjector(11.58)
-  const bounds = expandBounds(boundsOf(geo.features, project), 0.04)
-  const barangaysByKey = new Map(barangays.map((b) => [b.key, b]))
 
   // Thresholds are eyeballed against this component's actual callers
   // (120px thumbnail, 220px Barangays-tab map, 280-320px full maps), not
@@ -124,7 +134,7 @@ export default function StaticIslandMap({
         {geo.features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
           const selected = f.properties.key === selectedKey
-          const d = geometryToPath(f.geometry, project)
+          const d = barangayPaths.get(f.properties.key) ?? ''
           return (
             <path
               key={f.properties.key}

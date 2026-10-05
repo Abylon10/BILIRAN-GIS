@@ -23,6 +23,8 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type FormEvent } from 'react'
+import dynamic from 'next/dynamic'
+import Image from 'next/image'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { fetchOwnProfile, formatDisplayName, getAvatarUrl } from '@/lib/profile'
@@ -35,7 +37,10 @@ import { computeLiveIslandState } from '@/lib/liveIslandState'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
-import AdminShell from '@/components/AdminShell'
+// Dynamically imported (not a static top-level import): AdminShell is a
+// large multi-tab surface only ever rendered for admin accounts, so this
+// keeps its code out of the bundle every non-admin visitor downloads.
+const AdminShell = dynamic(() => import('@/components/AdminShell'))
 import HeaderProfileButton from '@/components/HeaderProfileButton'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
@@ -171,6 +176,11 @@ export default function HomePage() {
     }, BARANGAY_SELECT_COMPACT_DELAY_MS)
   }, [])
 
+  // Stabilized wrapper for BiliranMap's onSelect prop — BiliranMap's own
+  // internal layer components are React.memo-wrapped, which an inline
+  // arrow function recreated on every page render would silently defeat.
+  const handleMapSelect = useCallback((b: Barangay) => selectBarangay(b.key), [selectBarangay])
+
   // Keep theme in sync with system changes after the initial render above.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -257,17 +267,19 @@ export default function HomePage() {
     }
   }, [authState])
 
-  // basin_hydrographs.json + fsi_factors.json — same early-fetch tradeoff
-  // as barangays above, except these two used to be fetched lazily, only
-  // once a barangay was selected (components/BarangayDetailPanel.tsx still
-  // does that on its own, for the factor-breakdown bars and as a fallback
-  // before live data arrives). The live-forecast recompute below needs
-  // them for EVERY barangay up front, not just whichever one is selected,
-  // so they're loaded here too now. Both loaders cache themselves
-  // (loadBasinHydrographs/loadFsiFactors), so this doesn't duplicate
-  // BarangayDetailPanel's own fetch — it's the same in-flight promise/cache.
+  // basin_hydrographs.json (~800KB) + fsi_factors.json — unlike barangays
+  // above, these are gated on 'revealed' (actually authenticated), not just
+  // "not checking": they used to fire on the bare login screen too, but
+  // that cost every visitor ~800KB before they'd even typed a password.
+  // Deferring to 'revealed' costs no visible delay in the live-colored map
+  // appearing, because the live-forecast recompute below is itself gated on
+  // live weather data, which already takes a real async fetch to arrive —
+  // so this data is never the bottleneck either way. Both loaders cache
+  // themselves (loadBasinHydrographs/loadFsiFactors), so this doesn't
+  // duplicate BarangayDetailPanel's own fetch — it's the same in-flight
+  // promise/cache.
   useEffect(() => {
-    if (authState === 'checking') return
+    if (authState !== 'revealed') return
     let cancelled = false
     loadBasinHydrographs()
       .then((data) => {
@@ -288,13 +300,15 @@ export default function HomePage() {
   }, [authState])
 
   // Live weather for all 7 monitored municipalities — same source
-  // (lib/liveWeather.ts) and refresh cadence (15 min) BiliranMap.tsx
+  // (lib/liveWeather.ts) and refresh cadence (30 min) BiliranMap.tsx
   // already uses for its own icon, but this is a SEPARATE fetch/state:
   // that one derives a decorative WeatherCondition (icon/cloud config),
   // this one keeps the raw WeatherData (hourly precipitation) the live
   // FSI/countdown recompute actually needs. loadWeather()'s own client
   // cache means calling it from both places doesn't double the real
-  // network traffic.
+  // network traffic. 30 min (not 15) is a deliberate lower-background-cost
+  // tradeoff — Open-Meteo's own forecast granularity is hourly, so this
+  // doesn't meaningfully change data freshness in practice.
   useEffect(() => {
     if (authState === 'checking') return
     let cancelled = false
@@ -305,7 +319,7 @@ export default function HomePage() {
       // countdown (nextForecastUpdateAt) actually counts down to, so it
       // needs to reset each time a real refresh fires, same as the
       // fetches themselves.
-      setNextForecastUpdateAt(Date.now() + 15 * 60 * 1000)
+      setNextForecastUpdateAt(Date.now() + 30 * 60 * 1000)
       for (const name of MONITORED_MUNICIPALITIES) {
         loadWeather(name).then((data) => {
           if (cancelled) return
@@ -315,7 +329,7 @@ export default function HomePage() {
     }
 
     refresh()
-    const interval = setInterval(refresh, 15 * 60 * 1000)
+    const interval = setInterval(refresh, 30 * 60 * 1000)
     return () => {
       cancelled = true
       clearInterval(interval)
@@ -668,7 +682,7 @@ export default function HomePage() {
             <BiliranMap
               barangays={displayBarangays}
               selectedKey={selectedKey}
-              onSelect={(b) => selectBarangay(b.key)}
+              onSelect={handleMapSelect}
               showChrome={revealed}
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
@@ -731,17 +745,23 @@ export default function HomePage() {
                 aria-label={loginMode === 'user' ? 'Switch to administrator sign-in' : 'Switch to regular sign-in'}
                 className="rounded-md"
               >
-                <img
+                <Image
                   src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
                   alt="Biliran Flood Risk Monitor"
+                  width={385}
+                  height={420}
+                  priority
                   className="h-16 w-auto select-none"
                   draggable={false}
                 />
               </button>
             ) : (
-              <img
+              <Image
                 src={theme === 'light' ? '/logo-light.png' : '/logo-dark.png'}
                 alt="Biliran Flood Risk Monitor"
+                width={385}
+                height={420}
+                priority
                 className="h-16 w-auto select-none"
                 draggable={false}
               />

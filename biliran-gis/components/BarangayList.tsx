@@ -4,7 +4,7 @@
 // sortBySeverity in lib/dashboardData.ts). Complements BiliranMap — the map
 // shows where, this shows the ranking as a scannable list.
 
-import { useRef } from 'react'
+import { memo, useCallback, useRef } from 'react'
 import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/dashboardData'
 
 // Must stay comfortably shorter than app/page.tsx's own
@@ -42,6 +42,29 @@ export default function BarangayList({
   onSelectMunicipality?: (municipality: string) => void
 }) {
   const lastClickRef = useRef<{ key: string; time: number } | null>(null)
+
+  // One stable reference shared by every row (useCallback, not recreated
+  // per row) — BarangayRow is React.memo-wrapped, so passing a fresh
+  // function here on every BarangayList render would force every row to
+  // re-render regardless of whether its own props actually changed. The
+  // double-tap/single-tap disambiguation itself is inherently a
+  // list-level concern (lastClickRef tracks across rows), not a per-row
+  // one, so it stays here rather than moving into BarangayRow.
+  const handleRowClick = useCallback(
+    (b: Barangay) => {
+      const now = Date.now()
+      const last = lastClickRef.current
+      if (last && last.key === b.key && now - last.time < DOUBLE_TAP_WINDOW_MS) {
+        lastClickRef.current = null
+        onSelectMunicipality?.(b.municipality)
+        return
+      }
+      lastClickRef.current = { key: b.key, time: now }
+      onSelect(b)
+    },
+    [onSelect, onSelectMunicipality],
+  )
+
   if (barangays.length === 0) {
     return (
       <p className="px-1 py-6 text-center text-sm" style={{ color: 'var(--text-soft)' }}>
@@ -52,59 +75,69 @@ export default function BarangayList({
 
   return (
     <ul className="flex flex-col gap-2">
-      {barangays.map((b, i) => {
-        const selected = b.key === selectedKey
-        return (
-          <li key={b.key}>
-            <button
-              type="button"
-              onClick={() => {
-                const now = Date.now()
-                const last = lastClickRef.current
-                if (last && last.key === b.key && now - last.time < DOUBLE_TAP_WINDOW_MS) {
-                  lastClickRef.current = null
-                  onSelectMunicipality?.(b.municipality)
-                  return
-                }
-                lastClickRef.current = { key: b.key, time: now }
-                onSelect(b)
-              }}
-              className="flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors"
-              style={{
-                background: selected ? 'rgba(232, 163, 61, 0.28)' : 'var(--card-bg)',
-                borderColor: selected ? '#E8A33D' : 'var(--card-border)',
-              }}
-            >
-              <span
-                className="w-5 shrink-0 text-center text-xs font-semibold"
-                style={{ color: 'var(--text-soft)' }}
-                aria-hidden
-              >
-                {i + 1}
-              </span>
-              <span
-                aria-hidden
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: urgencyTierColor(b.dominant_fsi_label) }}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
-                  {b.barangay}
-                </span>
-                <span className="block truncate text-xs" style={{ color: 'var(--text-soft)' }}>
-                  {b.municipality} · {b.dominant_fsi_label}
-                </span>
-              </span>
-              <span className="shrink-0 text-right text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
-                {b.mean_fsi_score.toFixed(2)}
-                <span className="block font-normal" style={{ color: 'var(--text-soft)' }}>
-                  {formatHoursAsCountdown(b.danger_time_hours)} to Danger
-                </span>
-              </span>
-            </button>
-          </li>
-        )
-      })}
+      {barangays.map((b, i) => (
+        <BarangayRow key={b.key} barangay={b} index={i} selected={b.key === selectedKey} onRowClick={handleRowClick} />
+      ))}
     </ul>
   )
 }
+
+// React.memo-wrapped: up to 115 of these can be in the list at once, and
+// without memo, selecting one row (or any unrelated state change further
+// up the tree — e.g. the 30-min live-weather refresh) forces React to
+// reconcile all 115 rows, not just the one or two whose own
+// selected/data actually changed. Relies on the parent passing a stable
+// `onRowClick` (see handleRowClick's useCallback above) — an unstable
+// callback prop would silently defeat this memoization.
+const BarangayRow = memo(function BarangayRow({
+  barangay: b,
+  index,
+  selected,
+  onRowClick,
+}: {
+  barangay: Barangay
+  index: number
+  selected: boolean
+  onRowClick: (barangay: Barangay) => void
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onRowClick(b)}
+        className="flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors"
+        style={{
+          background: selected ? 'rgba(232, 163, 61, 0.28)' : 'var(--card-bg)',
+          borderColor: selected ? '#E8A33D' : 'var(--card-border)',
+        }}
+      >
+        <span
+          className="w-5 shrink-0 text-center text-xs font-semibold"
+          style={{ color: 'var(--text-soft)' }}
+          aria-hidden
+        >
+          {index + 1}
+        </span>
+        <span
+          aria-hidden
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ background: urgencyTierColor(b.dominant_fsi_label) }}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
+            {b.barangay}
+          </span>
+          <span className="block truncate text-xs" style={{ color: 'var(--text-soft)' }}>
+            {b.municipality} · {b.dominant_fsi_label}
+          </span>
+        </span>
+        <span className="shrink-0 text-right text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
+          {b.mean_fsi_score.toFixed(2)}
+          <span className="block font-normal" style={{ color: 'var(--text-soft)' }}>
+            {formatHoursAsCountdown(b.danger_time_hours)} to Danger
+          </span>
+        </span>
+      </button>
+    </li>
+  )
+})

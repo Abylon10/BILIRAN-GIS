@@ -32,7 +32,7 @@
 
 'use client'
 
-import { useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useMemo, useRef, type RefObject } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import type { LiveHydrograph } from '@/lib/liveIslandState'
 import LiveUpdateBanner from '@/components/LiveUpdateBanner'
@@ -144,6 +144,11 @@ export default function DashboardShell({
     }, SCROLL_DEBOUNCE_MS)
   }
 
+  // Stabilized wrapper for onSelectKey (itself already useCallback'd in
+  // app/page.tsx) — BarangayList's rows are React.memo-wrapped, which an
+  // inline arrow recreated on every DashboardShell render would defeat.
+  const handleSelect = useCallback((b: Barangay) => onSelectKey(b.key), [onSelectKey])
+
   return (
     <div className="flex h-full flex-col gap-4">
       <div
@@ -171,7 +176,7 @@ export default function DashboardShell({
             happens to the alert banner" question. Reappears once scrolled
             back above the threshold, same as the map expanding again.
           */}
-          {!listScrolled && <LiveUpdateBanner barangays={barangays} onSelect={(b) => onSelectKey(b.key)} />}
+          {!listScrolled && <LiveUpdateBanner barangays={barangays} onSelect={handleSelect} />}
 
           <div className="flex flex-wrap items-center gap-2">
             <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} theme={theme} />
@@ -241,7 +246,7 @@ export default function DashboardShell({
                 <BarangayList
                   barangays={filtered}
                   selectedKey={selectedKey}
-                  onSelect={(b) => onSelectKey(b.key)}
+                  onSelect={handleSelect}
                   onSelectMunicipality={onMunicipalityChange}
                 />
               </div>

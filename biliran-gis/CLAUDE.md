@@ -2368,6 +2368,85 @@ caption. Confirmed via mocked-auth Playwright: the framing sentence now appears 
 regardless of which row (if any) is open — never duplicated per-row — while each factor's shortened
 explanation + correct weight percentage still renders correctly on click.
 
+## Performance pass: lowest-spec devices, mobile and desktop
+
+The user asked to "optimize the system to the lowest spec possible, both mobile and desktop" — confirmed via two
+questions: target both platforms equally **without changing visual design**, and the accepted trade-offs are
+simplifying/removing *decorative* animation cost and slowing the live-data refresh interval (both explicitly
+approved, alongside also explicitly keeping "everything exactly as it looks/behaves today" — read together as
+"maximize zero-visual-difference wins first, then apply only these two narrow, pre-approved trade-offs," never a
+redesign). Three Explore passes read the actual code before proposing anything; two of their claims were
+independently re-verified by direct read rather than trusted: (1) `app/page.tsx`'s hydrograph/FSI-factor fetch
+was firing on the bare login screen, before any credentials were entered, pre-dating this round — safe to defer
+because the live-forecast recompute these feed (`lib/liveIslandState.ts`) is itself gated on a real async weather
+fetch, so deferring doesn't change when the live-colored map visibly appears, while sparing every visitor who
+never completes login from downloading ~812KB; (2) `BarangayLayer`/`MunicipalityLayer`'s `onSelect` handlers were
+recreated every render, confirming `React.memo` alone would be a no-op without pairing it with `useCallback`.
+
+**Network payload**:
+- `app/page.tsx`: the `basin_hydrographs.json`/`fsi_factors.json` fetch now gates on `authState === 'revealed'`
+  instead of `authState !== 'checking'` — only starts once a user is actually authenticated, not on the bare
+  login screen. The three fetches that render the login-screen map backdrop (`barangays.geojson`, etc.) are
+  untouched — deferring those would visibly blank the backdrop, out of scope per "don't change visual design."
+- `package.json`: removed the unused `maplibre-gl` dependency (confirmed zero imports repo-wide via grep).
+- `app/page.tsx`: both logo `<img>` tags (above-the-fold on the login screen) now use `next/image` with
+  `priority` (no lazy-load regression) and their real pixel dimensions (385×420, confirmed via `file`).
+- `app/page.tsx`: `AdminShell` is now `next/dynamic`-imported instead of a static top-level import, so its code
+  only ships to sessions that actually reveal an admin account — a zero-visual-difference win, not one of the
+  two pre-approved trade-offs, included because it costs nothing the user asked to avoid.
+- **Approved trade-off**: both independent 15-minute live-weather poll intervals (`app/page.tsx` and
+  `components/BiliranMap.tsx`'s own) bumped to 30 minutes — Open-Meteo's own forecast granularity is hourly, so
+  this doesn't meaningfully change data freshness in practice. `app/api/weather/route.ts`'s own cache
+  (`REVALIDATE_SECONDS`) bumped to match (1800s).
+
+**Map/SVG rendering**:
+- `components/StaticIslandMap.tsx`: the projector, bounds computation, and all 115 barangays' SVG path strings
+  are now `useMemo`'d (previously recomputed from scratch on every render, unlike `BiliranMap.tsx`, which already
+  memoized this) — mirrors `BiliranMap.tsx`'s own `municipalityPaths`/`barangayPaths` pattern. This had to move
+  above the component's `!geo` early return (Rules of Hooks — hooks can't follow a conditional `return`, unlike
+  a plain function, which was the earlier, non-memoized version's shape).
+- `components/BiliranMap.tsx`: `focusMuni` and a new `handleBarangaySelect` are now `useCallback`-wrapped
+  (both had to move to immediately after `applyMuniFocus`, before either of the component's two early returns —
+  the first placement attempt tripped `react-hooks/rules-of-hooks` for the same reason as above); `clampView`
+  moved to module scope (a pure function with no component-state dependency, so no `useCallback` needed at all).
+  `MunicipalityLayer`, `BarangayLayer`, `DriftingClouds`, and `WeatherIconSVG` are now `React.memo`-wrapped —
+  this only actually skips re-renders because the callback-stabilization above landed first; memoizing without
+  it would have been a no-op (confirmed by tracing the full prop chain, not assumed).
+- `components/BiliranMap.tsx`: ambient CSS animations (sea shimmer, drifting clouds, per-municipality weather-icon
+  drift/rain) now pause via the Page Visibility API (`document.visibilitychange` → a `bfw-anim-paused` class
+  applied to the map root, `animation-play-state: paused !important`) whenever the tab is backgrounded — zero
+  visual difference while actually being looked at, pure CPU/battery saving while hidden/locked. Verified via
+  Playwright: forcing `document.hidden = true` and dispatching `visibilitychange` adds the class; reverting
+  removes it.
+- **Approved trade-off**: a `@media (prefers-reduced-motion: reduce)` rule pauses the same animations and drops
+  the two `feDropShadow` filters (`.bfw-shadow-group`, a new className added to both filtered `<g>`s) to `none`
+  — changes nothing for the default experience (confirmed only one such query existed anywhere in this codebase
+  before this, so this is purely additive), but lightens the map automatically for anyone who's told their OS
+  they want less motion. Verified via Playwright with `page.emulateMedia({ reducedMotion: 'reduce' })`: the
+  filter resolves to `none` and `animation-play-state` resolves to `paused`; the default (no preference set)
+  case is confirmed unaffected (filter still `url(#bfw-land-shadow)`, no paused class).
+
+**List rendering**:
+- `components/DashboardShell.tsx`: the `onSelect` handler passed to `BarangayList` is now `useCallback`-wrapped.
+- `components/BarangayList.tsx`: each row is now its own `React.memo`-wrapped `BarangayRow` component, with the
+  double-tap-detection logic staying in the parent as one stable `useCallback`'d `handleRowClick` shared by every
+  row — so selecting one barangay (or an unrelated parent re-render, e.g. the 30-min weather poll) only
+  reconciles the rows whose own `selected`/data prop actually changed, not all up to 115.
+
+**Verified, not just implemented**: a dedicated 3-part mocked-auth Playwright pass confirmed
+`basin_hydrographs.json`/`fsi_factors.json` are genuinely absent from the network log pre-login and present
+post-login, the login-screen map backdrop still renders (507 SVG paths), barangay selection and the
+double-tap-to-filter gesture both still work, the dynamically-imported admin shell still loads with all its
+tabs, `StaticIslandMap` still renders all its barangay polygons correctly post-memoization (136 paths on the
+Barangays tab), and rapid-fire typing in Simulation Mode's rainfall input — the exact scenario the
+`StaticIslandMap` memoization targeted, since every keystroke there re-renders the whole `UserDashboardModal`
+tree — no longer breaks or blanks the detail panel. `npm run lint`/`npm run build` both clean throughout.
+
+Not touched, per the plan's own scope: `DischargeChart.tsx` (confirmed non-hot-path), the two independent
+weather-poll loops' architecture (only their interval literal changed, not merged into one shared source), and
+no virtualization library was added for `BarangayList.tsx` (115 rows is a modest, bounded count — memoization
+was judged the right-sized fix, matching this app's existing "no new dependency unless necessary" posture).
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

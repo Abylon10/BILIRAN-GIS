@@ -19,10 +19,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { MUNICIPALITY_COORDS } from '@/lib/municipalityCoords'
 
-// Open-Meteo's forecast updates roughly hourly — 15 minutes is generous
+// Open-Meteo's forecast updates roughly hourly — 30 minutes is generous
 // caching, not a necessity (its free tier allows ~10k calls/day, and this
-// app only ever queries 7 municipalities).
-const REVALIDATE_SECONDS = 900
+// app only ever queries 7 municipalities). Matches the client poll interval
+// in app/page.tsx and BiliranMap.tsx (both also 30 min).
+const REVALIDATE_SECONDS = 1800
 
 export async function GET(req: NextRequest) {
   const municipality = req.nextUrl.searchParams.get('municipality')
