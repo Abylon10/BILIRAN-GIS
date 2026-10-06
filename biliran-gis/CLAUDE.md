@@ -115,9 +115,12 @@ semi-transparent click-to-close backdrop (`.bfw-sidebar-backdrop`,
 itself (`.bfw-sidebar`, `transform: translateX(100%)` → `translateX(0)`
 on `data-open='true'`, 250ms `cubic-bezier(0.22,1,0.36,1)` — the one
 house easing curve this app reuses for every transition — disabled under
-`prefers-reduced-motion: reduce`). Full width on narrow viewports, capped
-at `sm:max-w-[380px]` on larger ones so the map stays visible beside it.
-**Accepted trade-off**: `BiliranMap`'s own floating chrome is lopsided —
+`prefers-reduced-motion: reduce`). Full-width (`w-full`) at every
+viewport size, not just narrow ones — an earlier version capped it at
+`sm:max-w-[380px]` on larger screens, but the explicit ask this round was
+for the open sidebar to "cover the whole map" so the list and FSI detail
+have the full screen to themselves, not a cramped strip. **Accepted
+trade-off**: `BiliranMap`'s own floating chrome is lopsided —
 `WeatherBadge`, `ZoomControls`, and `NextForecastBadge` all live on the
 right, only `Legend` is on the left — so a right-side sidebar now
 overlaps that chrome more than a left-side one would have. Not
@@ -139,12 +142,13 @@ when open — **not** a bare `right: 100%`, which for a fixed element
 moves its right edge to the viewport's left edge, pushing the whole
 28px-wide handle off-screen rather than flush against it (a real bug
 caught via Playwright: the handle became unclickable once opened on a
-narrow viewport, confirmed by the exact math before fixing it) — with a
-`@media (min-width: 640px)` override to `right: 380px`, matching the
-sidebar's own `sm:max-w-[380px]` desktop width, so the handle always
-tracks the sidebar's current leading edge without a JS-measured value.
-Contains a small chevron that rotates 180° via `data-open`. Rendered only
-when `revealed`, same gating the old toggle button had.
+narrow viewport, confirmed by the exact math before fixing it). One rule
+now covers every viewport size — the earlier desktop-only `@media
+(min-width: 640px) { right: 380px }` override was removed once the
+sidebar itself became full-width at every size (see above), since there's
+no longer a second, narrower desktop width to track. Contains a small
+chevron that rotates 180° via `data-open`. Rendered only when `revealed`,
+same gating the old toggle button had.
 
 **Compact FSI-corner card** (`components/SelectedBarangayCorner.tsx`) —
 shown whenever a barangay is selected **and** the sidebar is closed, so
@@ -155,7 +159,11 @@ UserDashboardModal.tsx`) — no thumbnail map, no simulation fields, both
 admin-only concepts — but follows the same established spirit already
 settled there: a compact summary card kept distinct from the full detail
 panel, not one component trying to do both. Positioned `fixed right-5
-top-1/2 -translate-y-1/2`, mount-triggered `@keyframes` slide-in from the
+top-24` — below the header-controls row, deliberately **not** vertically
+centered like an earlier version was: `.bfw-sidebar-handle` (above) is
+vertically centered on the same right edge, so centering this card too
+made it visually sit on top of (hide) the handle, reported directly and
+confirmed via screenshot. Mount-triggered `@keyframes` slide-in from the
 right (300ms, same house easing, respects `prefers-reduced-motion`) —
 same entrance-only-animation technique as `AdminInvitePanel.tsx`'s
 `.bfw-edit-row-enter`, no exit animation needed since it only unmounts

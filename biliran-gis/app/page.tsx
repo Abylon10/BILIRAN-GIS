@@ -575,12 +575,11 @@ export default function HomePage() {
           while closed instead of staying reachable at the viewport edge.
           Its own "right" offset is animated in sync with the sidebar's
           transform instead (same duration/easing) — right:0 flush against
-          the edge when closed, right:100% (resolves to the viewport's far
-          left edge for a fixed element — correct for the sidebar's
-          full-width mobile state) when open, overridden to the sidebar's
-          own sm:max-w-[380px] desktop width via the matching breakpoint
-          below, so the handle always sits at the sidebar's current
-          leading edge without needing a JS-measured width.
+          the edge when closed, right:calc(100% - 28px) when open (see the
+          comment on that rule below for why not a bare 100%). The sidebar
+          is full-width at every viewport size now (see .bfw-sidebar
+          below), so this one open-state rule covers every size — no
+          desktop-only breakpoint override needed anymore.
         */
         .bfw-sidebar-handle {
           position: fixed;
@@ -600,9 +599,6 @@ export default function HomePage() {
           with a harmless, intentional overlap rather than disappearing.
         */
         .bfw-sidebar-handle[data-open='true'] { right: calc(100% - 28px); }
-        @media (min-width: 640px) {
-          .bfw-sidebar-handle[data-open='true'] { right: 380px; }
-        }
         .bfw-sidebar-handle svg { transition: transform 250ms cubic-bezier(0.22,1,0.36,1); }
         .bfw-sidebar-handle[data-open='true'] svg { transform: rotate(180deg); }
 
@@ -901,7 +897,7 @@ export default function HomePage() {
             aria-hidden={!sidebarOpen}
           />
           <aside
-            className="bfw-sidebar fixed inset-y-0 right-0 z-[17] flex w-full flex-col sm:max-w-[380px]"
+            className="bfw-sidebar fixed inset-y-0 right-0 z-[17] flex w-full flex-col"
             data-open={sidebarOpen}
             aria-hidden={!sidebarOpen}
           >
@@ -928,7 +924,19 @@ export default function HomePage() {
               <h1 className="truncate text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
               <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-6" style={{ background: 'var(--body-bg)' }}>
+            {/*
+              backdrop-blur-xl added here: --body-bg is a fairly
+              translucent wash (tuned for the old, narrow 380px-wide
+              sidebar, where only a thin sliver of map showed through it).
+              Now that the sidebar is full-width, that same translucency
+              let the busy, colorful map geometry bleed through legibly
+              behind every list row — confirmed via screenshot, a real
+              readability regression the width change introduced, not
+              present in the plan but a direct consequence of it. Blurring
+              keeps the same tinted-glass look without the map detail
+              reading through sharply.
+            */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 backdrop-blur-xl" style={{ background: 'var(--body-bg)' }}>
               <DashboardShell
                 barangays={displayBarangays}
                 loadError={mapLoadError}

@@ -7,6 +7,12 @@
 // Tapping it opens the full sidebar for the complete picture (hydrograph/
 // precipitation charts, factor breakdown — see BarangayDetailPanel.tsx).
 //
+// Positioned below the header-controls row (right-5 top-24), not
+// vertically centered — the sidebar's own slide-arrow handle
+// (.bfw-sidebar-handle in app/page.tsx) is vertically centered on the
+// same right edge, so centering this card too made it visually cover the
+// handle (reported directly, confirmed via screenshot).
+//
 // Deliberately simpler than the admin dashboard's own SelectedBarangayCard
 // (components/UserDashboardModal.tsx) — no thumbnail map, no simulation
 // fields, both admin-only concepts — but follows the same established
@@ -27,13 +33,13 @@ export default function SelectedBarangayCorner({
       type="button"
       onClick={onExpand}
       aria-label={`View full details for ${barangay.barangay}`}
-      className="bfw-selected-corner fixed right-5 top-1/2 z-[18] w-full max-w-[260px] -translate-y-1/2 rounded-xl border p-3 text-left shadow-lg backdrop-blur-xl"
+      className="bfw-selected-corner fixed right-5 top-24 z-[18] w-full max-w-[260px] rounded-xl border p-3 text-left shadow-lg backdrop-blur-xl"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
     >
       <style>{`
         @keyframes bfw-selected-corner-in {
-          from { opacity: 0; transform: translateY(-50%) translateX(16px); }
-          to { opacity: 1; transform: translateY(-50%) translateX(0); }
+          from { opacity: 0; transform: translateX(16px); }
+          to { opacity: 1; transform: translateX(0); }
         }
         .bfw-selected-corner { animation: bfw-selected-corner-in 300ms cubic-bezier(0.22,1,0.36,1); }
         @media (prefers-reduced-motion: reduce) {
