@@ -371,6 +371,42 @@ max value, now fixed rather than a ceiling), unconditional on zoom. The
 toggle itself is still the only on/off control; this only changed what
 "on" looks like.
 
+**Waterways clipped to the island's own landmass.** The raw waterway line
+geometry isn't guaranteed to stay inside the coastline — reported directly
+(most visible around Culaba, but not a Culaba-specific bug: the data isn't
+clipped anywhere), some segments rendered past municipality polygons into
+open sea. Fixed with a `<clipPath id="bfw-island-clip">` added to the
+`<svg>`'s existing `<defs>` block, containing one `<path>` per municipality
+(reusing the already-memoized `municipalityPaths` map) — SVG unions
+multiple `clipPath` children by default, so this clips to "inside any
+municipality polygon," i.e. the real landmass (the 7 municipalities tile
+the whole island with no gaps, so their union *is* the coastline). Applied
+via `clipPath="url(#bfw-island-clip)"` on the waterways `<g>` only —
+municipality/barangay polygons are themselves the landmass and can't
+overflow it, so no other layer needs this.
+
+**Barangay labels decluttered in dense municipalities.** `BarangayLayer`
+previously rendered every barangay's name label unconditionally at a fixed
+font size with no collision avoidance — municipalities with many small,
+tightly-packed barangays (Culaba: 34) overlapped illegibly, reported
+directly. A new `labeledKeys` `useMemo` (same `[features, project]` deps
+as the existing `barangayPaths` memo) now decides which barangays get a
+visible label: each candidate's label gets an *approximate* bounding box
+(width ≈ `label.length * fontSize * 0.62`, height ≈ `fontSize * 1.4`, both
+padded ×1.15 for a visual gap) — no real DOM text measurement (no extra
+render/measure pass for up to ~48 labels per municipality switch), this
+estimate is standard practice for SVG label placement and only needs to be
+roughly right, confirmed directly via Playwright (zero overlapping
+barangay-label pairs across the three densest municipalities after this).
+Candidates are sorted by their own polygon's bounding-box area descending
+(`boundsOf`, already imported) — bigger barangays get label priority, both
+because they have more room and are arguably more important to label —
+then walked in that order, accepting a label only if its padded box
+doesn't overlap any already-accepted one. A barangay whose label loses out
+keeps its polygon exactly as colored/clickable as always; only its
+`<text>` goes unrendered — selecting it from the list or by its visible
+neighbors still works identically.
+
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
 top-0`, clip-path tapering only the bottom-left corner). Now `absolute
