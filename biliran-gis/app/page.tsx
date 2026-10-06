@@ -138,6 +138,13 @@ export default function HomePage() {
   // the sidebar open).
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  // The waterway/river line overlay on the map (~448 SVG <path>s, real
+  // rendering cost) — off by default, since the point of this toggle is
+  // specifically to give lower-end devices a lighter default, not to
+  // preserve today's always-on look. No persistence: resets to off on
+  // every load, matching that confirmed default exactly.
+  const [showWaterways, setShowWaterways] = useState(false)
+
   // Selecting a barangay — from the map, the list, or the LIVE UPDATE
   // banner (all three funnel through here) — just updates selectedKey;
   // BiliranMap's own selectedKey-sync effect handles focusing/zooming to
@@ -495,6 +502,10 @@ export default function HomePage() {
           --text-strong: #031716; --text-soft: #274D60; --field-line: #B7D2DE;
           --header-bg: rgba(10, 112, 117, 0.85); --body-bg: rgba(231, 241, 245, 0.35);
           --separator: #0C969C;
+          /* Solid-reading (not blurred) background for the full-width
+             sidebar body — see the .bfw-sidebar comment below for why
+             this is a dedicated variable, not a bump to --body-bg. */
+          --sidebar-body-bg: rgba(231, 241, 245, 0.96);
           /* Buttons: lighter pairing in day mode (per the reference: day = lighter, night = darker). */
           --btn-from: #6BA3BE; --btn-to: #0C969C; --btn-text: #FBFEFF;
         }
@@ -511,6 +522,7 @@ export default function HomePage() {
           --text-strong: #85B7CE; --text-soft: #7098AD; --field-line: rgba(107, 163, 190, 0.25);
           --header-bg: rgba(3, 47, 48, 0.9); --body-bg: rgba(3, 23, 22, 0.3);
           --separator: #0C969C;
+          --sidebar-body-bg: rgba(3, 23, 22, 0.96);
           /* Buttons: darker pairing in night mode. */
           --btn-from: #274D60; --btn-to: #031716; --btn-text: #FBFEFF;
         }
@@ -690,26 +702,44 @@ export default function HomePage() {
               onFocusMunicipality={setFocusedMunicipality}
               resetToken={mapResetToken}
               nextForecastUpdateAt={nextForecastUpdateAt}
+              pauseAnimations={sidebarOpen}
+              showWaterways={showWaterways}
             />
           )}
         </div>
       )}
 
       {/*
-        Header row: theme toggle + profile button, as flex siblings in one
-        shared right-anchored row rather than independently absolutely-
-        positioned elements — the theme toggle "drifts left" for free as
-        the profile button's own width grows on reveal (see
-        HeaderProfileButton.tsx), via ordinary flexbox reflow, no manual
-        position math needed. Replaces the old hidden bottom-right "+" FAB
-        (Profile / Dashboard / Invitations / Sign out) entirely — reachable
-        here at all times, not just once revealed. These are "the toggles"
-        that stay visible over the full-bleed map at all times — everything
-        else (title, banners, barangay list, FSI detail) lives in the
-        toggleable sidebar, opened via its own slide-arrow handle (below),
-        not a button in this row.
+        Header row: waterways toggle (once revealed) + theme toggle +
+        profile button, as flex siblings in one shared right-anchored row
+        rather than independently absolutely-positioned elements — the
+        theme toggle "drifts left" for free as the profile button's own
+        width grows on reveal (see HeaderProfileButton.tsx), via ordinary
+        flexbox reflow, no manual position math needed. Replaces the old
+        hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
+        Sign out) entirely — reachable here at all times, not just once
+        revealed. These are "the toggles" that stay visible over the
+        full-bleed map at all times — everything else (title, banners,
+        barangay list, FSI detail) lives in the toggleable sidebar, opened
+        via its own slide-arrow handle (below), not a button in this row.
       */}
       <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
+        {revealed && (
+          <button
+            type="button"
+            onClick={() => setShowWaterways((v) => !v)}
+            aria-pressed={showWaterways}
+            aria-label={showWaterways ? 'Hide river/waterway lines on the map' : 'Show river/waterway lines on the map'}
+            title={showWaterways ? 'Waterway lines: on' : 'Waterway lines: off (lighter for low-end devices)'}
+            className="bfw-btn shrink-0 rounded-full p-2"
+            style={{ opacity: showWaterways ? 1 : 0.55 }}
+          >
+            <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M2 14c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0" />
+              <path d="M2 9c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0" opacity="0.5" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
@@ -925,18 +955,31 @@ export default function HomePage() {
               <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
             </div>
             {/*
-              backdrop-blur-xl added here: --body-bg is a fairly
-              translucent wash (tuned for the old, narrow 380px-wide
-              sidebar, where only a thin sliver of map showed through it).
-              Now that the sidebar is full-width, that same translucency
-              let the busy, colorful map geometry bleed through legibly
-              behind every list row — confirmed via screenshot, a real
-              readability regression the width change introduced, not
-              present in the plan but a direct consequence of it. Blurring
-              keeps the same tinted-glass look without the map detail
-              reading through sharply.
+              A dedicated, solid-reading --sidebar-body-bg, not
+              var(--body-bg) + backdrop-blur-xl like an earlier version
+              of this div had: --body-bg is a fairly translucent wash
+              (tuned for the old, narrow 380px-wide sidebar, where only a
+              thin sliver of map showed through it), and backdrop-blur-xl
+              over the FULL viewport is one of the most GPU-expensive CSS
+              effects there is — continuously re-composited while the
+              map's own ambient animations keep playing underneath it, a
+              real, reported performance regression on lower-end devices.
+              A plain solid-ish fill fixes the same "map bleeding through
+              legibly behind every list row" legibility problem the blur
+              was added for, at a fraction of the cost — no filter at all.
+              See the BiliranMap pauseAnimations prop below for the other
+              half of this fix (stopping those ambient animations outright
+              while they're hidden behind this anyway).
+
+              No overflow-y-auto here (unlike the single-column version this
+              replaced) — DashboardShell's own two-column grid owns two
+              independently-scrolling regions internally now (list and FSI
+              detail panel), and this wrapper scrolling too would mean the
+              page scrolling as a whole instead of each column scrolling on
+              its own. flex/min-h-0 just pass a real height constraint down
+              to it.
             */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-6 backdrop-blur-xl" style={{ background: 'var(--body-bg)' }}>
+            <div className="flex min-h-0 flex-1 flex-col p-6" style={{ background: 'var(--sidebar-body-bg)' }}>
               <DashboardShell
                 barangays={displayBarangays}
                 loadError={mapLoadError}

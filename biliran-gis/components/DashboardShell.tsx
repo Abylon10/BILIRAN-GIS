@@ -3,11 +3,19 @@
 // The content rendered inside the public dashboard's toggleable sidebar
 // (see app/page.tsx) — the live-forecast/honesty banner, the LIVE UPDATE
 // banner, the municipality filter, the barangay list ranked by
-// susceptibility, and (once a barangay is selected) its FSI detail panel.
-// One single scrolling column at every viewport size — the sidebar itself
-// is narrow regardless of device, so there's no separate desktop two-column
-// treatment the way an earlier, wider "dashboard area" version of this
-// component had.
+// susceptibility, and the FSI detail panel.
+//
+// Below that shared full-width header block, the list and the FSI detail
+// panel sit in a two-column grid at lg: and up (list left, detail right —
+// now that the sidebar itself is full-width, there's room to show both at
+// once instead of one buried below ~115 list rows). Below lg:, they stack
+// as a single column with the detail panel first (same "pinned above the
+// list" reasoning as before this round), matching this component's older,
+// narrower-sidebar behavior exactly. Each column scrolls independently
+// (min-h-0 overflow-y-auto) — see CLAUDE.md's "Independent scroll for each
+// column" note (same pattern already used for the admin Rainfall &
+// Scenarios tab) for why the full ancestor chain, including app/page.tsx's
+// sidebar body wrapper, has to give up its own scroll for this to work.
 //
 // The map itself is NOT rendered here — app/page.tsx mounts a single,
 // always full-bleed <BiliranMap> (see "one map, not two" in CLAUDE.md).
@@ -86,7 +94,7 @@ export default function DashboardShell({
   const handleSelect = useCallback((b: Barangay) => onSelectKey(b.key), [onSelectKey])
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div
         className="rounded-lg border px-3 py-2 text-xs"
         style={
@@ -106,33 +114,37 @@ export default function DashboardShell({
 
       {barangays && (
         <>
-          {/*
-            Pinned above the list (not after it) — selecting a barangay
-            from a list that can run to ~115 rows used to mean its detail
-            panel rendered below the whole thing, invisible without
-            scrolling past every row first. Showing it here means opening
-            the sidebar with something already selected reveals the full
-            FSI/hydrograph/factor-breakdown detail immediately.
-          */}
-          {selected && (
-            <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
-          )}
-
           <LiveUpdateBanner barangays={barangays} onSelect={handleSelect} />
 
           <div className="flex flex-wrap items-center gap-2">
             <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} theme={theme} />
           </div>
 
-          <h3 className="px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-            Barangays by flood susceptibility, highest first
-          </h3>
-          <BarangayList
-            barangays={filtered}
-            selectedKey={selectedKey}
-            onSelect={handleSelect}
-            onSelectMunicipality={onMunicipalityChange}
-          />
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+            {/*
+              Below lg:, this column comes first — same "pinned above the
+              list" reasoning as before this round, so opening the sidebar
+              with something already selected still reveals the full
+              FSI/hydrograph/factor-breakdown detail immediately without
+              scrolling past the list first. At lg: and up it moves to the
+              right, alongside the list instead of above it.
+            */}
+            <div className="bfw-sidebar-detail-col order-1 min-h-0 overflow-y-auto lg:order-2">
+              <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
+            </div>
+
+            <div className="bfw-sidebar-list-col order-2 min-h-0 overflow-y-auto lg:order-1">
+              <h3 className="px-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+                Barangays by flood susceptibility, highest first
+              </h3>
+              <BarangayList
+                barangays={filtered}
+                selectedKey={selectedKey}
+                onSelect={handleSelect}
+                onSelectMunicipality={onMunicipalityChange}
+              />
+            </div>
+          </div>
         </>
       )}
     </div>

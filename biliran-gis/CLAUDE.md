@@ -189,6 +189,78 @@ only rendered once `revealed` — unlike the old always-mounted `.bfw-dash`
 before sign-in), nothing downstream needs this mounted early anymore,
 since there's no more measurement to keep warm.
 
+**Two-column sidebar body (list | FSI detail), `lg:` and up** — a later
+round split what had been one full-width stacked column (the pinned
+`BarangayDetailPanel` above a ~115-row `BarangayList`) into a
+`grid grid-cols-1 lg:grid-cols-2 min-h-0 flex-1 gap-4` row inside
+`DashboardShell.tsx`, now that the sidebar is full-width and has the room:
+the list is `order-2 lg:order-1` (second/below on mobile, matching the
+original stacked behavior exactly; first/left on desktop) and the detail
+panel is `order-1 lg:order-2` (first/above on mobile, preserving the
+"pinned above the list" fix; second/right on desktop). `BarangayDetailPanel`
+renders unconditionally now (it already has its own "Select a barangay..."
+placeholder for a null `barangay`), not gated on `selected` — no separate
+placeholder needed for this column. Each column scrolls independently
+(`min-h-0 overflow-y-auto` on both), the same pattern already used for the
+admin Rainfall & Scenarios tab (`UserDashboardModal.tsx`) — and the same
+lesson applies: the full ancestor chain needs a real height constraint for
+it to work, which is why `app/page.tsx`'s sidebar body wrapper dropped its
+own `overflow-y-auto` (now `flex min-h-0 flex-1 flex-col`, just passing
+height down) — two scroll owners (the wrapper and the inner grid) would
+have meant one shared scrollbar instead of two independent ones.
+`DashboardShell`'s own root div is `flex h-full min-h-0 flex-col`.
+
+**Sidebar body background: solid `--sidebar-body-bg`, not
+`backdrop-blur-xl`** — the full-width sidebar (above) originally got
+`backdrop-blur-xl` over `var(--body-bg)` to stop the map's busy terrain
+geometry from reading through sharply behind every list row. Reported
+directly as a lagginess regression on lower-end devices: `backdrop-filter:
+blur` is one of the GPU-heaviest CSS effects, and it was running over the
+entire viewport, continuously re-composited while the map's own ambient
+animations (sea shimmer, drifting clouds, weather icons) kept playing
+underneath it. Fixed by dropping the blur filter entirely and using a new,
+dedicated, more-opaque `--sidebar-body-bg` custom property instead (defined
+per-theme alongside `--header-bg`/`--body-bg`/`--separator`) — plain solid
+fills are dramatically cheaper than any `backdrop-filter`, and a solid-
+enough fill was the thing that actually fixed the original legibility
+complaint, not blur specifically. Deliberately a new variable rather than
+bumping the shared `--body-bg`, since `AdminDashboardTab.tsx` also reads
+`--body-bg` for an unrelated progress-bar track that shouldn't change.
+
+**`pauseAnimations` prop — sidebar-open also pauses the map's ambient
+animations.** `BiliranMap.tsx` already had an `animationsPaused` state
+(Page Visibility API — pauses sea shimmer/clouds/weather-icon drift while
+the tab is backgrounded, via a `bfw-anim-paused` class forcing `animation-
+play-state: paused !important` on every descendant). `app/page.tsx` now
+passes `pauseAnimations={sidebarOpen}`, OR'd into the same class decision
+(`animationsPaused || pauseAnimations`) rather than a second mechanism —
+once the sidebar can cover the entire map (full-width, above), there's no
+visual reason to keep animating underneath it, so this is pure wasted
+CPU/GPU avoided while it's open, the other half of the lagginess fix above.
+
+**Waterways on/off toggle, default OFF** — a new icon-only `.bfw-btn` in
+the header-controls row (`app/page.tsx`, left of the Day/Night button,
+only rendered once `revealed`) toggles `showWaterways` state, passed to
+`BiliranMap`. The waterway/river line overlay (`waterwayPaths`, ~448 SVG
+`<path>` elements — real per-frame SVG-paint cost) now only renders inside
+a `{showWaterways && (...)}` gate; the underlying geojson fetch is
+unchanged (cheap, still loaded eagerly via the existing `Promise.all`) —
+only the expensive part of actually drawing the paths is skipped when off.
+Defaults to **off** on first load, no persistence (resets every load) —
+confirmed directly: the ask was specifically a lower-end-device
+optimization, so the lighter-weight state is the default, not the
+previous always-on look.
+
+**`WeatherBadge` moved to upper-center.** Previously a right-leaning
+trapezoid flush against the map's top-right corner (`absolute right-0
+top-0`, clip-path tapering only the bottom-left corner). Now `absolute
+left-1/2 top-0 -translate-x-1/2`, with a **symmetric** trapezoid clip-path
+(`polygon(0 0, 100% 0, calc(100% - 24px) 100%, 24px 100%)`, both bottom
+corners taper inward) and matching symmetric left/right padding — a flush-
+edge clip-path read correctly only when anchored to that edge; floating
+detached in the center needed both sides to taper the same way. Content,
+`drop-shadow`, and `WeatherIconSVG` unchanged.
+
 `handleSignOut` resets the sidebar closed (`setSidebarOpen(false)`)
 alongside its existing `selectedKey`/`focusedMunicipality`/`mapResetToken`
 resets, so a fresh sign-in always starts from the same closed-sidebar,
