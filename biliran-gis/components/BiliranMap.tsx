@@ -168,7 +168,13 @@ export default function BiliranMap({
   // are all continuous CSS animations with no natural stopping point, so
   // this pauses them while the tab is backgrounded/screen-locked (zero
   // visual difference while actually looking at the map, pure CPU/battery
-  // saving while not).
+  // saving while not). The same class is also applied below while
+  // `interacting` is true (an active drag-pan/wheel-zoom gesture) — that's
+  // exactly when the browser is already busiest (pointermove handling,
+  // the rAF-driven setView() re-render each frame), so freeing it from also
+  // compositing these purely decorative animations is a real, measurable
+  // win on lower-end devices; they resume the instant the gesture ends,
+  // same "no visual cost, pure saved work" reasoning as the tab-hidden case.
   const [animationsPaused, setAnimationsPaused] = useState(
     () => typeof document !== 'undefined' && document.hidden
   )
@@ -416,6 +422,32 @@ export default function BiliranMap({
     [barangaysByKey, onSelect],
   )
 
+  // Also moved above the early returns, same rules-of-hooks reasoning as
+  // focusMuni/handleBarangaySelect above (replaces what used to be a plain
+  // function declaration further down). Reads cx/cy from the functional
+  // setView updater instead of closing over currentView directly —
+  // currentView.cx/cy change on every single pan frame, so a useCallback
+  // keyed on currentView would get a new function identity just as often,
+  // defeating ZoomControls' React.memo below (its onChange prop) right
+  // when memoizing it matters most: during an active drag, not a zoom.
+  // islandBounds is already its own stable useMemo, so this reference now
+  // only changes when the geojson itself changes (effectively once).
+  const setScale = useCallback(
+    (newScale: number) => {
+      if (!islandBounds) return
+      setInteracting(false)
+      setView((prev) => {
+        const base = prev ?? {
+          cx: (islandBounds.minX + islandBounds.maxX) / 2,
+          cy: (islandBounds.minY + islandBounds.maxY) / 2,
+          scale: 1,
+        }
+        return clampView({ cx: base.cx, cy: base.cy, scale: newScale }, islandBounds)
+      })
+    },
+    [islandBounds],
+  )
+
   // Keep the map in sync when a barangay is selected from elsewhere (e.g.
   // the list): adjust state during render off a previous-value comparison,
   // rather than in an effect, per https://react.dev/learn/you-might-not-need-an-effect.
@@ -525,12 +557,6 @@ export default function BiliranMap({
     onFocusMunicipality?.(null)
   }
 
-  function setScale(newScale: number) {
-    if (!islandBounds) return
-    setInteracting(false)
-    setView(clampView({ cx: currentView.cx, cy: currentView.cy, scale: newScale }, islandBounds))
-  }
-
   // Drag-vs-tap disambiguation: pointer capture is deferred until the
   // pointer has actually moved past DRAG_THRESHOLD_PX (handlePointerMove),
   // not grabbed unconditionally on pointerdown. Capturing eagerly on every
@@ -613,7 +639,7 @@ export default function BiliranMap({
   return (
     <div
       ref={containerRef}
-      className={`bfw-map-root relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10${animationsPaused || pauseAnimations ? ' bfw-anim-paused' : ''}`}
+      className={`bfw-map-root relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10${animationsPaused || pauseAnimations || interacting ? ' bfw-anim-paused' : ''}`}
       style={{ borderColor: 'var(--card-border)' }}
     >
       <style>{`
@@ -1107,8 +1133,16 @@ const BarangayLayer = memo(function BarangayLayer({
  * tap-a-municipality — a dedicated, always-visible control for continuous
  * zoom, alongside (not replacing) the tap-to-zoom shortcut and the
  * top-left "back to all municipalities" reset button.
+ *
+ * memo-wrapped — scale is the one prop that legitimately changes during a
+ * zoom gesture, but during a pure pan drag it doesn't, and this component
+ * was re-rendering on every single pan frame anyway (BiliranMap's drag
+ * handling calls setView() once per rAF tick). onChange only became a
+ * stable reference once setScale above was converted to useCallback;
+ * without that, memo here would have been a no-op (a fresh onChange
+ * closure every render always fails the shallow prop comparison).
  */
-function ZoomControls({
+const ZoomControls = memo(function ZoomControls({
   scale,
   maxScale,
   onChange,
@@ -1160,7 +1194,7 @@ function ZoomControls({
       </button>
     </div>
   )
-}
+})
 
 /**
  * Small countdown to the next live-forecast refresh (app/page.tsx's own
@@ -1174,8 +1208,13 @@ function ZoomControls({
  * re-render interval rather than recomputing the countdown from scratch
  * each parent render, so the text stays live even while nothing else on
  * the map changes.
+ *
+ * memo-wrapped — updateAt only changes once per forecast refresh (every
+ * ~15 minutes), so without this it was re-rendering on every pan/zoom
+ * frame from its parent for no reason; its own countdown still ticks via
+ * the interval above regardless.
  */
-function NextForecastBadge({ updateAt }: { updateAt: number }) {
+const NextForecastBadge = memo(function NextForecastBadge({ updateAt }: { updateAt: number }) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -1197,7 +1236,7 @@ function NextForecastBadge({ updateAt }: { updateAt: number }) {
       {label}
     </div>
   )
-}
+})
 
 export function Legend({
   compact = false,
@@ -1411,8 +1450,14 @@ function WeatherIconStyles() {
  * for free, so the ribbon itself needs no border-radius. A plain
  * border/box-shadow doesn't follow a clip-path'd box correctly, so depth
  * comes from `filter: drop-shadow(...)` instead.
+ *
+ * memo-wrapped — crossing is already a stable useMemo (mostUrgentCrossing)
+ * and condition is a direct weatherByMunicipality[...] lookup (same object
+ * reference until the next weather poll), so without this it was
+ * re-rendering — including its mount-independent drop-shadow filter and
+ * nested WeatherIconSVG — on every pan/zoom frame for no reason.
  */
-function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: WeatherCondition | null }) {
+const WeatherBadge = memo(function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: WeatherCondition | null }) {
   if (!condition) return null
 
   const chance = condition.precipitationProbability
@@ -1458,4 +1503,4 @@ function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: 
       </span>
     </div>
   )
-}
+})

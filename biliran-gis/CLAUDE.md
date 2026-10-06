@@ -238,6 +238,50 @@ once the sidebar can cover the entire map (full-width, above), there's no
 visual reason to keep animating underneath it, so this is pure wasted
 CPU/GPU avoided while it's open, the other half of the lagginess fix above.
 
+**Further perf pass: pause ambient animations during active pan/zoom too,
+and stop three overlay components re-rendering on every pan frame.**
+Reported lag persisted even with the above fixes, so investigated what
+else runs continuously during an actual drag-pan gesture (not just while
+the sidebar happens to be open):
+- The `bfw-anim-paused` class condition above is now `animationsPaused ||
+  pauseAnimations || interacting` — `interacting` is an existing state
+  (`BiliranMap.tsx`) already used to disable the zoom-group's eased CSS
+  `transition` during an active drag/wheel-zoom gesture (so direct
+  manipulation tracks the pointer instantly). It's a Boolean, not a CSS
+  `transition`, so toggling the animation-pause class doesn't fight with
+  it — the sea shimmer/clouds/weather-icon-drift animations simply stop
+  compositing for the gesture's duration (set once per gesture, not
+  per-frame) and resume the instant it ends, same zero-visual-cost
+  reasoning as the tab-hidden/sidebar-open cases above. This matters most
+  exactly when the browser is already busiest: every pan frame calls
+  `setView()` from a rAF-throttled `pointermove` handler.
+- `ZoomControls`, `WeatherBadge`, and `NextForecastBadge` are now
+  `React.memo`-wrapped, matching the pattern `DriftingClouds`/
+  `MunicipalityLayer`/`BarangayLayer`/`WeatherIconSVG` already used — all
+  three were previously plain functions, so they re-rendered on *every*
+  `BiliranMap` re-render, including every single pan-drag frame, even
+  though their actual props (`crossing`/`condition`, `updateAt`) are
+  stable across a pan (nothing about panning changes the current weather
+  or forecast countdown). Memoizing `ZoomControls` required one more
+  fix to actually take effect: its `onChange` prop (`setScale`) was a
+  plain function declaration recreated fresh every render, which would
+  have failed `ZoomControls`' shallow prop comparison every time regardless
+  of memo. `setScale` is now a `useCallback` reading `cx`/`cy` through the
+  functional `setView(prev => ...)` form rather than closing over
+  `currentView` directly — `currentView.cx/cy` change on every pan frame,
+  so a naive `useCallback` keyed on it would still get a new identity just
+  as often; keying only on the already-stable `islandBounds` `useMemo`
+  keeps the reference fixed for the whole gesture. (Like `focusMuni`/
+  `handleBarangaySelect` already did, this `useCallback` has to live above
+  `BiliranMap`'s early-return loading/error guards — a Hook can't run
+  conditionally — so it's declared alongside them, not where the old plain
+  `setScale` function sat below those guards.)
+- None of this touches the actual SVG geometry (barangay/municipality/
+  waterway polygons are ~4,700 total vertices with waterways off by
+  default, ~11,600 with them on — not itself the bottleneck investigated
+  here) — a future pass simplifying that geometry (e.g. via `mapshaper`)
+  remains a separate, bigger lever if lag is still reported after this.
+
 **Waterways on/off toggle, default OFF** — a new icon-only `.bfw-btn` in
 the header-controls row (`app/page.tsx`, left of the Day/Night button,
 only rendered once `revealed`) toggles `showWaterways` state, passed to
