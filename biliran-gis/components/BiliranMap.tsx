@@ -761,6 +761,19 @@ export default function BiliranMap({
             <stop offset="45%" stopColor="#ffffff" stopOpacity="0.05" />
             <stop offset="100%" stopColor="#000000" stopOpacity="0.2" />
           </linearGradient>
+          {/*
+            Island landmass clip — the union of all 7 municipality polygons
+            (SVG unions multiple clipPath children by default), reused to
+            keep the waterways layer below from spilling past the real
+            coastline into open sea. Municipality/barangay polygons
+            themselves ARE the landmass, so only waterways (raw line
+            geometry, not guaranteed to stay inside it) need this.
+          */}
+          <clipPath id="bfw-island-clip">
+            {municipalities.features.map((f) => (
+              <path key={f.properties.pgc_prefix} d={municipalityPaths.get(f.properties.pgc_prefix)} />
+            ))}
+          </clipPath>
         </defs>
 
         {/* Atmospheric sea highlight — a slow, subtle shimmer for a "living" feel, not tied to zoom */}
@@ -789,6 +802,10 @@ export default function BiliranMap({
             that read as "faded into the background" rather than the
             permanently-visible overlay this toggle is meant to be, reported
             directly. The toggle itself is still the only on/off switch.
+            clipPath keeps lines from spilling past the coastline into open
+            sea (bfw-island-clip, defined above — reported directly, most
+            visible around Culaba, but the underlying line data isn't
+            guaranteed to stay inside the landmass anywhere).
           */}
           {showWaterways && (
             <g
@@ -796,6 +813,7 @@ export default function BiliranMap({
               stroke="#7EC8D9"
               strokeWidth={0.0009}
               fill="none"
+              clipPath="url(#bfw-island-clip)"
             >
               {waterwayPaths.map((d, i) => (
                 <path key={i} d={d} />
@@ -1091,6 +1109,53 @@ const BarangayLayer = memo(function BarangayLayer({
     () => new Map(features.map((f) => [f.properties.key, geometryToPath(f.geometry, project)])),
     [features, project]
   )
+  // Which barangays get a visible label — municipalities with many small,
+  // tightly-packed barangays (Culaba: 34) rendered every label
+  // unconditionally at a fixed size, which overlapped illegibly, reported
+  // directly. No real DOM text measurement here (no extra render/measure
+  // pass for up to ~48 labels per municipality switch) — an approximate
+  // bounding box from character count is standard practice for SVG label
+  // placement and only needs to be roughly right. Bigger barangays (by
+  // their own polygon bounding-box area, via the already-imported
+  // boundsOf) get label priority — they have the most room and are
+  // arguably the most important to label — and a label that would overlap
+  // an already-accepted one is skipped; its polygon stays exactly as
+  // interactive/colored as always, only its <text> goes unlabeled.
+  const labeledKeys = useMemo(() => {
+    const LABEL_FONT_SIZE = 0.0032
+    const CHAR_WIDTH_FACTOR = 0.62
+    const LINE_HEIGHT_FACTOR = 1.4
+    const PADDING_FACTOR = 1.15
+
+    const candidates = features
+      .map((f) => {
+        const [lon, lat] = geometryCentroid(f.geometry)
+        const [x, y] = project(lon, lat)
+        const bounds = boundsOf([f], project)
+        const area = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY)
+        const halfWidth = (f.properties.barangay.length * LABEL_FONT_SIZE * CHAR_WIDTH_FACTOR * PADDING_FACTOR) / 2
+        const halfHeight = (LABEL_FONT_SIZE * LINE_HEIGHT_FACTOR * PADDING_FACTOR) / 2
+        return { key: f.properties.key, area, box: { minX: x - halfWidth, maxX: x + halfWidth, minY: y - halfHeight, maxY: y + halfHeight } }
+      })
+      .sort((a, b) => b.area - a.area)
+
+    const accepted: typeof candidates = []
+    const keys = new Set<string>()
+    for (const candidate of candidates) {
+      const overlaps = accepted.some(
+        (a) =>
+          candidate.box.minX < a.box.maxX &&
+          candidate.box.maxX > a.box.minX &&
+          candidate.box.minY < a.box.maxY &&
+          candidate.box.maxY > a.box.minY
+      )
+      if (!overlaps) {
+        accepted.push(candidate)
+        keys.add(candidate.key)
+      }
+    }
+    return keys
+  }, [features, project])
   return (
     <g>
       <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)">
@@ -1121,7 +1186,7 @@ const BarangayLayer = memo(function BarangayLayer({
           )
         })}
       </g>
-      {features.map((f) => {
+      {features.filter((f) => labeledKeys.has(f.properties.key)).map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const [x, y] = project(lon, lat)
         return (
