@@ -88,6 +88,8 @@ export default function BiliranMap({
   onFocusMunicipality,
   resetToken = 0,
   nextForecastUpdateAt = null,
+  pauseAnimations = false,
+  showWaterways = true,
 }: {
   barangays: Barangay[]
   selectedKey: string | null
@@ -126,6 +128,18 @@ export default function BiliranMap({
   // any caller that hasn't wired up live weather yet just show nothing,
   // same "don't invent a placeholder" pattern as the weather icons.
   nextForecastUpdateAt?: number | null
+  // Pauses the map's continuous ambient animations (sea shimmer, drifting
+  // clouds, per-municipality weather icons) — OR'd together with the
+  // existing Page-Visibility-driven animationsPaused state below, not a
+  // second independent mechanism. Set true while the sidebar is open and
+  // can cover the whole map, since there's no visual reason to keep
+  // animating underneath it then.
+  pauseAnimations?: boolean
+  // Gates the waterway/river line overlay (~448 SVG <path>s) — real
+  // rendering cost, so this is a genuine lower-end-device toggle, not
+  // cosmetic. Defaults true here for component-level safety; the one real
+  // caller (app/page.tsx) always passes its own explicit state.
+  showWaterways?: boolean
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
   const [brgyGeo, setBrgyGeo] = useState<GeoFeatureCollection<BrgyProps> | null>(null)
@@ -599,7 +613,7 @@ export default function BiliranMap({
   return (
     <div
       ref={containerRef}
-      className={`bfw-map-root relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10${animationsPaused ? ' bfw-anim-paused' : ''}`}
+      className={`bfw-map-root relative h-full w-full overflow-hidden rounded-xl border shadow-xl ring-1 ring-white/10${animationsPaused || pauseAnimations ? ' bfw-anim-paused' : ''}`}
       style={{ borderColor: 'var(--card-border)' }}
     >
       <style>{`
@@ -728,20 +742,24 @@ export default function BiliranMap({
           style={{ transition: interacting ? 'none' : 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}
         >
           {/*
-            Waterways — subtle context at the island overview, turned up
-            continuously as barangayOpacity rises (i.e. as the view nears
-            barangay-reading zoom), rather than a hard on/off switch.
+            Waterways — off by default (showWaterways toggle in app/page.tsx,
+            a real lower-end-device win since this is ~448 SVG <path>s). When
+            on, opacity still ramps with barangayOpacity for the same subtle
+            context-at-overview, more-visible-near-barangay-zoom feel as
+            before — the toggle is the hard on/off switch, this ramp is not.
           */}
-          <g
-            opacity={0.35 + barangayOpacity * 0.3}
-            stroke="#7EC8D9"
-            strokeWidth={0.0006 + barangayOpacity * 0.0003}
-            fill="none"
-          >
-            {waterwayPaths.map((d, i) => (
-              <path key={i} d={d} />
-            ))}
-          </g>
+          {showWaterways && (
+            <g
+              opacity={0.35 + barangayOpacity * 0.3}
+              stroke="#7EC8D9"
+              strokeWidth={0.0006 + barangayOpacity * 0.0003}
+              fill="none"
+            >
+              {waterwayPaths.map((d, i) => (
+                <path key={i} d={d} />
+              ))}
+            </g>
+          )}
 
           {/* dimmed context outlines of the rest of the island, fading in as barangayOpacity rises */}
           <g opacity={0.12 * barangayOpacity} pointerEvents="none">
@@ -1412,11 +1430,14 @@ function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: 
   return (
     <div
       // Mobile-first sizing, same reasoning as ZoomControls above — tighter
-      // padding by default, growing at sm:.
-      className="absolute right-0 top-0 flex items-center gap-1.5 py-2 pl-6 pr-3 backdrop-blur-md sm:gap-2 sm:py-2.5 sm:pl-8 sm:pr-4"
+      // padding by default, growing at sm:. Upper-center, not flush against
+      // an edge, so the clip-path below is a symmetric trapezoid (both
+      // bottom corners taper inward) rather than the old flush-right shape
+      // (only the bottom-left corner tapered).
+      className="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-1.5 py-2 pl-6 pr-6 backdrop-blur-md sm:gap-2 sm:py-2.5 sm:pl-8 sm:pr-8"
       style={{
         background: 'var(--card-bg)',
-        clipPath: 'polygon(0 0, 100% 0, 100% 100%, 24px 100%)',
+        clipPath: 'polygon(0 0, 100% 0, calc(100% - 24px) 100%, 24px 100%)',
         filter: 'drop-shadow(0 3px 5px rgba(11,30,40,0.35))',
       }}
       title={title}
