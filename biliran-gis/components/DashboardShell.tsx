@@ -106,6 +106,18 @@ export default function DashboardShell({
 
       {barangays && (
         <>
+          {/*
+            Pinned above the list (not after it) — selecting a barangay
+            from a list that can run to ~115 rows used to mean its detail
+            panel rendered below the whole thing, invisible without
+            scrolling past every row first. Showing it here means opening
+            the sidebar with something already selected reveals the full
+            FSI/hydrograph/factor-breakdown detail immediately.
+          */}
+          {selected && (
+            <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
+          )}
+
           <LiveUpdateBanner barangays={barangays} onSelect={handleSelect} />
 
           <div className="flex flex-wrap items-center gap-2">
@@ -121,10 +133,6 @@ export default function DashboardShell({
             onSelect={handleSelect}
             onSelectMunicipality={onMunicipalityChange}
           />
-
-          {selected && (
-            <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
-          )}
         </>
       )}
     </div>

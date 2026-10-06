@@ -37,6 +37,7 @@ import { computeLiveIslandState } from '@/lib/liveIslandState'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
+import SelectedBarangayCorner from '@/components/SelectedBarangayCorner'
 // Dynamically imported (not a static top-level import): AdminShell is a
 // large multi-tab surface only ever rendered for admin accounts, so this
 // keeps its code out of the bundle every non-admin visitor downloads.
@@ -361,6 +362,16 @@ export default function HomePage() {
   // built from, not the pre-scaling static value.
   const liveRainfallFactor = selectedKey ? liveIslandState?.get(selectedKey)?.liveRainfallFactor ?? null : null
 
+  // The selected barangay object itself — for SelectedBarangayCorner below
+  // (the compact quick-glance card shown while the sidebar is closed).
+  // DashboardShell does its own equivalent lookup internally for its own
+  // rendering needs; this is a separate, cheap O(n) find over the same
+  // already-loaded array, not a second fetch.
+  const selectedBarangay = useMemo(
+    () => (selectedKey ? displayBarangays?.find((b) => b.key === selectedKey) ?? null : null),
+    [displayBarangays, selectedKey]
+  )
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
@@ -531,7 +542,12 @@ export default function HomePage() {
           dashboard title/banners/filter) — same backdrop + translateX
           drawer pattern as AdminShell.tsx's own mobile nav drawer, reused
           byte-for-byte rather than inventing new transition mechanics.
-          Slides in from the left (see the JSX comment above for why).
+          Slides in from the RIGHT (an explicit choice this round,
+          overriding an earlier left-side choice made specifically to
+          avoid covering BiliranMap's own right-side chrome — WeatherBadge/
+          ZoomControls/NextForecastBadge all live on the right, only
+          Legend is on the left. That overlap is now an accepted
+          trade-off, not fixed here — see CLAUDE.md).
         */
         .bfw-sidebar-backdrop {
           background: rgba(0, 0, 0, 0.4);
@@ -542,13 +558,52 @@ export default function HomePage() {
         .bfw-sidebar-backdrop[data-open='true'] { opacity: 1; pointer-events: auto; }
         .bfw-sidebar {
           background: var(--body-bg);
-          transform: translateX(-100%);
+          transform: translateX(100%);
           pointer-events: none;
           transition: transform 250ms cubic-bezier(0.22,1,0.36,1);
         }
         .bfw-sidebar[data-open='true'] { transform: translateX(0); pointer-events: auto; }
+
+        /*
+          Slide-arrow handle — opens/closes the sidebar, replacing the old
+          header-row tap button. Deliberately a SEPARATE fixed sibling, NOT
+          nested inside .bfw-sidebar: a CSS transform on an ancestor (the
+          sidebar's own translateX above) establishes a new containing
+          block for any position:fixed descendant (the same gotcha
+          ProfilePanel.tsx's lightbox already hit once), so a handle nested
+          inside the transformed sidebar would move off-screen WITH it
+          while closed instead of staying reachable at the viewport edge.
+          Its own "right" offset is animated in sync with the sidebar's
+          transform instead (same duration/easing) — right:0 flush against
+          the edge when closed, right:calc(100% - 28px) when open (see the
+          comment on that rule below for why not a bare 100%). The sidebar
+          is full-width at every viewport size now (see .bfw-sidebar
+          below), so this one open-state rule covers every size — no
+          desktop-only breakpoint override needed anymore.
+        */
+        .bfw-sidebar-handle {
+          position: fixed;
+          top: 50%;
+          right: 0;
+          transform: translateY(-50%);
+          z-index: 18;
+          border-radius: 12px 0 0 12px;
+          transition: right 250ms cubic-bezier(0.22,1,0.36,1);
+        }
+        /*
+          calc(100% - 28px), not a bare 100%: for a fixed element, "right:
+          100%" moves its RIGHT edge to the viewport's left edge, pushing
+          the whole 28px-wide handle off-screen to the left — not flush
+          against it. Subtracting its own width keeps it fully visible,
+          flush against the open sidebar's full-width (mobile) left edge,
+          with a harmless, intentional overlap rather than disappearing.
+        */
+        .bfw-sidebar-handle[data-open='true'] { right: calc(100% - 28px); }
+        .bfw-sidebar-handle svg { transition: transform 250ms cubic-bezier(0.22,1,0.36,1); }
+        .bfw-sidebar-handle[data-open='true'] svg { transform: rotate(180deg); }
+
         @media (prefers-reduced-motion: reduce) {
-          .bfw-sidebar-backdrop, .bfw-sidebar { transition: none !important; }
+          .bfw-sidebar-backdrop, .bfw-sidebar, .bfw-sidebar-handle, .bfw-sidebar-handle svg { transition: none !important; }
         }
 
         /*
@@ -641,37 +696,20 @@ export default function HomePage() {
       )}
 
       {/*
-        Header row: sidebar toggle (once revealed) + theme toggle + profile
-        button, as flex siblings in one shared right-anchored row rather
-        than independently absolutely-positioned elements — the theme
-        toggle "drifts left" for free as the profile button's own width
-        grows on reveal (see HeaderProfileButton.tsx), via ordinary
-        flexbox reflow, no manual position math needed. Replaces the old
-        hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
-        Sign out) entirely — reachable here at all times, not just once
-        revealed. These are "the toggles" that stay visible over the
-        full-bleed map at all times — everything else (title, banners,
-        barangay list, FSI detail) lives in the toggleable sidebar below.
+        Header row: theme toggle + profile button, as flex siblings in one
+        shared right-anchored row rather than independently absolutely-
+        positioned elements — the theme toggle "drifts left" for free as
+        the profile button's own width grows on reveal (see
+        HeaderProfileButton.tsx), via ordinary flexbox reflow, no manual
+        position math needed. Replaces the old hidden bottom-right "+" FAB
+        (Profile / Dashboard / Invitations / Sign out) entirely — reachable
+        here at all times, not just once revealed. These are "the toggles"
+        that stay visible over the full-bleed map at all times — everything
+        else (title, banners, barangay list, FSI detail) lives in the
+        toggleable sidebar, opened via its own slide-arrow handle (below),
+        not a button in this row.
       */}
       <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
-        {revealed && (
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((v) => !v)}
-            aria-label={sidebarOpen ? 'Close barangay list and FSI details' : 'Open barangay list and FSI details'}
-            className="bfw-btn shrink-0 rounded-full p-2"
-          >
-            {sidebarOpen ? (
-              <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                <path d="M5 5l10 10M15 5L5 15" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                <path d="M3 5h14M3 10h14M3 15h14" />
-              </svg>
-            )}
-          </button>
-        )}
         <button
           type="button"
           onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
@@ -829,19 +867,29 @@ export default function HomePage() {
         Toggleable sidebar — holds everything that isn't "the toggles":
         the dashboard title/subtitle, the live-forecast/honesty banner,
         the LIVE UPDATE/MODELED ALERT banner, the municipality filter, the
-        barangay list, and the FSI detail panel. Slides in from the LEFT
-        (not the right, where BiliranMap's own WeatherBadge/ZoomControls/
-        NextForecastBadge all live — a left-side sidebar only ever covers
-        the Legend, which sits at left-3). Built on AdminShell.tsx's exact
-        mobile-drawer pattern (backdrop + translateX(-100%)/translateX(0),
-        250ms cubic-bezier(0.22,1,0.36,1), reduced-motion override) rather
-        than inventing new transition mechanics. Only rendered once
-        revealed — unlike the old always-mounted .bfw-dash, nothing
-        downstream needs this mounted early anymore (no more map-slot
-        measurement to keep warm).
+        barangay list, and the FSI detail panel. Slides in from the RIGHT
+        edge (see the CSS comment above for the explicit trade-off this
+        overrides) via its own slide-arrow handle, not a header-row
+        button. Built on AdminShell.tsx's exact mobile-drawer pattern
+        (backdrop + translateX, 250ms cubic-bezier(0.22,1,0.36,1),
+        reduced-motion override) rather than inventing new transition
+        mechanics. Only rendered once revealed — unlike the old
+        always-mounted .bfw-dash, nothing downstream needs this mounted
+        early anymore (no more map-slot measurement to keep warm).
       */}
       {revealed && (
         <>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? 'Close barangay list and FSI details' : 'Open barangay list and FSI details'}
+            data-open={sidebarOpen}
+            className="bfw-sidebar-handle bfw-btn flex h-16 w-7 items-center justify-center"
+          >
+            <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 4l-7 6 7 6" />
+            </svg>
+          </button>
           <div
             className="bfw-sidebar-backdrop fixed inset-0 z-[16]"
             data-open={sidebarOpen}
@@ -849,7 +897,7 @@ export default function HomePage() {
             aria-hidden={!sidebarOpen}
           />
           <aside
-            className="bfw-sidebar fixed inset-y-0 left-0 z-[17] flex w-full flex-col sm:max-w-[380px]"
+            className="bfw-sidebar fixed inset-y-0 right-0 z-[17] flex w-full flex-col"
             data-open={sidebarOpen}
             aria-hidden={!sidebarOpen}
           >
@@ -863,15 +911,32 @@ export default function HomePage() {
               header's own text stays a fixed light tint rather than
               var(--text-strong), since --header-bg is deliberately dark
               in both themes (a branded band, not a theme-following
-              surface). No paddingRight reservation needed here (unlike
-              the old .bfw-dash header band) — the header-controls row
-              sits on the opposite (right) edge, nothing to dodge.
+              surface). paddingTop: 84 reserves space under the
+              header-controls row (Day/Night + Profile, z-20, top-5) —
+              now that the sidebar is on the right, its own top-right
+              corner sits directly under that floating row (same
+              collision shape the old .bfw-dash title band once had
+              against it, just rotated to the vertical axis since both
+              now anchor to the same edge); same hand-tuned-constant,
+              confirmed-via-screenshot discipline as that original fix.
             */}
-            <div className="min-w-0 shrink-0 border-b-2 px-6 py-4" style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)' }}>
+            <div className="min-w-0 shrink-0 border-b-2 px-6 py-4" style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)', paddingTop: 84 }}>
               <h1 className="truncate text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
               <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-6" style={{ background: 'var(--body-bg)' }}>
+            {/*
+              backdrop-blur-xl added here: --body-bg is a fairly
+              translucent wash (tuned for the old, narrow 380px-wide
+              sidebar, where only a thin sliver of map showed through it).
+              Now that the sidebar is full-width, that same translucency
+              let the busy, colorful map geometry bleed through legibly
+              behind every list row — confirmed via screenshot, a real
+              readability regression the width change introduced, not
+              present in the plan but a direct consequence of it. Blurring
+              keeps the same tinted-glass look without the map detail
+              reading through sharply.
+            */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 backdrop-blur-xl" style={{ background: 'var(--body-bg)' }}>
               <DashboardShell
                 barangays={displayBarangays}
                 loadError={mapLoadError}
@@ -886,6 +951,18 @@ export default function HomePage() {
               />
             </div>
           </aside>
+          {/*
+            Compact quick-glance card — shown whenever a barangay is
+            selected and the full sidebar is closed, so its FSI score/
+            class/countdown is visible immediately without opening the
+            sidebar at all. Hidden while the sidebar is open: the same
+            (and more complete) info is already pinned at the top of
+            BarangayDetailPanel there, so showing both would be
+            redundant. Tapping it opens the full sidebar.
+          */}
+          {selectedKey && !sidebarOpen && selectedBarangay && (
+            <SelectedBarangayCorner barangay={selectedBarangay} onExpand={() => setSidebarOpen(true)} />
+          )}
         </>
       )}
 
