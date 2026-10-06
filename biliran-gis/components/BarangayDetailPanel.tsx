@@ -74,6 +74,12 @@ export default function BarangayDetailPanel({
   const [entry, setEntry] = useState<HydrographEntry | null>(null)
   const [failedKey, setFailedKey] = useState<string | null>(null)
   const [factorEntry, setFactorEntry] = useState<FactorEntry | null>(null)
+  // Same single-open-at-a-time "?" pattern as FactorBreakdown's own
+  // openFactor below, kept as a separate piece of state since these are a
+  // different group of rows (the Basins/Danger/Warning/Alert stat grid,
+  // not the factor breakdown) — opening one here doesn't need to, and
+  // shouldn't, close whichever factor explanation is open.
+  const [openStat, setOpenStat] = useState<string | null>(null)
 
   useEffect(() => {
     if (!barangay) return
@@ -248,10 +254,38 @@ export default function BarangayDetailPanel({
       )}
 
       <dl className="grid grid-cols-2 gap-3 text-sm">
-        <Stat label="Basins" value={String(barangay.basin_ids.length)} />
-        <Stat label="Danger at" value={formatHoursAsCountdown(barangay.danger_time_hours)} />
-        <Stat label="Warning at" value={formatHoursAsCountdown(barangay.warning_time_hours)} />
-        <Stat label="Alert at" value={formatHoursAsCountdown(barangay.alert_time_hours)} />
+        <Stat
+          statKey="basins"
+          label="Basins"
+          value={String(barangay.basin_ids.length)}
+          explanation="The number of distinct river basins whose watershed boundary overlaps this barangay's area. A barangay overlapping more than one basin draws its modeled risk from more than one discharge curve, not just the single one shown above."
+          openStat={openStat}
+          onToggle={setOpenStat}
+        />
+        <Stat
+          statKey="danger"
+          label="Danger at"
+          value={formatHoursAsCountdown(barangay.danger_time_hours)}
+          explanation="Hours into the forecast/storm when modeled flow is projected to reach 95% of this basin's peak discharge — the highest and most urgent of the three thresholds."
+          openStat={openStat}
+          onToggle={setOpenStat}
+        />
+        <Stat
+          statKey="warning"
+          label="Warning at"
+          value={formatHoursAsCountdown(barangay.warning_time_hours)}
+          explanation="Hours into the forecast/storm when modeled flow is projected to reach 50% of this basin's peak discharge — the earliest of the three thresholds."
+          openStat={openStat}
+          onToggle={setOpenStat}
+        />
+        <Stat
+          statKey="alert"
+          label="Alert at"
+          value={formatHoursAsCountdown(barangay.alert_time_hours)}
+          explanation="Hours into the forecast/storm when modeled flow is projected to reach 75% of this basin's peak discharge — the middle threshold, between Warning and Danger."
+          openStat={openStat}
+          onToggle={setOpenStat}
+        />
       </dl>
 
       <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
@@ -382,11 +416,48 @@ function FactorBreakdown({
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  statKey,
+  label,
+  value,
+  explanation,
+  openStat,
+  onToggle,
+}: {
+  statKey: string
+  label: string
+  value: string
+  explanation: string
+  openStat: string | null
+  onToggle: (key: string | null) => void
+}) {
+  const isOpen = openStat === statKey
   return (
     <div>
-      <dt className="text-xs" style={{ color: 'var(--text-soft)' }}>{label}</dt>
+      <dt className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-soft)' }}>
+        <span>{label}</span>
+        {/* Same real-tap-target "?" pattern as FactorBreakdown's rows above. */}
+        <button
+          type="button"
+          onClick={() => onToggle(isOpen ? null : statKey)}
+          aria-expanded={isOpen}
+          aria-label={`What is ${label}?`}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold"
+          style={{
+            borderColor: 'var(--card-border)',
+            color: isOpen ? 'var(--card-bg)' : 'var(--text-soft)',
+            background: isOpen ? 'var(--text-soft)' : 'transparent',
+          }}
+        >
+          ?
+        </button>
+      </dt>
       <dd className="font-semibold" style={{ color: 'var(--text-strong)' }}>{value}</dd>
+      {isOpen && (
+        <div className="mt-1 rounded-md px-2 py-1.5 text-[10px] leading-snug" style={{ background: 'var(--card-border)', color: 'var(--text-soft)' }}>
+          {explanation}
+        </div>
+      )}
     </div>
   )
 }

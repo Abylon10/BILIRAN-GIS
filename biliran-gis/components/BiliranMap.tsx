@@ -783,15 +783,18 @@ export default function BiliranMap({
           {/*
             Waterways — off by default (showWaterways toggle in app/page.tsx,
             a real lower-end-device win since this is ~448 SVG <path>s). When
-            on, opacity still ramps with barangayOpacity for the same subtle
-            context-at-overview, more-visible-near-barangay-zoom feel as
-            before — the toggle is the hard on/off switch, this ramp is not.
+            on, rendered at a fixed, fully-visible opacity/width regardless of
+            zoom — an earlier version ramped both with barangayOpacity (dim
+            at the island overview, more visible near barangay zoom), but
+            that read as "faded into the background" rather than the
+            permanently-visible overlay this toggle is meant to be, reported
+            directly. The toggle itself is still the only on/off switch.
           */}
           {showWaterways && (
             <g
-              opacity={0.35 + barangayOpacity * 0.3}
+              opacity={1}
               stroke="#7EC8D9"
-              strokeWidth={0.0006 + barangayOpacity * 0.0003}
+              strokeWidth={0.0009}
               fill="none"
             >
               {waterwayPaths.map((d, i) => (
