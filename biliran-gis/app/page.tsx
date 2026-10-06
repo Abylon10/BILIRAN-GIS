@@ -22,7 +22,7 @@
 
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, useCallback, type FormEvent } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import type { User } from '@supabase/supabase-js'
@@ -44,10 +44,6 @@ const AdminShell = dynamic(() => import('@/components/AdminShell'))
 import HeaderProfileButton from '@/components/HeaderProfileButton'
 
 const LAST_LOGIN_KEY = 'bfw_last_login_date'
-
-// Must stay comfortably longer than BarangayList's own DOUBLE_TAP_WINDOW_MS
-// — see selectBarangay below for why.
-const BARANGAY_SELECT_COMPACT_DELAY_MS = 450
 
 type AuthState = 'checking' | 'needsLogin' | 'revealed'
 // Copy/branding for most of this file — the logo on the login screen
@@ -133,47 +129,22 @@ export default function HomePage() {
   // focusedMunicipality alone isn't enough to guarantee that.
   const [mapResetToken, setMapResetToken] = useState(0)
 
-  const mapSlotRef = useRef<HTMLDivElement>(null)
-  const [mapRect, setMapRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
-
-  // Compact map on barangay-list scroll (DashboardShell.tsx owns the
-  // scroll listener/debounce and flips this true once the list scrolls
-  // past the row threshold). One-way: scroll position alone never flips
-  // it back — only an explicit tap on the compacted map does, via
-  // onCompactTap below, which sets it directly. listScrollRef is used
-  // both there, as the list's own scroll container, and here, purely as a
-  // courtesy to scroll it back to top when the map re-expands (no longer
-  // the mechanism that drives listScrolled, now that it's one-way).
-  const [listScrolled, setListScrolled] = useState(false)
-  const listScrollRef = useRef<HTMLDivElement>(null)
+  // Barangay list + FSI detail panel live inside a toggleable sidebar
+  // (see the sidebar markup below) rather than inline beside/below the
+  // map — opened/closed only via its own toggle button in the header
+  // controls row, never automatically by a selection (confirmed directly:
+  // tapping a barangay on the map should select/focus it without forcing
+  // the sidebar open).
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Selecting a barangay — from the map, the list, or the LIVE UPDATE
-  // banner (all three funnel through here) — also compacts the map, same
-  // as scrolling the list past the row threshold does: reclaims the space
-  // for the list/FSI/hydrograph corners instead of leaving the barangay's
-  // detail panel pushed below the fold. Reuses listScrolled's existing
-  // one-way semantics (only an explicit tap on the compacted map expands
-  // it back out) rather than a separate flag.
-  //
-  // The compacting itself (setListScrolled) is deliberately delayed a
-  // beat rather than firing in the same tick as the selection: compacting
-  // moves the barangay list from below the map to beside it, a layout
-  // reflow big enough that — confirmed via Playwright — a fast double-tap
-  // on a list row would have its second physical tap land on a
-  // completely different row once the first tap's selection compacted the
-  // map out from under it, misfiring BarangayList's double-tap-to-filter
-  // against the wrong municipality. Delaying past BarangayList's own
-  // DOUBLE_TAP_WINDOW_MS keeps the row stationary for the whole window a
-  // double-tap needs, while still feeling instant for an ordinary single
-  // tap. selectedKey itself updates immediately either way — only the
-  // layout-shifting part is delayed.
-  const compactDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // banner (all three funnel through here) — just updates selectedKey;
+  // BiliranMap's own selectedKey-sync effect handles focusing/zooming to
+  // it. (An earlier version also delayed-compacted the map's layout slot
+  // to reclaim space for the list/detail panel below it — no longer
+  // needed now that those live in the sidebar instead.)
   const selectBarangay = useCallback((key: string) => {
     setSelectedKey(key)
-    if (compactDelayRef.current) clearTimeout(compactDelayRef.current)
-    compactDelayRef.current = setTimeout(() => {
-      setListScrolled(true)
-    }, BARANGAY_SELECT_COMPACT_DELAY_MS)
   }, [])
 
   // Stabilized wrapper for BiliranMap's onSelect prop — BiliranMap's own
@@ -390,35 +361,6 @@ export default function HomePage() {
   // built from, not the pre-scaling static value.
   const liveRainfallFactor = selectedKey ? liveIslandState?.get(selectedKey)?.liveRainfallFactor ?? null : null
 
-  // Measures where the map should sit: mapSlotRef's on-screen position when
-  // revealed (DashboardShell's empty spacer for it — sized/positioned by
-  // DashboardShell itself based on listScrolled, so this measurement stays
-  // a single codepath for both the normal and compact map spots), or a
-  // full-bleed viewport rect otherwise — the same numbers get applied as
-  // inline top/left/width/height on the map's wrapping div below,
-  // CSS-transitioned, which is what actually produces the shared-element
-  // animation, both for the login→dashboard reveal and for compacting on
-  // scroll. Re-measured on reveal, on resize, once barangays data arrives
-  // (it can change the LIVE UPDATE banner's height above the map slot), and
-  // whenever listScrolled flips the spacer's own size.
-  useLayoutEffect(() => {
-    function measure() {
-      if (revealed && mapSlotRef.current) {
-        const r = mapSlotRef.current.getBoundingClientRect()
-        setMapRect({ top: r.top, left: r.left, width: r.width, height: r.height })
-      } else {
-        setMapRect({ top: 0, left: 0, width: window.innerWidth, height: window.innerHeight })
-      }
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    const raf1 = requestAnimationFrame(measure)
-    return () => {
-      window.removeEventListener('resize', measure)
-      cancelAnimationFrame(raf1)
-    }
-  }, [revealed, barangays, listScrolled])
-
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
@@ -500,7 +442,7 @@ export default function HomePage() {
     setShowProfile(false)
     setShowAdminPanel(false)
     setLoginMode('user')
-    setListScrolled(false)
+    setSidebarOpen(false)
     setSelectedKey(null)
     setFocusedMunicipality(null)
     setMapResetToken((t) => t + 1)
@@ -582,10 +524,32 @@ export default function HomePage() {
         .bfw-card { transition: transform 0.6s ease, opacity 0.5s ease; }
         .bfw-root[data-revealed='true'] .bfw-card { transform: translateY(40px) scale(0.92); opacity: 0; pointer-events: none; }
 
-        .bfw-dash { opacity: 0; transition: opacity 0.8s ease 0.4s; pointer-events: none; }
-        .bfw-root[data-revealed='true'] .bfw-dash { opacity: 1; pointer-events: auto; }
-
         .bfw-loading-cover { position: absolute; inset: 0; background: var(--sky-bottom, #CFE4EC); z-index: 50; transition: opacity 0.3s ease; }
+
+        /*
+          Toggleable sidebar (barangay list + FSI detail panel, plus the
+          dashboard title/banners/filter) — same backdrop + translateX
+          drawer pattern as AdminShell.tsx's own mobile nav drawer, reused
+          byte-for-byte rather than inventing new transition mechanics.
+          Slides in from the left (see the JSX comment above for why).
+        */
+        .bfw-sidebar-backdrop {
+          background: rgba(0, 0, 0, 0.4);
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 250ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-sidebar-backdrop[data-open='true'] { opacity: 1; pointer-events: auto; }
+        .bfw-sidebar {
+          background: var(--body-bg);
+          transform: translateX(-100%);
+          pointer-events: none;
+          transition: transform 250ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .bfw-sidebar[data-open='true'] { transform: translateX(0); pointer-events: auto; }
+        @media (prefers-reduced-motion: reduce) {
+          .bfw-sidebar-backdrop, .bfw-sidebar { transition: none !important; }
+        }
 
         /*
           Shared "oval, not flat" button treatment (design reference: the
@@ -607,42 +571,30 @@ export default function HomePage() {
         .bfw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /*
-          The one persistent map's wrapping box — fixed + viewport-relative,
-          its top/left/width/height set inline from a measured rect (see
-          mapRect in HomePage: mapSlotRef's position when revealed, a
-          full-bleed viewport rect otherwise). This is what produces the
-          shared-element transition between the login backdrop and the
-          boxed dashboard position; reuses the same easing as the map's own
-          internal zoom transition (BiliranMap.tsx) for consistency.
-          BiliranMap already rounds/borders its own inner container
-          (rounded-xl border shadow-xl) unconditionally — left as-is in
-          both states rather than conditionally stripped for full-bleed,
-          to avoid coupling this shell's styling to BiliranMap's internals.
+          The one persistent map's wrapping box — always full-bleed
+          (fixed inset: 0) once mounted, both pre-login (the decorative
+          backdrop behind the login card) and post-login (no more boxed
+          "dashboard slot" to grow into — the barangay list/FSI detail
+          panel live in the toggleable sidebar below instead, not beside
+          or below the map). No JS-measured rect, no shared-element
+          transition between two sizes — there's only ever one size now.
 
-          z-index: below .bfw-card (10) pre-reveal, so the login card floats
-          on top of the full-bleed map as intended — but ABOVE .bfw-dash
-          (also 10) once revealed, otherwise .bfw-dash's own DOM content
-          (specifically DashboardShell's empty map-slot spacer, which this
-          shell's box exactly overlaps once boxed) sits stacked above the
-          map and silently swallows every click/drag/wheel gesture meant
-          for it, even though the map is still visually on top (transparent
-          spacer, so you can see through it — but hit-testing follows stack
-          order, not visibility). Found via this feature's own testing:
-          tap-to-zoom-a-municipality never reached the map once boxed into
-          the dashboard until this was raised. Nothing else in .bfw-dash
-          overlaps the map's rectangle (plain flex flow, no other absolutely
-          positioned siblings there), so raising it doesn't hide anything.
+          z-index: below .bfw-card (10) pre-reveal, so the login card
+          floats on top of the full-bleed map as intended. Kept at 15 once
+          revealed (above the sidebar's own z-index, see .bfw-sidebar
+          below) mostly for continuity with the header-controls row (z-20)
+          still needing to sit above everything — the original reason for
+          raising it above 10 (an invisible map-slot spacer in the old
+          .bfw-dash layout silently swallowing pointer events) no longer
+          applies now that nothing shares the map's footprint.
         */
         .bfw-map-shell {
           position: fixed;
+          inset: 0;
           z-index: 0;
           overflow: hidden;
-          transition: top 0.9s cubic-bezier(0.22,1,0.36,1), left 0.9s cubic-bezier(0.22,1,0.36,1),
-            width 0.9s cubic-bezier(0.22,1,0.36,1), height 0.9s cubic-bezier(0.22,1,0.36,1);
         }
         .bfw-root[data-revealed='true'] .bfw-map-shell { z-index: 15; }
-
-        @media (prefers-reduced-motion: reduce) { .bfw-map-shell { transition: none !important; } }
       `}</style>
 
       <div className="bfw-sky" />
@@ -667,17 +619,12 @@ export default function HomePage() {
       {/*
         The one real, persistent map — mounted as soon as authState isn't
         'checking' (i.e. during needsLogin too), full-bleed behind the login
-        card at first. On sign-in this same instance's wrapping box animates
-        into its boxed dashboard spot (see .bfw-map-shell above) while the
-        login card fades/slides out and the dashboard chrome fades in around
-        it — one map throughout, not a decorative login backdrop swapped for
-        a real map after reveal.
+        card pre-reveal and full-bleed behind the sidebar/header controls
+        post-reveal — one map throughout, not a decorative login backdrop
+        swapped for a real map after reveal.
       */}
-      {authState !== 'checking' && mapRect && (
-        <div
-          className="bfw-map-shell"
-          style={{ top: mapRect.top, left: mapRect.left, width: mapRect.width, height: mapRect.height }}
-        >
+      {authState !== 'checking' && (
+        <div className="bfw-map-shell">
           {displayBarangays && (
             <BiliranMap
               barangays={displayBarangays}
@@ -686,11 +633,6 @@ export default function HomePage() {
               showChrome={revealed}
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
-              compact={revealed && listScrolled}
-              onCompactTap={() => {
-                setListScrolled(false)
-                listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
-              }}
               resetToken={mapResetToken}
               nextForecastUpdateAt={nextForecastUpdateAt}
             />
@@ -699,16 +641,37 @@ export default function HomePage() {
       )}
 
       {/*
-        Header row: theme toggle + profile button, as flex siblings in one
-        shared right-anchored row rather than two independently absolutely-
-        positioned elements — the toggle "drifts left" for free as the
-        profile button's own width grows on reveal (see
-        HeaderProfileButton.tsx), via ordinary flexbox reflow, no manual
-        position math needed. Replaces the old hidden bottom-right "+" FAB
-        (Profile / Dashboard / Invitations / Sign out) entirely — reachable
-        here at all times, not just once revealed.
+        Header row: sidebar toggle (once revealed) + theme toggle + profile
+        button, as flex siblings in one shared right-anchored row rather
+        than independently absolutely-positioned elements — the theme
+        toggle "drifts left" for free as the profile button's own width
+        grows on reveal (see HeaderProfileButton.tsx), via ordinary
+        flexbox reflow, no manual position math needed. Replaces the old
+        hidden bottom-right "+" FAB (Profile / Dashboard / Invitations /
+        Sign out) entirely — reachable here at all times, not just once
+        revealed. These are "the toggles" that stay visible over the
+        full-bleed map at all times — everything else (title, banners,
+        barangay list, FSI detail) lives in the toggleable sidebar below.
       */}
       <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
+        {revealed && (
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? 'Close barangay list and FSI details' : 'Open barangay list and FSI details'}
+            className="bfw-btn shrink-0 rounded-full p-2"
+          >
+            {sidebarOpen ? (
+              <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                <path d="M5 5l10 10M15 5L5 15" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                <path d="M3 5h14M3 10h14M3 15h14" />
+              </svg>
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
@@ -863,60 +826,68 @@ export default function HomePage() {
       </div>
 
       {/*
-        Dashboard shell — always mounted (not just when revealed), same as
-        this wrapping .bfw-dash div already was: opacity/pointer-events
-        hide it pre-reveal (see .bfw-dash CSS above), rather than a
-        conditional mount, so its map-slot spacer has a real, measurable
-        layout position for the map-shell transition above even before
-        sign-in.
+        Toggleable sidebar — holds everything that isn't "the toggles":
+        the dashboard title/subtitle, the live-forecast/honesty banner,
+        the LIVE UPDATE/MODELED ALERT banner, the municipality filter, the
+        barangay list, and the FSI detail panel. Slides in from the LEFT
+        (not the right, where BiliranMap's own WeatherBadge/ZoomControls/
+        NextForecastBadge all live — a left-side sidebar only ever covers
+        the Legend, which sits at left-3). Built on AdminShell.tsx's exact
+        mobile-drawer pattern (backdrop + translateX(-100%)/translateX(0),
+        250ms cubic-bezier(0.22,1,0.36,1), reduced-motion override) rather
+        than inventing new transition mechanics. Only rendered once
+        revealed — unlike the old always-mounted .bfw-dash, nothing
+        downstream needs this mounted early anymore (no more map-slot
+        measurement to keep warm).
       */}
-      <div className="bfw-dash absolute inset-0 z-10 flex flex-col" data-revealed={revealed}>
-        {/*
-          Header and body are two distinct color panels now, not one
-          uniformly-padded column — a solid header-bg band (border-bottom
-          in --separator marks the split) sitting above a separate
-          body-bg wash the dashboard content scrolls within. Both
-          per-theme (see the --header-bg/--body-bg/--separator variables
-          above); the header's own text stays a fixed light tint rather
-          than var(--text-strong), since --header-bg is deliberately dark
-          in both themes (a branded band, not a theme-following surface).
-        */}
-        <div
-          className="min-w-0 shrink-0 border-b-2 px-6 py-4"
-          style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)', paddingRight: 260 }}
-        >
-          {/*
-            paddingRight: 260 reserves space under the absolutely-positioned
-            Day/Night+Profile controls above (z-20, up to ~400px wide once
-            HeaderProfileButton is revealed) — same reservation technique
-            already proven for this exact collision shape elsewhere in this
-            app (AdminInvitePanel's old "Open User Dashboard" button). Without
-            it, the subtitle line runs far enough right on a phone screen to
-            be painted over by those higher-z-index controls. truncate is a
-            second safety net for very narrow phones.
-          */}
-          <h1 className="truncate text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
-          <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
-        </div>
-        <div className="min-h-0 flex-1 p-6" style={{ background: 'var(--body-bg)' }}>
-          <DashboardShell
-            barangays={displayBarangays}
-            loadError={mapLoadError}
-            selectedKey={selectedKey}
-            onSelectKey={selectBarangay}
-            municipality={focusedMunicipality}
-            onMunicipalityChange={setFocusedMunicipality}
-            mapSlotRef={mapSlotRef}
-            listScrollRef={listScrollRef}
-            listScrolled={listScrolled}
-            onListScrolledChange={setListScrolled}
-            theme={theme}
-            liveActive={liveIslandState != null}
-            liveHydrograph={liveHydrograph}
-            liveRainfallFactor={liveRainfallFactor}
+      {revealed && (
+        <>
+          <div
+            className="bfw-sidebar-backdrop fixed inset-0 z-[16]"
+            data-open={sidebarOpen}
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden={!sidebarOpen}
           />
-        </div>
-      </div>
+          <aside
+            className="bfw-sidebar fixed inset-y-0 left-0 z-[17] flex w-full flex-col sm:max-w-[380px]"
+            data-open={sidebarOpen}
+            aria-hidden={!sidebarOpen}
+          >
+            {/*
+              Header and body are two distinct color panels, not one
+              uniformly-padded column — a solid header-bg band
+              (border-bottom in --separator marks the split) sitting
+              above a separate body-bg wash the sidebar's own content
+              scrolls within. Both per-theme (see the
+              --header-bg/--body-bg/--separator variables above); the
+              header's own text stays a fixed light tint rather than
+              var(--text-strong), since --header-bg is deliberately dark
+              in both themes (a branded band, not a theme-following
+              surface). No paddingRight reservation needed here (unlike
+              the old .bfw-dash header band) — the header-controls row
+              sits on the opposite (right) edge, nothing to dodge.
+            */}
+            <div className="min-w-0 shrink-0 border-b-2 px-6 py-4" style={{ background: 'var(--header-bg)', borderColor: 'var(--separator)' }}>
+              <h1 className="truncate text-lg font-semibold" style={{ color: '#E7F1F5' }}>Biliran — flood risk dashboard</h1>
+              <p className="truncate text-sm" style={{ color: '#B7D2DE' }}>MDRRMO / barangay flood early-warning conditions</p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-6" style={{ background: 'var(--body-bg)' }}>
+              <DashboardShell
+                barangays={displayBarangays}
+                loadError={mapLoadError}
+                selectedKey={selectedKey}
+                onSelectKey={selectBarangay}
+                municipality={focusedMunicipality}
+                onMunicipalityChange={setFocusedMunicipality}
+                theme={theme}
+                liveActive={liveIslandState != null}
+                liveHydrograph={liveHydrograph}
+                liveRainfallFactor={liveRainfallFactor}
+              />
+            </div>
+          </aside>
+        </>
+      )}
 
       {/* Loading cover, hides the pre-resolved state flash */}
       <div
