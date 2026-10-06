@@ -359,6 +359,18 @@ confirmed directly: the ask was specifically a lower-end-device
 optimization, so the lighter-weight state is the default, not the
 previous always-on look.
 
+**When on, waterways render at a fixed, fully-visible opacity/width, not
+ramped with zoom** — the original implementation ramped both `opacity`
+(0.35→0.65) and `strokeWidth` with `barangayOpacity`, dim at the island
+overview and only reaching full strength near barangay-level zoom (a
+"subtle context" design intent from when this layer was always-on).
+Reported directly as reading like the lines were "in the background"
+rather than the permanently-visible overlay a deliberate toggle should be
+— now `opacity={1}`, `strokeWidth={0.0009}` (the old formula's own
+max value, now fixed rather than a ceiling), unconditional on zoom. The
+toggle itself is still the only on/off control; this only changed what
+"on" looks like.
+
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
 top-0`, clip-path tapering only the bottom-left corner). Now `absolute
@@ -2610,6 +2622,25 @@ never hardcoded). `FACTOR_SCORE_FRAMING` itself is untouched and keeps its one r
 caption. Confirmed via mocked-auth Playwright: the framing sentence now appears exactly once in the panel
 regardless of which row (if any) is open — never duplicated per-row — while each factor's shortened
 explanation + correct weight percentage still renders correctly on click.
+
+## "?" explainer buttons on the Basins/Danger/Warning/Alert stat grid
+
+Same ask extended to the other stat-row group in `components/BarangayDetailPanel.tsx`: the `<dl>` grid below
+the Factor Breakdown (`Basins`/`Danger at`/`Warning at`/`Alert at`) had no explanation of what those four
+numbers meant either. `Stat` (previously just `{ label, value }`, no interactivity) now takes `statKey`,
+`explanation`, `openStat`, and `onToggle`, rendering the identical real-tap-target "?" button pattern
+`FactorBreakdown` already established (16px circle, `aria-expanded`/`aria-label`, tap not hover). Deliberately
+a **separate** `openStat` state in the parent component rather than reusing `FactorBreakdown`'s own
+`openFactor` — these are two different row groups, and opening one group's explanation has no reason to close
+whichever row is open in the other.
+
+Explanations use the exact Warning/Alert/Danger percentages this app's own honesty banner already states
+elsewhere (`DashboardShell.tsx`: "Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak
+discharge") rather than inventing new wording that could drift from it: Warning = 50%, Alert = 75%, Danger =
+95% of peak discharge. `Basins`' explanation covers the one real edge case the raw count doesn't convey on its
+own — a barangay can overlap more than one basin, but `BarangayDetailPanel` only ever shows a single "primary"
+hydrograph (`hydrographForBarangay` returns one `PrimaryHydrograph`, not one per overlapping basin), so the
+explanation says so explicitly rather than leaving that gap implicit.
 
 ## Performance pass: lowest-spec devices, mobile and desktop
 
