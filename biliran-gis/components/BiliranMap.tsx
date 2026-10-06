@@ -57,9 +57,14 @@ interface View {
   scale: number
 }
 
-// Max zoom: close enough to comfortably read barangay labels on the
-// smallest municipalities without a hard-coded per-municipality lookup.
-const MAX_SCALE = 9
+// Max zoom — capped to ~10% of the old 9x range (was chosen to comfortably
+// read barangay labels on the smallest municipalities; this is a deliberate
+// trade-off of that framing tightness for raw rendering cost, confirmed
+// directly in response to reported lag). Real per-municipality "fill the
+// frame" scales measured 1.9x-2.8x (muniFocusByPrefix below), i.e. already
+// above this cap — see the muniFillScale clamp further down for why that's
+// handled explicitly rather than left to clampView alone.
+const MAX_SCALE = 1.8
 
 // Tuned by feel against real trackpad/mouse-wheel input, not derived —
 // wheel deltas vary a lot by device/OS, so these are starting points to
@@ -541,7 +546,16 @@ export default function BiliranMap({
   }
 
   const nearestPrefix = nearestMunicipalityPrefix(currentView.cx, currentView.cy)
-  const muniFillScale = nearestPrefix ? muniFocusByPrefix[nearestPrefix].scale : 3
+  // Clamped to MAX_SCALE: muniFocusByPrefix's own per-municipality "fill the
+  // frame" scale (1.9x-2.8x, measured directly) now exceeds MAX_SCALE (see
+  // its comment above) for every municipality on this island — left
+  // unclamped, lowThreshold/highThreshold below would sit at or past the
+  // view's own hard ceiling, so barangayOpacity could never reach 1 (and,
+  // since barangay polygons only become clickable past 0.5 opacity below,
+  // tapping individual barangays on the map would silently stop working
+  // for most municipalities). Clamping here keeps the reveal reachable
+  // regardless of how low MAX_SCALE is tuned.
+  const muniFillScale = Math.min(MAX_SCALE, nearestPrefix ? muniFocusByPrefix[nearestPrefix].scale : 3)
   const lowThreshold = muniFillScale * 0.55
   const highThreshold = muniFillScale * 0.85
   const barangayOpacity = Math.min(1, Math.max(0, (currentView.scale - lowThreshold) / (highThreshold - lowThreshold)))

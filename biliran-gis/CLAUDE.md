@@ -282,6 +282,30 @@ the sidebar happens to be open):
   here) — a future pass simplifying that geometry (e.g. via `mapshaper`)
   remains a separate, bigger lever if lag is still reported after this.
 
+**Max zoom capped at 1.8x (`MAX_SCALE` in `BiliranMap.tsx`), down from 9x**
+— lag was still reported after the fixes above, so the next direct ask was
+to cut the zoom range itself (confirmed as ~10% of the old range: `1 +
+(9-1)*0.10 = 1.8`). `clampView` already clamps every view-setting path
+(`focusMuni`/`focusBarangay`/`setScale`/wheel-zoom) to `MAX_SCALE`, so
+changing this one constant uniformly caps tap-to-zoom, the zoom slider,
+and wheel/pinch-zoom together — no per-call-site changes needed.
+
+This surfaced a real correctness trap, not just a tightness trade-off:
+measured directly, every municipality's own "fill the frame" scale
+(`muniFocusByPrefix[prefix].scale`, used to frame a tap-to-zoom) is
+1.9x-2.8x — already above the new 1.8x ceiling. `barangayOpacity` (the
+fade-in that reveals barangay polygons and, past 0.5, makes them
+clickable) is computed from `lowThreshold`/`highThreshold` derived from
+that same per-municipality scale (`muniFillScale * 0.55`/`* 0.85`) — left
+unclamped, those thresholds would sit at or past the new 1.8x hard ceiling
+for most municipalities, so `barangayOpacity` could never cross 0.5 and
+tapping individual barangays on the map would silently stop working for
+them. Fixed by clamping `muniFillScale` itself to `MAX_SCALE` before
+deriving the thresholds (`Math.min(MAX_SCALE, muniFocusByPrefix[...].scale)`)
+— confirmed directly afterward (tapping each of the 7 municipalities,
+reading the barangay layer's own clickable-path count) that every one
+still reveals and allows selecting its barangays at the capped zoom.
+
 **Waterways on/off toggle, default OFF** — a new icon-only `.bfw-btn` in
 the header-controls row (`app/page.tsx`, left of the Day/Night button,
 only rendered once `revealed`) toggles `showWaterways` state, passed to
