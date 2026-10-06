@@ -83,48 +83,103 @@ instead of each owning a copy.
 
 **Toggleable sidebar — barangay list, FSI detail panel, and everything
 else that isn't "the toggles."** Once revealed, the map shows nothing but
-itself plus three floating controls in the top-right header-controls row:
-a sidebar-toggle button, the Day/Night theme toggle, and the profile
-button. Everything else — the dashboard title/subtitle, the live-forecast/
-honesty banner, the LIVE UPDATE/MODELED ALERT banner, the municipality
-filter dropdown, the barangay list, and (once a barangay is selected) its
-FSI detail panel (`BarangayDetailPanel`) — lives inside a toggleable
-sidebar (`<aside className="bfw-sidebar ...">` in `app/page.tsx`), closed
-by default, opened/closed only via the toggle button — **never**
-automatically by selecting a barangay (confirmed directly: tapping a
-barangay's polygon on the map selects/focuses it exactly as before, but
-does not force the sidebar open). `DashboardShell` itself no longer owns
-any map-layout concerns at all — it's purely the sidebar's scrollable
-content now (see its own file header).
+itself plus two floating controls in the top-right header-controls row —
+the Day/Night theme toggle and the profile button — plus a separate
+slide-arrow handle on the right edge (see below) that opens/closes the
+sidebar. Everything else — the dashboard title/subtitle, the live-
+forecast/honesty banner, the LIVE UPDATE/MODELED ALERT banner, the
+municipality filter dropdown, the barangay list, and (once a barangay is
+selected) its FSI detail panel (`BarangayDetailPanel`) — lives inside a
+toggleable sidebar (`<aside className="bfw-sidebar ...">` in
+`app/page.tsx`), closed by default, opened/closed only via the handle —
+**never** automatically by selecting a barangay (confirmed directly:
+tapping a barangay's polygon on the map selects/focuses it exactly as
+before, but does not force the sidebar open — a separate compact card
+handles that case instead, see "Compact FSI-corner card" below).
+`DashboardShell` itself no longer owns any map-layout concerns at all —
+it's purely the sidebar's scrollable content now (see its own file
+header). Inside the sidebar, `BarangayDetailPanel` (when something is
+selected) is now rendered **above** the barangay list, not after it — the
+list can run to ~115 rows, so appending the detail panel after it meant
+it was invisible without scrolling past the entire list first; pinning it
+above means opening the sidebar with something selected shows the full
+FSI/hydrograph/factor-breakdown detail immediately.
 
-The sidebar slides in from the **left**, reusing `AdminShell.tsx`'s exact
-mobile-nav-drawer CSS pattern (`AdminShell.tsx`'s own `.bfw-admin-drawer`/
-`.bfw-admin-drawer-backdrop`) rather than inventing new transition
-mechanics: a semi-transparent click-to-close backdrop (`.bfw-sidebar-
-backdrop`, `rgba(0,0,0,0.4)`, opacity-faded via `data-open`) and the
-sliding panel itself (`.bfw-sidebar`, `transform: translateX(-100%)` →
-`translateX(0)` on `data-open='true'`, 250ms `cubic-bezier(0.22,1,0.36,1)`
-— the one house easing curve this app reuses for every transition —
-disabled under `prefers-reduced-motion: reduce`). Full width on narrow
-viewports, capped at `sm:max-w-[380px]` on larger ones so the map stays
-visible beside it. Left, not right: `BiliranMap`'s own floating chrome is
-lopsided — `Legend` (full-size) sits at the left edge, while
-`WeatherBadge`, `ZoomControls`, and `NextForecastBadge` are all on the
-right — so a left-side sidebar only ever covers the Legend, not three
-separate overlays, and it also sits nowhere near the header-controls row
-(top-right), so the toggle button needs no collision-avoidance padding
-the way the old dashboard title band once did.
+The sidebar slides in from the **right** (an explicit instruction this
+round, overriding an earlier round's left-side choice — see below for the
+accepted trade-off), reusing `AdminShell.tsx`'s exact mobile-nav-drawer
+CSS pattern (`AdminShell.tsx`'s own `.bfw-admin-drawer`/`.bfw-admin-
+drawer-backdrop`) rather than inventing new transition mechanics: a
+semi-transparent click-to-close backdrop (`.bfw-sidebar-backdrop`,
+`rgba(0,0,0,0.4)`, opacity-faded via `data-open`) and the sliding panel
+itself (`.bfw-sidebar`, `transform: translateX(100%)` → `translateX(0)`
+on `data-open='true'`, 250ms `cubic-bezier(0.22,1,0.36,1)` — the one
+house easing curve this app reuses for every transition — disabled under
+`prefers-reduced-motion: reduce`). Full width on narrow viewports, capped
+at `sm:max-w-[380px]` on larger ones so the map stays visible beside it.
+**Accepted trade-off**: `BiliranMap`'s own floating chrome is lopsided —
+`WeatherBadge`, `ZoomControls`, and `NextForecastBadge` all live on the
+right, only `Legend` is on the left — so a right-side sidebar now
+overlaps that chrome more than a left-side one would have. Not
+repositioned here; confirmed via screenshot the overlap is only visible
+while the sidebar is actually open, same "acceptable gap" posture this
+codebase already applies to other hand-placed overlay positioning.
 
-z-index: `.bfw-sidebar-backdrop`/`.bfw-sidebar` sit at `z-16`/`z-17` —
-above the map (`z-15` once revealed) but below the header-controls row
-(`z-20`, unchanged), so the sidebar toggle/theme-toggle/profile button
-stay reachable and visible above the sidebar at all times, and below
-`AdminShell`/`ProfilePanel` (`z-50`) so those full-takeover views still
-paint on top of everything if opened while the sidebar happens to be
-open. Only rendered once `revealed` — unlike the old always-mounted
-`.bfw-dash` (kept mounted pre-login purely to give `mapSlotRef` a
-measurable position before sign-in), nothing downstream needs this
-mounted early anymore, since there's no more measurement to keep warm.
+**Slide-arrow handle, replacing the old header-row toggle button.**
+`.bfw-sidebar-handle` is a separate `fixed` sibling — deliberately **not**
+nested inside `.bfw-sidebar` — because a CSS `transform` on an ancestor
+establishes a new containing block for any `position: fixed` descendant
+(the same gotcha `ProfilePanel.tsx`'s lightbox already hit once, see
+below): a handle nested inside the transformed sidebar would move
+off-screen along with it while closed, instead of staying reachable at
+the viewport edge. Its own `right` offset animates in sync with the
+sidebar's `transform` instead (same 250ms `cubic-bezier(0.22,1,0.36,1)`):
+flush against the edge (`right: 0`) when closed, `right: calc(100% - 28px)`
+when open — **not** a bare `right: 100%`, which for a fixed element
+moves its right edge to the viewport's left edge, pushing the whole
+28px-wide handle off-screen rather than flush against it (a real bug
+caught via Playwright: the handle became unclickable once opened on a
+narrow viewport, confirmed by the exact math before fixing it) — with a
+`@media (min-width: 640px)` override to `right: 380px`, matching the
+sidebar's own `sm:max-w-[380px]` desktop width, so the handle always
+tracks the sidebar's current leading edge without a JS-measured value.
+Contains a small chevron that rotates 180° via `data-open`. Rendered only
+when `revealed`, same gating the old toggle button had.
+
+**Compact FSI-corner card** (`components/SelectedBarangayCorner.tsx`) —
+shown whenever a barangay is selected **and** the sidebar is closed, so
+its FSI score/class/countdown is visible at a glance without opening the
+sidebar at all. Deliberately separate from, and simpler than, the admin
+dashboard's own `SelectedBarangayCard` (`components/
+UserDashboardModal.tsx`) — no thumbnail map, no simulation fields, both
+admin-only concepts — but follows the same established spirit already
+settled there: a compact summary card kept distinct from the full detail
+panel, not one component trying to do both. Positioned `fixed right-5
+top-1/2 -translate-y-1/2`, mount-triggered `@keyframes` slide-in from the
+right (300ms, same house easing, respects `prefers-reduced-motion`) —
+same entrance-only-animation technique as `AdminInvitePanel.tsx`'s
+`.bfw-edit-row-enter`, no exit animation needed since it only unmounts
+(selection changes/clears, or the sidebar opens — at which point the same
+info is already pinned at the top of the open sidebar, so showing both
+would be redundant). The whole card is a button; tapping it opens the
+full sidebar.
+
+z-index: `.bfw-sidebar-backdrop`/`.bfw-sidebar` sit at `z-16`/`z-17`,
+`.bfw-sidebar-handle`/`SelectedBarangayCorner` at `z-18` — all above the
+map (`z-15` once revealed) but below the header-controls row (`z-20`,
+unchanged), so the theme/profile toggles stay reachable and visible at
+all times, and below `AdminShell`/`ProfilePanel` (`z-50`) so those
+full-takeover views still paint on top of everything. The sidebar's own
+header band now reserves `paddingTop: 84` — now that it shares the same
+(right) edge as the header-controls row, its top-right corner sits
+directly under that floating row (the same collision shape the old
+`.bfw-dash` title band once had against it, rotated to the vertical axis
+since both now anchor to the same edge) — same hand-tuned-constant,
+confirmed-via-screenshot discipline as that original fix. The sidebar is
+only rendered once `revealed` — unlike the old always-mounted `.bfw-dash`
+(kept mounted pre-login purely to give `mapSlotRef` a measurable position
+before sign-in), nothing downstream needs this mounted early anymore,
+since there's no more measurement to keep warm.
 
 `handleSignOut` resets the sidebar closed (`setSidebarOpen(false)`)
 alongside its existing `selectedKey`/`focusedMunicipality`/`mapResetToken`
