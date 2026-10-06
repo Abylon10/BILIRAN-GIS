@@ -86,8 +86,6 @@ export default function BiliranMap({
   showChrome = true,
   focusedMunicipality = null,
   onFocusMunicipality,
-  compact = false,
-  onCompactTap,
   resetToken = 0,
   nextForecastUpdateAt = null,
 }: {
@@ -107,16 +105,6 @@ export default function BiliranMap({
   // so the dropdown follows. null means "all municipalities" / full island.
   focusedMunicipality?: string | null
   onFocusMunicipality?: (name: string | null) => void
-  // True while docked as the small top-left thumbnail during barangay-list
-  // scroll (see DashboardShell.tsx) — a passive live view, not a smaller
-  // version of the normal interactive map: wheel-zoom, drag-pan, and
-  // municipality/barangay taps are all suppressed, and any tap on the map
-  // itself (other than the reset button) calls onCompactTap instead, which
-  // the caller uses to scroll the barangay list back to top and exit
-  // compact mode. Avoids gesture conflicts with the list scrolling right
-  // next to it, and avoids trying to support precise pan/zoom at ~50% size.
-  compact?: boolean
-  onCompactTap?: () => void
   // Forces the view back to the default whole-island framing, regardless
   // of the current selectedKey/focusedMunicipality — a monotonically
   // incrementing token (not a boolean) since app/page.tsx's handleSignOut
@@ -154,11 +142,10 @@ export default function BiliranMap({
   // instantly, rather than lagging behind it. Programmatic jumps (tap a
   // municipality, pick a barangay, zoom buttons, reset) keep the transition.
   const [interacting, setInteracting] = useState(false)
-  // Real viewport width, independent of `compact` (which is driven by
-  // barangay-list scroll state — a different question). Used only to pick
-  // the Legend's already-built 'md' size variant on a phone-width screen
-  // instead of its full desktop-sized default — same matchMedia pattern
-  // app/page.tsx already uses for its own dark-mode-preference listener.
+  // Real viewport width — used only to pick the Legend's already-built
+  // 'md' size variant on a phone-width screen instead of its full
+  // desktop-sized default — same matchMedia pattern app/page.tsx already
+  // uses for its own dark-mode-preference listener.
   const [isNarrowViewport, setIsNarrowViewport] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 480px)').matches
   )
@@ -268,7 +255,7 @@ export default function BiliranMap({
 
     function handleWheel(e: WheelEvent) {
       e.preventDefault()
-      if (!svgRef.current || compact) return
+      if (!svgRef.current) return
       const zoomFactor = Math.exp(-e.deltaY * WHEEL_ZOOM_COEFFICIENT)
 
       setInteracting(true)
@@ -292,7 +279,7 @@ export default function BiliranMap({
 
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
-  }, [islandBounds, compact])
+  }, [islandBounds])
 
   // Each municipality's own "fill the frame" center + scale — used both to
   // animate the view when tapping a municipality, and as the crossfade
@@ -543,7 +530,6 @@ export default function BiliranMap({
   const DRAG_THRESHOLD_PX = 5
 
   function handlePointerDown(e: React.PointerEvent<SVGSVGElement>) {
-    if (compact) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     dragRef.current = {
       pointerId: e.pointerId,
@@ -653,22 +639,8 @@ export default function BiliranMap({
         style={{
           background: 'linear-gradient(155deg, var(--sea-top), var(--sea-bottom) 70%)',
           touchAction: 'none',
-          cursor: compact ? 'pointer' : interacting ? 'grabbing' : 'grab',
+          cursor: interacting ? 'grabbing' : 'grab',
         }}
-        // Compact mode's one live gesture: any tap anywhere on the map
-        // expands it back out, instead of panning/selecting. Captured
-        // (rather than a plain onClick) so it fires before — and
-        // suppresses — the municipality/barangay polygons' own onClick
-        // below, without needing to thread a "disabled" flag through
-        // MunicipalityLayer/BarangayLayer themselves.
-        onClickCapture={
-          compact
-            ? (e) => {
-                e.stopPropagation()
-                onCompactTap?.()
-              }
-            : undefined
-        }
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -824,42 +796,25 @@ export default function BiliranMap({
       {isZoomed && (
         <button
           type="button"
-          onClick={(e) => {
-            // Kept even at compact size (per the settled Part 3 design) —
-            // stopPropagation so resetting the view doesn't also read as
-            // the map-background tap that expands the map back out.
-            if (compact) e.stopPropagation()
-            resetView()
-          }}
-          className={
-            compact
-              ? 'bfw-btn absolute left-1.5 top-1.5 rounded-full px-1.5 py-1 text-[9px] font-medium'
-              : 'bfw-btn absolute left-3 top-3 rounded-full px-3 py-1.5 text-xs font-medium'
-          }
+          onClick={() => resetView()}
+          className="bfw-btn absolute left-3 top-3 rounded-full px-3 py-1.5 text-xs font-medium"
         >
-          {compact ? '← All' : '← All municipalities'}
+          ← All municipalities
         </button>
       )}
 
-      {showChrome && !compact && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
-      {showChrome && !compact && nextForecastUpdateAt != null && (
+      {showChrome && <ZoomControls scale={currentView.scale} maxScale={MAX_SCALE} onChange={setScale} showSlider={showChrome} />}
+      {showChrome && nextForecastUpdateAt != null && (
         <NextForecastBadge updateAt={nextForecastUpdateAt} />
       )}
 
-      {showChrome && !compact && (
+      {showChrome && (
         <WeatherBadge
           crossing={urgentCrossing}
           condition={urgentCrossing ? weatherByMunicipality[urgentCrossing.barangay.municipality] ?? null : null}
         />
       )}
-      {/*
-        showChrome-gated (hidden pre-login, like the rest of this chrome),
-        but NOT !compact-gated — unlike ZoomControls/WeatherBadge, Legend
-        has its own dedicated compact variant (dots-only) specifically so
-        it stays visible and legible at the small compact-map size, so it
-        shouldn't disappear entirely just because the map is compact.
-      */}
-      {showChrome && <Legend compact={compact} size={isNarrowViewport ? 'md' : 'lg'} />}
+      {showChrome && <Legend size={isNarrowViewport ? 'md' : 'lg'} />}
     </div>
   )
 }

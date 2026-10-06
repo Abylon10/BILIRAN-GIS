@@ -54,36 +54,82 @@ redirects to `/?activated=1` (not `/login`) after activating an account;
 `app/page.tsx` reads that query param to show a one-time "Account activated"
 message on the login card.
 
-**One persistent map, not a decorative login backdrop swapped for a real
-one.** A single `<BiliranMap>` instance mounts in `app/page.tsx` itself
-(not inside `DashboardShell`) as soon as `authState !== 'checking'` —
-full-bleed behind the login card at first, the same real interactive map
-throughout, not a hand-drawn placeholder (`IslandScene`, removed). Its
-wrapping `.bfw-map-shell` div is `position: fixed`, sized via inline
-`top/left/width/height` computed in a `useLayoutEffect` (`mapRect` state):
-a full-viewport rect when not `revealed`, or `mapSlotRef.getBoundingClientRect()`
-when `revealed` — `mapSlotRef` is an empty spacer div inside
-`DashboardShell` (`<div ref={mapSlotRef} className="h-96 shrink-0
-md:h-[70%]" />`) that reserves the map's layout slot without rendering a
-map itself. `DashboardShell` is **always mounted** now (not `{revealed &&
-<DashboardShell/>}`), same as its own `.bfw-dash` wrapper already was —
-opacity/pointer-events hide it pre-reveal, not a conditional mount — so
-`mapSlotRef` has a real, measurable position even before sign-in, which is
-what lets the map animate smoothly INTO that exact spot rather than
-jumping there once `DashboardShell` first exists. `.bfw-map-shell`'s CSS
-transition (`top/left/width/height`, `cubic-bezier(0.22,1,0.36,1)`, same
-easing family as the map's own internal zoom transition) is what actually
-produces the shared-element/FLIP-style animation — verified by sampling
-`getComputedStyle(el)` repeatedly right after load and confirming the
-values actually interpolate between the two rects, not just checking the
-CSS is present (the same verification discipline this project already
-uses for CSS-driven SVG animations, for the same reason: a transition
-being *present* in the DOM doesn't guarantee it's actually *running*).
-`barangays`/`selectedKey` are lifted from `DashboardShell` into
-`app/page.tsx` too (loaded as soon as `authState !== 'checking'`, same
-early-fetch tradeoff as the map's own geojson — it's static public JSON,
-no auth needed) so the persistent map and `DashboardShell`'s list/detail
-panel share one fetch and one selection instead of each owning a copy.
+**One persistent map, always full-bleed — not a decorative login backdrop
+swapped for a real one, and no longer boxed into a dashboard layout slot
+post-login either.** A single `<BiliranMap>` instance mounts in
+`app/page.tsx` itself (not inside `DashboardShell`) as soon as `authState
+!== 'checking'`, the same real interactive map throughout, not a
+hand-drawn placeholder (`IslandScene`, removed long before this). Its
+wrapping `.bfw-map-shell` div is a plain `position: fixed; inset: 0` CSS
+rule — no JS-measured rect, no `useLayoutEffect`, no shared-element
+transition between two sizes, because there's only ever one size now: the
+map fills the viewport at all times once mounted, both pre-login (behind
+the login card) and post-login (behind the header-controls row and the
+toggleable sidebar — see "Toggleable sidebar" below). This replaced an
+earlier `mapRect`/`mapSlotRef` mechanism (a `useLayoutEffect` measuring an
+empty spacer div inside `DashboardShell`, CSS-transitioning the map's
+`top/left/width/height` between a full-viewport rect and that spacer's
+boxed rect) that existed only because `DashboardShell`'s list/detail panel
+used to share screen space with the map, inline below/beside it — once
+that content moved into its own toggleable sidebar instead (a separate
+overlay, not a layout sibling the map needs to make room for), the whole
+measurement mechanism became unnecessary and was removed, not just
+simplified. `barangays`/`selectedKey` are still lifted from
+`DashboardShell` into `app/page.tsx` (loaded as soon as `authState !==
+'checking'`, same early-fetch tradeoff as the map's own geojson — it's
+static public JSON, no auth needed) so the persistent map and
+`DashboardShell`'s list/detail panel share one fetch and one selection
+instead of each owning a copy.
+
+**Toggleable sidebar — barangay list, FSI detail panel, and everything
+else that isn't "the toggles."** Once revealed, the map shows nothing but
+itself plus three floating controls in the top-right header-controls row:
+a sidebar-toggle button, the Day/Night theme toggle, and the profile
+button. Everything else — the dashboard title/subtitle, the live-forecast/
+honesty banner, the LIVE UPDATE/MODELED ALERT banner, the municipality
+filter dropdown, the barangay list, and (once a barangay is selected) its
+FSI detail panel (`BarangayDetailPanel`) — lives inside a toggleable
+sidebar (`<aside className="bfw-sidebar ...">` in `app/page.tsx`), closed
+by default, opened/closed only via the toggle button — **never**
+automatically by selecting a barangay (confirmed directly: tapping a
+barangay's polygon on the map selects/focuses it exactly as before, but
+does not force the sidebar open). `DashboardShell` itself no longer owns
+any map-layout concerns at all — it's purely the sidebar's scrollable
+content now (see its own file header).
+
+The sidebar slides in from the **left**, reusing `AdminShell.tsx`'s exact
+mobile-nav-drawer CSS pattern (`AdminShell.tsx`'s own `.bfw-admin-drawer`/
+`.bfw-admin-drawer-backdrop`) rather than inventing new transition
+mechanics: a semi-transparent click-to-close backdrop (`.bfw-sidebar-
+backdrop`, `rgba(0,0,0,0.4)`, opacity-faded via `data-open`) and the
+sliding panel itself (`.bfw-sidebar`, `transform: translateX(-100%)` →
+`translateX(0)` on `data-open='true'`, 250ms `cubic-bezier(0.22,1,0.36,1)`
+— the one house easing curve this app reuses for every transition —
+disabled under `prefers-reduced-motion: reduce`). Full width on narrow
+viewports, capped at `sm:max-w-[380px]` on larger ones so the map stays
+visible beside it. Left, not right: `BiliranMap`'s own floating chrome is
+lopsided — `Legend` (full-size) sits at the left edge, while
+`WeatherBadge`, `ZoomControls`, and `NextForecastBadge` are all on the
+right — so a left-side sidebar only ever covers the Legend, not three
+separate overlays, and it also sits nowhere near the header-controls row
+(top-right), so the toggle button needs no collision-avoidance padding
+the way the old dashboard title band once did.
+
+z-index: `.bfw-sidebar-backdrop`/`.bfw-sidebar` sit at `z-16`/`z-17` —
+above the map (`z-15` once revealed) but below the header-controls row
+(`z-20`, unchanged), so the sidebar toggle/theme-toggle/profile button
+stay reachable and visible above the sidebar at all times, and below
+`AdminShell`/`ProfilePanel` (`z-50`) so those full-takeover views still
+paint on top of everything if opened while the sidebar happens to be
+open. Only rendered once `revealed` — unlike the old always-mounted
+`.bfw-dash` (kept mounted pre-login purely to give `mapSlotRef` a
+measurable position before sign-in), nothing downstream needs this
+mounted early anymore, since there's no more measurement to keep warm.
+
+`handleSignOut` resets the sidebar closed (`setSidebarOpen(false)`)
+alongside its existing `selectedKey`/`focusedMunicipality`/`mapResetToken`
+resets, so a fresh sign-in always starts from the same closed-sidebar,
+full-map state.
 
 **Map resets to the default whole-island view on sign-out**
 (`handleSignOut` in `app/page.tsx`), not left wherever the previous
@@ -170,13 +216,17 @@ list," not just a contrast patch.
 The open panel is rendered via `createPortal` into `document.body` with
 `position: fixed` coordinates computed from the trigger's own
 `getBoundingClientRect()`, **not** as a normal `absolute`-positioned
-child. `.bfw-dash` (where this component normally lives in the tree) is a
-stacking context pinned at `z-index: 10`, deliberately kept *below* the
-persistent map's `z-index: 15` (see `.bfw-map-shell` below) — so nothing
-inside `.bfw-dash` can out-z-index the map locally, confirmed via
-Playwright when the map's own `<svg>` intercepted clicks meant for the
-dropdown's options before the portal fix. Portaling to `document.body`
-escapes that stacking context entirely. The panel closes on outside
+child. This component now lives inside the toggleable sidebar
+(`.bfw-sidebar`, `z-17` — see "Toggleable sidebar" above), itself already
+above the persistent map's `z-15`; the original motivation for portaling
+(confirmed via Playwright: the map's own `<svg>`, at a higher local
+z-index than this component's old container, intercepted clicks meant for
+the dropdown's options before the portal fix) predates the sidebar
+redesign and no longer applies the same way — but portaling to
+`document.body` is kept regardless, since it's still the simpler, more
+robust choice (escapes any ancestor's stacking context or `overflow:
+hidden` outright, rather than depending on the current z-index ordering
+staying correct). The panel closes on outside
 click, `Escape`, window resize, or scroll (repositioning isn't tracked
 live — closing and requiring a re-open is simpler than keeping a fixed
 popover glued to a moving trigger).
@@ -208,61 +258,55 @@ Playwright that the panel's `scrollHeight` equals its `clientHeight` at
 this sizing. The border around each row still gives clear separation
 between options at the smaller size, just a more compact box.
 
-**Dashboard header/body split** (`app/page.tsx`'s `.bfw-dash`): the
-title row and the `DashboardShell` content area are now two separate
-color panels — a `--header-bg` band with a `--separator`-colored
-`border-b-2`, then a `--body-bg` wash beneath it — rather than one
-uniformly-padded column with no background of its own. The header's own
-title/subtitle text stays a fixed light tint (not `var(--text-strong)`),
-since `--header-bg` is deliberately dark in both themes (a branded band,
-not a theme-following surface) — using the theme-following text color
-would fail contrast in light mode, where `--text-strong` is near-black.
+**Sidebar header/body split** (`app/page.tsx`'s `.bfw-sidebar`, see
+"Toggleable sidebar" above): the title row and `DashboardShell`'s
+scrollable content are two separate color panels — a `--header-bg` band
+with a `--separator`-colored `border-b-2`, then a `--body-bg` wash
+beneath it — rather than one uniformly-padded column with no background
+of its own. The header's own title/subtitle text stays a fixed light
+tint (not `var(--text-strong)`), since `--header-bg` is deliberately dark
+in both themes (a branded band, not a theme-following surface) — using
+the theme-following text color would fail contrast in light mode, where
+`--text-strong` is near-black. (This used to live in `app/page.tsx`'s
+`.bfw-dash` wrapper, before the sidebar redesign below replaced it.)
 
-**Compact map while the barangay list is scrolled.** Same `mapSlotRef`
-mechanism as above, reused rather than duplicated: `DashboardShell` owns a
-scroll listener on the barangay list's own scroll container that flips
-`listScrolled` (lifted to `app/page.tsx`, same shape as `revealed`) once
-the list has scrolled past a **row-count** threshold
-(`ROW_COMPACT_THRESHOLD` = 8), not a pixel value — found by locating the
-8th `<li>` inside the scroll container (`BarangayList`'s own rows, no
-change needed there) and comparing its `getBoundingClientRect().top`
-against the container's own, so it stays correct even if row height ever
-varies. `SCROLL_DEBOUNCE_MS` (100) still avoids compacting a beat too
-early mid-fast-scroll. This is **one-way**: `handleListScroll` only ever
-calls `onListScrolledChange(true)`, and only while not already compact —
-scrolling back to the top does nothing once compacted; the only way back
-is an explicit tap on the compacted map (`onCompactTap`, below), which now
-sets `listScrolled` false directly rather than relying on scroll position
-to un-flip it (a `scrollTo({ top: 0 })` alongside that is purely a
-courtesy return-to-top, not the trigger). `mapSlotRef` itself — the *same*
-spacer div, not a second one — just resizes from its normal
-`h-96`/`md:h-[70%]` box down to a small fixed `COMPACT_MAP_WIDTH` ×
-`COMPACT_MAP_HEIGHT` box (192×144) when `listScrolled` is true; the list's
-own grid row is `flex-1`, so it grows into whatever height the spacer
-gives up. No transition on the spacer itself (it's invisible either way)
-— re-measuring it after it's already settled at its new size is what
-feeds `mapRect`, and `.bfw-map-shell`'s existing transition (above) is
-what actually animates the visible map smoothly between spots, same as
-the login→dashboard reveal. `LiveUpdateBanner` unmounts while
-`listScrolled` (reappears once the map fully re-expands) rather than
-shrinking in place.
+**Removed: compact map while the barangay list is scrolled, and
+`BiliranMap`'s `compact`/`onCompactTap` props.** An earlier version of
+this app reclaimed screen space by shrinking the map into a small
+top-left thumbnail (`ROW_COMPACT_THRESHOLD`/`SCROLL_DEBOUNCE_MS`/
+`COMPACT_MAP_WIDTH`/`COMPACT_MAP_HEIGHT` in `DashboardShell.tsx`,
+`BiliranMap`'s own `compact`/`onCompactTap` props suppressing wheel/drag
+and swapping the `<svg>`'s tap gesture to "expand" instead of "select")
+whenever the barangay list scrolled past 8 rows, or whenever a barangay
+was selected (`BARANGAY_SELECT_COMPACT_DELAY_MS` = 450ms, deliberately
+delayed past `BarangayList`'s own double-tap window to avoid a fast
+double-tap's second click landing on a different row mid-reflow). All of
+this existed specifically to make room below/beside the map for the list
+and detail panel. Once those moved into the toggleable sidebar instead
+(an overlay, not a layout sibling the map shares space with — see
+"Toggleable sidebar" above), there was no more space to reclaim, so the
+entire mechanism — the thumbnail mode, the scroll-triggered compacting,
+the selection-triggered compacting and its delay — was removed outright
+as dead code, not just left unused. `BiliranMap` is now always its full
+interactive self; `ZoomControls`/`WeatherBadge`/`NextForecastBadge`/
+`Legend` now all gate on `showChrome` alone (previously `ZoomControls`/
+`WeatherBadge`/`NextForecastBadge` also required `!compact`; `Legend`
+already gated on `showChrome` alone, since it had its own dots-only
+`compact` variant rather than hiding — `Legend`'s `compact` prop/variant
+itself is unchanged and still exists on the component, just never
+receives `compact={true}` from `BiliranMap` anymore).
 
-`BiliranMap`'s `compact` prop (default `false`) turns it into a passive
-thumbnail rather than a smaller version of the interactive map: the wheel
-listener and `handlePointerDown`'s drag-tracking both no-op when `compact`,
-and the `<svg>` gets an `onClickCapture` that calls the caller's
-`onCompactTap` and `stopPropagation()`s before the tap ever reaches
-`MunicipalityLayer`/`BarangayLayer`'s own per-polygon `onClick` — so
-tapping the thumbnail always means "expand," never "select." `ZoomControls`
-and `WeatherBadge` are hidden outright when compact (`showChrome &&
-!compact`) rather than shrunk, since their own gestures/clutter don't fit
-a passive thumbnail either. `Legend` is the one exception — gated on
-`showChrome` alone, not `!compact` — since it has its own smaller
-`compact` variant (dots-only, since the full labeled pill overflows at
-this size) rather than hiding. The reset button also gets a `compact`
-size variant, and its `onClick` `stopPropagation()`s when compact so
-resetting the view doesn't also read as the tap-to-expand gesture on the
-`<svg>` underneath it.
+Selecting a barangay (map, list, or the LIVE UPDATE banner) now just
+updates `selectedKey` — `app/page.tsx`'s `selectBarangay(key)` is `{
+setSelectedKey(key) }`, nothing more. `BarangayList.tsx`'s own
+double-tap-to-filter-by-municipality detection (tracking `{ key, time }`
+of the last click in a ref, `DOUBLE_TAP_WINDOW_MS` = 350ms, rather than
+the browser's native `onDoubleClick`) is unchanged and still correct, but
+its original motivating concern — a fast double-tap's second click
+landing on a different row because the first click's selection had
+already reflowed the list out from under it — no longer applies: nothing
+about selecting a barangay moves the sidebar's layout anymore, so the row
+simply never moves between the two taps in the first place.
 
 **Legend (full-size variant) is left-edge, vertically centered, and
 ~4x larger** — moved off the bottom-left corner because it read as too
@@ -279,71 +323,14 @@ varying-width rows read oddly, unlike the compact variant's small dot row
 where a pill still makes sense. The `compact` (dots-only, tiny thumbnail)
 variant is untouched — still `absolute bottom-1.5 left-1.5`, still tiny —
 there's no room for anything close to this size in the 192×144px compact
-map box, and it wasn't asked for. No collision-avoidance logic added for
-the taller stack against the top-left reset button/top-right
-`WeatherBadge`/bottom-right `ZoomControls` — confirmed via screenshot
-there's a comfortable gap at typical map heights, since each of those
-overlays is independently `absolute`-positioned into its own corner-ish
-region (see the `compact` prop paragraph above) rather than sharing a
-layout that would need to shrink around the enlarged legend.
-
-**Fill-the-middle layout, once compact.** As soon as `listScrolled` is
-true — no separate gesture required (an earlier version gated this
-behind a swipe-down pointer gesture; dropped because it only armed on
-pointer drag, so it was unreachable via an ordinary mouse-wheel scroll,
-leaving that space empty for anyone not touch-dragging) — the
-map-spacer/list wrapper in `DashboardShell` switches from a flex column
-(map row, list row below it) into a 2×2 CSS grid: the map spacer is
-pinned to the top-left cell at its usual exact compact size (so
-`mapSlotRef`'s measured rect — and the real map's on-screen box — never
-changes because of this; only `DashboardShell`'s own layout around it
-does), and the list+detail grid fills the remaining column beside the
-map (and both rows, so it still extends below it too) instead of leaving
-that space empty. `FSI` `Legend` itself can't move into that space — it's
-rendered inside `BiliranMap`'s own box, clipped by that box's
-`overflow: hidden` — so the list is just sized to sit beside the compact
-map+legend without overlapping it, not literally merged with it.
-
-**Selecting a barangay also compacts the map**, not just scrolling past
-the row threshold. `app/page.tsx`'s `selectBarangay(key)` is the one
-handler every selection source now funnels through — the map, the
-barangay list, and the LIVE UPDATE/Modeled-alert banner all call it
-(`BiliranMap`'s `onSelect`, `DashboardShell`'s `onSelectKey`) instead of
-setting `selectedKey` directly — and it sets both `selectedKey` and
-(after a delay, see below) `listScrolled`, reusing `listScrolled`'s
-existing one-way semantics rather than a second flag. This reclaims the
-same fill-the-middle layout above for the barangay's own detail panel,
-FSI corner, and hydrograph corner (below), instead of leaving the detail
-panel pushed below the fold on a non-compact first selection.
-
-The `listScrolled` half of `selectBarangay` is deliberately delayed
-(`BARANGAY_SELECT_COMPACT_DELAY_MS` = 450ms) rather than firing in the
-same tick as `selectedKey`. Compacting moves the barangay list from below
-the map to beside it — a big enough reflow that, confirmed via
-Playwright, a fast double-click on a list row would have its *second*
-physical click land on a completely different row once the first click's
-selection had already compacted the map out from under it, filtering by
-the wrong barangay's municipality. `BarangayList.tsx`'s own double-tap
-detection (below) is tracked by row **key**, not screen position, but
-that only helps if the same physical button is still there to be clicked
-twice — the page.tsx delay is what keeps it there for the whole window.
-`selectedKey` itself (and therefore the map's pan/zoom via
-`focusBarangay()`) still updates immediately; only the layout-shifting
-part waits.
-
-**Double-tap/double-click a barangay row filters the list to its
-municipality** (`BarangayList.tsx`) — same effect as picking it from the
-filter dropdown, driven by the existing `onMunicipalityChange` prop
-threaded down through `DashboardShell`'s new `onSelectMunicipality` prop.
-Detected manually (tracking `{ key, time }` of the last click in a ref,
-`DOUBLE_TAP_WINDOW_MS` = 350ms) rather than via the browser's native
-`onDoubleClick`, precisely because native `dblclick` is a *position*-based
-gesture and (see above) the first click's own selection can move the row
-out from under the second one; tracking by key sidesteps that as long as
-the row hasn't actually moved yet, which the paired page.tsx delay
-guarantees. A single tap still just selects+focuses the barangay as
-before. Not yet tested against real touch double-tap gesture recognition
-across mobile browsers — desktop double-click only.
+map box (the `compact` thumbnail mode has since been removed, see above —
+this variant just stays defined on the component, unused for now). No
+collision-avoidance logic added for the taller stack against the top-left
+reset button/top-right `WeatherBadge`/bottom-right `ZoomControls` —
+confirmed via screenshot there's a comfortable gap at typical map
+heights, since each of those overlays is independently
+`absolute`-positioned into its own corner-ish region rather than sharing
+a layout that would need to shrink around the enlarged legend.
 
 When a barangay outside the currently-focused municipality is selected
 (e.g. tapped from the severity-ranked list while a different municipality
@@ -358,16 +345,15 @@ overlays that only make sense once there's a dashboard around them: the
 entire `ZoomControls` pill (both the `−`/`+` buttons and its slider — an
 earlier version kept the buttons showing either way, since only the
 slider itself had its own `showSlider` gate; both are gone pre-login now),
-`Legend`, and the `WeatherBadge` ribbon. As a pure decorative login
-backdrop these were just
-clutter — the ribbon specifically used to collide with the theme-toggle
-button in that state (worked around earlier by pushing the toggle down),
-now moot since the ribbon simply doesn't render there; the toggle is back
-to a fixed `top-5`. `Legend` is gated on `showChrome` alone, not
-`showChrome && !compact` like `ZoomControls`/`WeatherBadge` — it has its
-own dedicated compact (dots-only) variant specifically so it stays
-visible at the small compact-map size, unlike those two which just
-disappear outright when compact.
+`Legend`, `WeatherBadge`, and `NextForecastBadge` — all four now gate on
+`showChrome` alone (previously `ZoomControls`/`WeatherBadge`/
+`NextForecastBadge` also required `!compact`; `Legend` already gated on
+`showChrome` alone before — see "Removed: compact map..." above for why
+`compact` is gone entirely now). As a pure decorative login backdrop
+these were just clutter — the weather ribbon specifically used to
+collide with the theme-toggle button in that state (worked around
+earlier by pushing the toggle down), now moot since the ribbon simply
+doesn't render there; the toggle is back to a fixed `top-5`.
 
 **Daily login gate is UX, not security.** Even with a valid Supabase session,
 the login card reappears if the last successful login (tracked via
@@ -740,29 +726,30 @@ no longer just a self-validated guess.
 
 ## Dashboard UI
 
-`components/DashboardShell.tsx` (rendered by `app/page.tsx` in place of the
-old `.bfw-dash` placeholder): a "modeled, not live" banner naming the single
-most urgent upcoming Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
+`components/DashboardShell.tsx` (rendered inside `app/page.tsx`'s
+toggleable sidebar — see "Toggleable sidebar" earlier in this file): a
+"modeled, not live" banner naming the single most urgent upcoming
+Alert/Danger crossing (`components/LiveUpdateBanner.tsx`,
 `mostUrgentCrossing()`), a municipality filter dropdown (`filterBarangays()`,
 called with a constant `''` query — the free-text search input this used
 to pair with was removed; `filterBarangays()` itself still takes a query
-param, just always `''` from here now), an empty spacer reserving the real
-map's layout slot (the map itself is mounted once, persistently, in
-`app/page.tsx` — see "One persistent map" above, and
-`components/BiliranMap.tsx` below), a barangay list ranked by
+param, just always `''` from here now), a barangay list ranked by
 susceptibility (`components/BarangayList.tsx`, `sortBySeverity()`), and a
 "Detail Overview" panel on selection (`components/BarangayDetailPanel.tsx`)
 leading with the FSI class/score, then basin count and warning/alert/danger
-times.
+times. The map itself is mounted once, persistently, in `app/page.tsx` —
+see "One persistent map, always full-bleed" above, and
+`components/BiliranMap.tsx` below — and is no longer rendered anywhere
+near this component's own layout at all.
 
-**Layout: the map is the dominant element**, not one of two panes sharing
-a column with the list — it's a full-width row on its own (`h-96 shrink-0
-md:h-[70%]`), with the barangay list and detail panel sharing a shorter
-row below it (`md:grid-cols-[1fr_320px]`, same as before). This replaced
-an earlier layout where the map only got `h-64`/`45%` of a column it split
-with the list, back when the map was a smaller, single-fixed-zoom element;
-it now supports continuous pan/zoom (see below) and earns more screen
-space.
+**Layout: the map is the dominant element**, full-bleed behind everything
+— `DashboardShell` itself is a single scrolling column (banner, filter,
+list, then the selected barangay's detail panel inline below it) inside
+the sidebar, not a layout that shares screen space with the map at all
+anymore (see "Toggleable sidebar" above for why — an earlier version had
+the map as a large row the list/detail sat below/beside, with a scroll-
+triggered "compact" thumbnail mode to reclaim space; both are gone now
+that the list/detail live in their own overlay instead).
 
 Ranking is **highest FSI score first** (`sortBySeverity()` in
 `lib/dashboardData.ts`, mean_fsi_score descending, tie-broken by soonest
@@ -935,6 +922,13 @@ checked the shell's measured rect, not actual interaction. Fixed two ways:
 `.bfw-dash`, but still below `.bfw-card`'s `10` pre-reveal so the login
 card still floats over the full-bleed map as intended), plus
 `pointer-events: none` on the spacer div itself as defense in depth.
+
+(Historical: `.bfw-dash` and its map-slot spacer no longer exist — see
+"One persistent map, always full-bleed" and "Toggleable sidebar" near the
+top of this file for the current architecture, which removed the boxed
+layout slot this bug was about entirely. `.bfw-map-shell`'s `z-15` is kept
+for continuity, now mostly to stay above the toggleable sidebar's own
+`z-16`/`z-17`, not to beat an invisible spacer.)
 
 New UI controls, alongside (not replacing) tap-a-municipality: `ZoomControls`
 (bottom-right — `+`/`-` buttons and a slider, all driving the same
@@ -2167,6 +2161,12 @@ path) in place of `BarangayRankingTable`, which was deleted entirely — same `b
 are now the exact same component, not two components trying to look alike.
 
 ## Real-device phone fixes: header overlap, oversized map chrome, pan/zoom lag
+
+**Partially superseded** — see "One persistent map, always full-bleed" and "Toggleable sidebar" near the top of
+this file: the header-overlap fix below (`.bfw-dash`'s title band, the `paddingRight: 260` reservation) no
+longer applies, since that title band now lives inside the toggleable sidebar instead, which sits on the
+opposite (left) edge from the Day/Night+Profile+sidebar-toggle row and needs no collision-avoidance padding at
+all. The map-chrome and pan/zoom-performance fixes below are unaffected and still accurate.
 
 A phone screenshot showed the public (non-admin) dashboard's header title/subtitle overlapping the Day/Night
 toggle and Profile button, plus the map's FSI severity Legend dominating the screen — and the user separately
