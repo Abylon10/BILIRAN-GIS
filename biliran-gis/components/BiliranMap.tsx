@@ -57,14 +57,13 @@ interface View {
   scale: number
 }
 
-// Max zoom — capped to ~10% of the old 9x range (was chosen to comfortably
-// read barangay labels on the smallest municipalities; this is a deliberate
-// trade-off of that framing tightness for raw rendering cost, confirmed
-// directly in response to reported lag). Real per-municipality "fill the
-// frame" scales measured 1.9x-2.8x (muniFocusByPrefix below), i.e. already
-// above this cap — see the muniFillScale clamp further down for why that's
+// Max zoom — tightened further to 1.5x by direct request after 1.8x still
+// felt laggy (was 9x originally; this is a deliberate trade-off of framing
+// tightness for raw rendering cost). Real per-municipality "fill the frame"
+// scales measured 1.9x-2.8x (muniFocusByPrefix below), i.e. already above
+// this cap — see the muniFillScale clamp further down for why that's
 // handled explicitly rather than left to clampView alone.
-const MAX_SCALE = 1.8
+const MAX_SCALE = 1.5
 
 // Tuned by feel against real trackpad/mouse-wheel input, not derived —
 // wheel deltas vary a lot by device/OS, so these are starting points to
@@ -1492,17 +1491,22 @@ const WeatherBadge = memo(function WeatherBadge({ crossing, condition }: { cross
       // padding by default, growing at sm:. Upper-center, not flush against
       // an edge, so the clip-path below is a symmetric trapezoid (both
       // bottom corners taper inward) rather than the old flush-right shape
-      // (only the bottom-left corner tapered).
-      className="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-1.5 py-2 pl-6 pr-6 backdrop-blur-md sm:gap-2 sm:py-2.5 sm:pl-8 sm:pr-8"
+      // (only the bottom-left corner tapered). Shorter/wider ribbon by
+      // direct request — reduced vertical padding, increased horizontal
+      // padding, with the clip-path's taper scaled down to match the
+      // shorter height (the old 24px diagonal looked proportionate at the
+      // old ~48px height; unscaled it would read too steep on this flatter
+      // shape) and the icon shrunk slightly to fit the tighter vertical space.
+      className="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-1.5 py-1 pl-9 pr-9 backdrop-blur-md sm:gap-2 sm:py-1.5 sm:pl-11 sm:pr-11"
       style={{
         background: 'var(--card-bg)',
-        clipPath: 'polygon(0 0, 100% 0, calc(100% - 24px) 100%, 24px 100%)',
+        clipPath: 'polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%)',
         filter: 'drop-shadow(0 3px 5px rgba(11,30,40,0.35))',
       }}
       title={title}
     >
       <WeatherIconStyles />
-      <svg className="h-6 w-7 sm:h-7 sm:w-[34px]" viewBox="0 0 44 36" aria-hidden>
+      <svg className="h-5 w-6 sm:h-6 sm:w-7" viewBox="0 0 44 36" aria-hidden>
         <WeatherIconSVG condition={condition} />
       </svg>
       <span className="flex flex-col leading-tight">

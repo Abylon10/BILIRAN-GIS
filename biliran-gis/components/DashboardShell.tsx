@@ -1,9 +1,11 @@
 // components/DashboardShell.tsx
 //
 // The content rendered inside the public dashboard's toggleable sidebar
-// (see app/page.tsx) — the live-forecast/honesty banner, the LIVE UPDATE
-// banner, the municipality filter, the barangay list ranked by
-// susceptibility, and the FSI detail panel.
+// (see app/page.tsx) — the live-forecast/honesty banner, the municipality
+// filter, the barangay list ranked by susceptibility, and the FSI detail
+// panel. (The "Modeled Alert" LiveUpdateBanner that used to sit here was
+// removed by direct request — components/LiveUpdateBanner.tsx is left in
+// place, just no longer called from this file.)
 //
 // Below that shared full-width header block, the list and the FSI detail
 // panel sit in a two-column grid at lg: and up (list left, detail right —
@@ -32,7 +34,6 @@
 import { useCallback, useMemo } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import type { LiveHydrograph } from '@/lib/liveIslandState'
-import LiveUpdateBanner from '@/components/LiveUpdateBanner'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
@@ -114,8 +115,6 @@ export default function DashboardShell({
 
       {barangays && (
         <>
-          <LiveUpdateBanner barangays={barangays} onSelect={handleSelect} />
-
           <div className="flex flex-wrap items-center gap-2">
             <MunicipalityFilterDropdown value={municipality} onChange={onMunicipalityChange} theme={theme} />
           </div>

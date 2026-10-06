@@ -282,29 +282,69 @@ the sidebar happens to be open):
   here) — a future pass simplifying that geometry (e.g. via `mapshaper`)
   remains a separate, bigger lever if lag is still reported after this.
 
-**Max zoom capped at 1.8x (`MAX_SCALE` in `BiliranMap.tsx`), down from 9x**
-— lag was still reported after the fixes above, so the next direct ask was
-to cut the zoom range itself (confirmed as ~10% of the old range: `1 +
-(9-1)*0.10 = 1.8`). `clampView` already clamps every view-setting path
-(`focusMuni`/`focusBarangay`/`setScale`/wheel-zoom) to `MAX_SCALE`, so
-changing this one constant uniformly caps tap-to-zoom, the zoom slider,
-and wheel/pinch-zoom together — no per-call-site changes needed.
+**Max zoom capped at 1.5x (`MAX_SCALE` in `BiliranMap.tsx`), down from 9x,
+tightened in two steps** — lag was still reported after the fixes above,
+so the next direct ask was to cut the zoom range itself: first to 1.8x
+(confirmed as ~10% of the old 9x range: `1 + (9-1)*0.10 = 1.8`), then
+further to 1.5x by direct request after 1.8x still felt laggy. `clampView`
+already clamps every view-setting path (`focusMuni`/`focusBarangay`/
+`setScale`/wheel-zoom) to `MAX_SCALE`, so changing this one constant
+uniformly caps tap-to-zoom, the zoom slider, and wheel/pinch-zoom
+together — no per-call-site changes needed at either step.
 
-This surfaced a real correctness trap, not just a tightness trade-off:
-measured directly, every municipality's own "fill the frame" scale
-(`muniFocusByPrefix[prefix].scale`, used to frame a tap-to-zoom) is
-1.9x-2.8x — already above the new 1.8x ceiling. `barangayOpacity` (the
-fade-in that reveals barangay polygons and, past 0.5, makes them
+The first drop (to 1.8x) surfaced a real correctness trap, not just a
+tightness trade-off: measured directly, every municipality's own "fill the
+frame" scale (`muniFocusByPrefix[prefix].scale`, used to frame a
+tap-to-zoom) is 1.9x-2.8x — already above that ceiling. `barangayOpacity`
+(the fade-in that reveals barangay polygons and, past 0.5, makes them
 clickable) is computed from `lowThreshold`/`highThreshold` derived from
 that same per-municipality scale (`muniFillScale * 0.55`/`* 0.85`) — left
-unclamped, those thresholds would sit at or past the new 1.8x hard ceiling
-for most municipalities, so `barangayOpacity` could never cross 0.5 and
-tapping individual barangays on the map would silently stop working for
-them. Fixed by clamping `muniFillScale` itself to `MAX_SCALE` before
-deriving the thresholds (`Math.min(MAX_SCALE, muniFocusByPrefix[...].scale)`)
-— confirmed directly afterward (tapping each of the 7 municipalities,
-reading the barangay layer's own clickable-path count) that every one
-still reveals and allows selecting its barangays at the capped zoom.
+unclamped, those thresholds would sit at or past the hard ceiling for most
+municipalities, so `barangayOpacity` could never cross 0.5 and tapping
+individual barangays on the map would silently stop working for them.
+Fixed by clamping `muniFillScale` itself to `MAX_SCALE` before deriving the
+thresholds (`Math.min(MAX_SCALE, muniFocusByPrefix[...].scale)`) — since
+that clamp reads `MAX_SCALE` directly, the later 1.8x→1.5x drop needed no
+further code change, just re-verification (tapping each of the 7
+municipalities, reading the barangay layer's own clickable-path count,
+confirming every one still reveals and allows selecting its barangays at
+whatever the current cap is).
+
+**"Modeled Alert" banner removed** — `components/LiveUpdateBanner.tsx`
+(the single-highest-risk-barangay banner showing a "Modeled {tier}" badge,
+e.g. "MODELED ALERT") was removed from `DashboardShell.tsx`'s render (its
+one call site, between the honesty banner and the municipality filter) by
+direct request. The component file itself is left in place, unused, rather
+than deleted outright — only its one import/call site in `DashboardShell`
+changed. (`BarangayDetailPanel`'s unrelated "Modeled from a single
+synthetic 2-hour design storm..." hydrograph/precipitation captions are a
+different, lowercase, still-present use of the word "modeled" — not this
+banner, not touched here.)
+
+**`WeatherBadge` reshaped: shorter but wider, taper rescaled to match** —
+by direct request ("fix trapezoid in the center — centralize the design,
+smaller but longer"), read as reshaping the badge now that its horizontal
+centering (`left-1/2 -translate-x-1/2`, from an earlier round) was already
+confirmed working. Vertical padding reduced (`py-2`/`sm:py-2.5` →
+`py-1`/`sm:py-1.5`), horizontal padding increased (`pl-6 pr-6`/`sm:pl-8
+sm:pr-8` → `pl-9 pr-9`/`sm:pl-11 sm:pr-11`), the inner `WeatherIconSVG`
+shrunk slightly to fit the tighter vertical space (`h-6 w-7 sm:h-7
+sm:w-[34px]` → `h-5 w-6 sm:h-6 sm:w-7`), and the clip-path's taper scaled
+down from 24px to 14px to match the flatter shape — the original 24px
+diagonal was tuned for the old ~48px-tall badge; left unscaled on a
+shorter badge, the diagonal would read disproportionately steep.
+
+**Known limitation: this environment cannot play back a video the user
+attaches** — confirmed directly (not assumed) when a screen recording was
+used to report ongoing lag: the bundled `ffmpeg` here is a Playwright-
+internal build compiled with `--disable-everything` (only
+mjpeg/webm/vp8/png — no MP4/H.264 demuxer at all), and the bundled
+Chromium's own `canPlayType('video/mp4; codecs="avc1...")` returns `''`
+(no H.264 decoder in that browser build either). Any future round driven
+by an attached video needs to work from the user's text description alone
+unless a decodable format (e.g. a GIF, individual screenshots, or a webm/
+vp8 recording) is provided instead — don't silently guess at video content
+that was never actually viewed.
 
 **Waterways on/off toggle, default OFF** — a new icon-only `.bfw-btn` in
 the header-controls row (`app/page.tsx`, left of the Day/Night button,
