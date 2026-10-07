@@ -172,6 +172,7 @@ export default function BarangayDetailPanel({
               title="Hydrograph"
               metaLabel={`basin ${hydro.basinId} · peak ${Math.max(...hydro.q, 0.001).toFixed(1)} m³/s`}
               captionText={captionText}
+              infoText="How much water is expected to flow through this barangay's drainage basin over time, in cubic meters per second (m³/s). A higher curve means more water moving through at once — this is what the Danger/Alert countdown is based on."
             />
             <DischargeChart
               timeHours={hydro.timeHours}
@@ -181,6 +182,7 @@ export default function BarangayDetailPanel({
               captionText={captionText}
               color="#0891B2"
               ariaLabel="Rainfall over time"
+              infoText="Expected rainfall intensity over time, in millimeters per hour (mm/hr). This rainfall is what drives the Hydrograph above — more/heavier rain means more water flowing through the basin."
             />
           </>
         )

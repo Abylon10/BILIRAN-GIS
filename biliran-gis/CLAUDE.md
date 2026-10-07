@@ -691,6 +691,26 @@ via Playwright: no `bfw-cloud-cross` keyframe anywhere in the page, no
 console errors, and a screenshot of the full-island view shows a clean
 sea with no cloud shapes.
 
+**"?" help button added to the Hydrograph and Precipitation charts.**
+`components/DischargeChart.tsx` (shared by both — see its own doc
+comment) gained an optional `infoText` prop: when passed, a small "?"
+button renders next to the chart's title, toggling a plain-language
+explanation inline below it. Deliberately reused the exact convention
+already established by `FactorBreakdown`'s own "?" buttons just below
+in `BarangayDetailPanel.tsx` (same tap-to-toggle inline-expand behavior,
+same button styling) rather than inventing a new one — an earlier pass
+at this wrote a separate floating-popover version with its own click-
+outside/Escape handling before noticing the existing pattern already
+covers this exact case more simply. Wired `infoText` into the two real
+(non-simulated) `DischargeChart` calls only — Hydrograph and
+Precipitation, matching the request's literal scope; the "Simulated
+hydrograph"/"Simulated precipitation" calls elsewhere in the same file
+don't pass it, so they render no button, unchanged from before. Omitting
+the prop entirely (every other existing caller) renders no button at
+all — fully backward compatible. Confirmed via Playwright: both buttons
+render (`button[aria-label^="What is"]`), and clicking Hydrograph's
+expands its explanation inline, screenshotted.
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars

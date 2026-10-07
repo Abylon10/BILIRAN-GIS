@@ -6,6 +6,8 @@
 // (same axes/shape), just with a distinct color and caption — making the
 // real and simulated curves directly, visually comparable.
 
+import { useState } from 'react'
+
 export default function DischargeChart({
   timeHours,
   q,
@@ -14,6 +16,7 @@ export default function DischargeChart({
   captionText,
   color = '#3B82C4',
   ariaLabel = 'Basin discharge over time',
+  infoText,
 }: {
   timeHours: number[]
   q: number[]
@@ -22,6 +25,14 @@ export default function DischargeChart({
   captionText: string
   color?: string
   ariaLabel?: string
+  // Optional plain-language explainer shown via a small "?" button next to
+  // the title — omit it (the real hydrograph/precipitation charts are the
+  // only callers that pass it, by direct request) to render no button at
+  // all, same as before this prop existed. Same tap-to-toggle, inline-
+  // expand-below convention as FactorBreakdown's own "?" buttons just
+  // below in this file's caller (BarangayDetailPanel.tsx) — reusing that
+  // established pattern instead of inventing a new floating-popover one.
+  infoText?: string
 }) {
   const width = 280
   const height = 90
@@ -42,16 +53,42 @@ export default function DischargeChart({
     })
     .join(' ')
 
+  const [showInfo, setShowInfo] = useState(false)
+
   return (
     <div className="flex flex-col gap-2 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)' }}>
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-          {title}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="truncate text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+            {title}
+          </div>
+          {infoText && (
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              aria-expanded={showInfo}
+              aria-label={`What is ${title}?`}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold"
+              style={{
+                borderColor: 'var(--card-border)',
+                color: showInfo ? 'var(--card-bg)' : 'var(--text-soft)',
+                background: showInfo ? 'var(--text-soft)' : 'transparent',
+              }}
+            >
+              ?
+            </button>
+          )}
         </div>
-        <div className="text-xs" style={{ color: 'var(--text-soft)' }}>
+        <div className="shrink-0 text-xs" style={{ color: 'var(--text-soft)' }}>
           {metaLabel}
         </div>
       </div>
+
+      {showInfo && infoText && (
+        <div className="rounded-md px-2 py-1.5 text-[10px] leading-snug" style={{ background: 'var(--card-border)', color: 'var(--text-soft)' }}>
+          {infoText}
+        </div>
+      )}
 
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} role="img" aria-label={ariaLabel}>
         <line x1={padLeft} y1={padTop} x2={padLeft} y2={padTop + plotH} stroke="var(--card-border)" strokeWidth={1} />
