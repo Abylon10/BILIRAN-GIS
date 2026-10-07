@@ -90,6 +90,7 @@ export default function BiliranMap({
   showChrome = true,
   focusedMunicipality = null,
   onFocusMunicipality,
+  onResetToOverview,
   resetToken = 0,
   nextForecastUpdateAt = null,
   pauseAnimations = false,
@@ -111,6 +112,15 @@ export default function BiliranMap({
   // so the dropdown follows. null means "all municipalities" / full island.
   focusedMunicipality?: string | null
   onFocusMunicipality?: (name: string | null) => void
+  // Fires specifically when the user taps THIS map's own "all
+  // municipalities" reset button below — distinct from
+  // onFocusMunicipality(null), which also fires from the dashboard's own
+  // municipality-filter dropdown clearing to "all" (a different action,
+  // reported directly as NOT what should clear the selected barangay).
+  // app/page.tsx uses this one to clear selectedKey (and with it,
+  // SelectedBarangayCorner's mini FSI card) specifically when the user
+  // goes back to the full-island view from the map itself.
+  onResetToOverview?: () => void
   // Forces the view back to the default whole-island framing, regardless
   // of the current selectedKey/focusedMunicipality — a monotonically
   // incrementing token (not a boolean) since app/page.tsx's handleSignOut
@@ -593,6 +603,7 @@ export default function BiliranMap({
     setInteracting(false)
     setView({ cx: islandCx, cy: islandCy, scale: 1 })
     onFocusMunicipality?.(null)
+    onResetToOverview?.()
   }
 
   // Drag-vs-tap disambiguation: pointer capture is deferred until the

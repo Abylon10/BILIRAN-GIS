@@ -651,6 +651,29 @@ icons themselves (same `fadeFor` opacity, same positioning). Confirmed
 visually with waterways on and real weather conditions mocked — every
 municipality's cloud icon now sits fully above the river lines.
 
+**`SelectedBarangayCorner`'s mini FSI card now clears when going back to
+the full-island map.** `app/page.tsx` renders this "quick glance" card
+(`components/SelectedBarangayCorner.tsx`) whenever `selectedKey` is set
+and the sidebar is closed. Tapping the map's own "← All municipalities"
+button (`BiliranMap`'s `resetView()`) only ever reset the *view*
+(pan/zoom) and `focusedMunicipality` — it never touched `selectedKey` —
+so the card kept showing a barangay no longer anywhere near the current
+(now zoomed-out) view, reported directly, confirmed in the reported
+screenshot (full island overview, card still reading "Kawayan... 0.26
+Low"). Reusing the existing `onFocusMunicipality(null)` callback to also
+clear `selectedKey` wasn't safe: that callback *also* fires from the
+dashboard's own municipality-filter dropdown clearing to "all" (a
+different, unrelated action — `onMunicipalityChange={setFocusedMunicipality}`
+elsewhere in `app/page.tsx`), and clearing the selected barangay from
+that action wasn't asked for. Added a new, narrower `onResetToOverview`
+callback prop to `BiliranMap`, fired only from inside `resetView()`
+itself (the map's own back button, its one and only call site), wired
+in `app/page.tsx` to `() => setSelectedKey(null)`. Verified via
+Playwright: selecting a barangay shows the card (`.bfw-selected-corner`
+count 1); tapping "All municipalities" removes it (count 0) and the
+resulting screenshot shows a clean full-island view with no leftover
+card.
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars
