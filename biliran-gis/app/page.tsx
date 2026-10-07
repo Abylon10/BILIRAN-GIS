@@ -526,9 +526,9 @@ export default function HomePage() {
           --sky-top: #032F30; --sky-bottom: #031716;
           /* Same blue-not-teal shift as the light theme's own --sea-top/
              --sea-bottom above, kept this dark/desaturated for night mode
-             -- lightened a notch further by direct request (was #041B2E/
-             #0A3A5C), still clearly night, just not quite as inky. */
-          --sea-top: #0A2C47; --sea-bottom: #1A5684;
+             -- lightened again by direct request (was #041B2E/#0A3A5C,
+             then #0A2C47/#1A5684), still clearly night, just brighter. */
+          --sea-top: #15426A; --sea-bottom: #2D77AD;
           --sun-glow: rgba(39, 77, 96, 0.45); --sun-core: #6BA3BE;
           --cloud: rgba(39, 77, 96, 0.35);
           --card-bg: rgba(3, 23, 22, 0.65); --card-border: rgba(107, 163, 190, 0.18);

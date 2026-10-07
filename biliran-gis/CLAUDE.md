@@ -654,11 +654,14 @@ reference the shared palette's own literal hex values, not these vars),
 so this was a fully isolated change. Confirmed visually across all four
 combinations (login screen + dashboard, day + night).
 
-**Follow-up: night's sea lightened a notch.** The dark-theme
+**Follow-up: night's sea lightened a notch, then again.** The dark-theme
 `--sea-top`/`--sea-bottom` above (`#041B2E`/`#0A3A5C`) read as quite
 inky, reported directly as wanting it a little lighter at night. Bumped
-to `#0A2C47`/`#1A5684` — still clearly dark/night, just not as close to
-black. Same two isolated vars, no other theme values touched.
+to `#0A2C47`/`#1A5684`, then — "a little bit more light during night" —
+bumped again to `#15426A`/`#2D77AD`. Still reads as night (the header's
+own "Night" chip + moon icon don't change), just a clear medium ocean
+blue instead of near-black. Same two isolated vars both times, no other
+theme values touched.
 
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
