@@ -674,6 +674,23 @@ count 1); tapping "All municipalities" removes it (count 0) and the
 resulting screenshot shows a clean full-island view with no leftover
 card.
 
+**Drifting-clouds animation removed from the island-overview sea
+entirely.** `components/BiliranMap.tsx`'s `DriftingClouds` component (two
+ambient cloud shapes cross-fading across the full-island view on a
+65s/82s CSS animation loop) was reported directly as no longer wanted.
+Removed the component, its `<DriftingClouds bounds={islandBounds} />`
+invocation, and its `@keyframes bfw-cloud-cross` entirely. Left the
+`bfw-cloud-body` radial gradient in place — it's shared with
+`WeatherIconSVG`'s own per-municipality weather icons (confirmed via its
+own doc comment before touching it), which still use it and are
+unaffected. Updated the handful of other comments that referenced
+`DriftingClouds` by name (the Page Visibility pause rule, the shared
+`React.memo` rationale comment, `showWeatherIcons`'s own doc comment)
+so none of them dangle on a component that no longer exists. Confirmed
+via Playwright: no `bfw-cloud-cross` keyframe anywhere in the page, no
+console errors, and a screenshot of the full-island view shows a clean
+sea with no cloud shapes.
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars

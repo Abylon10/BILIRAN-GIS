@@ -701,11 +701,11 @@ export default function BiliranMap({
         .bfw-sea-shimmer { animation: bfw-sea-shimmer 16s ease-in-out infinite; }
 
         /* Page Visibility pause — tab backgrounded/screen locked. Every
-           continuous ambient animation in this map (sea shimmer, drifting
-           clouds, per-municipality weather-icon drift/rain — see
-           DriftingClouds/WeatherIconStyles below) is driven by a CSS
-           animation-name, so pausing them all is one blanket rule here
-           rather than touching each @keyframes definition individually. */
+           continuous ambient animation in this map (sea shimmer,
+           per-municipality weather-icon drift/rain — see WeatherIconStyles
+           below) is driven by a CSS animation-name, so pausing them all is
+           one blanket rule here rather than touching each @keyframes
+           definition individually. */
         .bfw-anim-paused, .bfw-anim-paused * { animation-play-state: paused !important; }
 
         /* prefers-reduced-motion: reduce — an explicit OS-level opt-in, not
@@ -767,10 +767,11 @@ export default function BiliranMap({
             <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
           </radialGradient>
           {/*
-            Puffier cloud lobes (DriftingClouds, WeatherIconSVG) use this
-            instead of a flat fill — a soft off-center highlight plus a
-            dimmer rim gives each lobe volume instead of reading as a flat
-            gray/white blob. Purely a styling gradient, not tied to any data.
+            Puffier cloud lobes (WeatherIconSVG's per-municipality icons)
+            use this instead of a flat fill — a soft off-center highlight
+            plus a dimmer rim gives each lobe volume instead of reading as
+            a flat gray/white blob. Purely a styling gradient, not tied to
+            any data.
           */}
           <radialGradient id="bfw-cloud-body" cx="38%" cy="32%" r="70%">
             <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
@@ -822,7 +823,6 @@ export default function BiliranMap({
           fill="url(#bfw-sea-glow)"
           pointerEvents="none"
         />
-        {currentView.scale < 1.3 && <DriftingClouds bounds={islandBounds} />}
 
         <g
           className="bfw-zoom-group"
@@ -998,60 +998,14 @@ export default function BiliranMap({
   )
 }
 
-/**
- * Purely decorative, ambient clouds drifting across the whole-island view
- * — not per-municipality data (see MunicipalityLayer for that). Island
- * overview only; showing these over a zoomed single-municipality view
- * would add motion right where the user is trying to read barangay-level
- * detail. Travel distance is computed from the real island bounds (baked
- * directly into the keyframe, not a CSS custom property) so it scales
- * with the actual map extent rather than a guessed pixel value.
- */
-// React.memo-wrapped (here and MunicipalityLayer/BarangayLayer/
-// WeatherIconSVG below): these can render a large SVG subtree (up to ~500
-// nodes combined at worst case), and without memo, any unrelated parent
-// re-render (a weather-poll tick, a viewport resize) forces React to
-// reconcile that whole tree even when none of a given layer's own props
-// changed. Relies on their callers passing stable prop references
-// (useCallback/useMemo) — see focusMuni/handleBarangaySelect above and
-// municipalityPaths/barangayPaths/waterwayPaths elsewhere in this file.
-const DriftingClouds = memo(function DriftingClouds({ bounds }: { bounds: Bounds }) {
-  const width = bounds.maxX - bounds.minX
-  const height = bounds.maxY - bounds.minY
-  const travel = width * 1.3
-  const cx = bounds.minX + width / 2
-
-  return (
-    <g pointerEvents="none">
-      <style>{`
-        @keyframes bfw-cloud-cross {
-          from { transform: translateX(${-travel}px); }
-          to { transform: translateX(${travel}px); }
-        }
-      `}</style>
-      <g style={{ animation: 'bfw-cloud-cross 65s linear infinite' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.16}) scale(${width * 0.09})`} opacity={0.26}>
-          <ellipse cx="-0.6" cy="0.08" rx="0.9" ry="0.55" fill="#B9C7CE" opacity={0.5} />
-          <ellipse cx="0.9" cy="0.22" rx="1.1" ry="0.55" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="-0.65" cy="-0.05" rx="0.75" ry="0.48" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.3" cy="-0.3" rx="0.8" ry="0.5" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="1.35" cy="0.1" rx="0.6" ry="0.4" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.05" cy="0.05" rx="1.05" ry="0.42" fill="url(#bfw-cloud-body)" />
-        </g>
-      </g>
-      <g style={{ animation: 'bfw-cloud-cross 82s linear infinite', animationDelay: '-35s' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.34}) scale(${width * 0.065})`} opacity={0.2}>
-          <ellipse cx="-0.5" cy="0.06" rx="0.75" ry="0.45" fill="#B9C7CE" opacity={0.5} />
-          <ellipse cx="0.85" cy="0.18" rx="0.9" ry="0.45" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="-0.55" cy="-0.04" rx="0.6" ry="0.38" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.35" cy="-0.24" rx="0.65" ry="0.4" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.05" cy="0.04" rx="0.85" ry="0.34" fill="url(#bfw-cloud-body)" />
-        </g>
-      </g>
-    </g>
-  )
-})
-
+// React.memo-wrapped (here and BarangayLayer/WeatherIconSVG below): these
+// can render a large SVG subtree (up to ~500 nodes combined at worst
+// case), and without memo, any unrelated parent re-render (a weather-poll
+// tick, a viewport resize) forces React to reconcile that whole tree even
+// when none of a given layer's own props changed. Relies on their callers
+// passing stable prop references (useCallback/useMemo) — see focusMuni/
+// handleBarangaySelect above and municipalityPaths/barangayPaths/
+// waterwayPaths elsewhere in this file.
 const MunicipalityLayer = memo(function MunicipalityLayer({
   municipalities,
   municipalityPaths,
@@ -1082,11 +1036,11 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   nearestPrefix: string | null
   barangayOpacity: number
   weatherByMunicipality: Record<string, WeatherCondition | null>
-  // Same scale < 1.3 threshold DriftingClouds already uses (approved
-  // decorative-cost trade-off) — up to 7 icons' worth of continuous
-  // cloud-drift + rain-drop CSS animation isn't the visual focus once a
-  // user has zoomed into a municipality, so they're skipped entirely past
-  // that threshold rather than staying mounted (and animating) underneath.
+  // scale < 1.3 (approved decorative-cost trade-off) — up to 7 icons'
+  // worth of continuous cloud-drift + rain-drop CSS animation isn't the
+  // visual focus once a user has zoomed into a municipality, so they're
+  // skipped entirely past that threshold rather than staying mounted
+  // (and animating) underneath.
   showWeatherIcons: boolean
   // Both default true (every existing call site is unaffected) -- added so
   // BiliranMap can call this component twice, once per pass, with the
