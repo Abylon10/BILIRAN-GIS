@@ -732,7 +732,28 @@ export default function HomePage() {
             aria-label={showWaterways ? 'Hide river/waterway lines on the map' : 'Show river/waterway lines on the map'}
             title={showWaterways ? 'Waterway lines: on' : 'Waterway lines: off (lighter for low-end devices)'}
             className="bfw-btn shrink-0 rounded-full p-2"
-            style={{ opacity: showWaterways ? 1 : 0.55 }}
+            // Lights up when on, rather than the old opacity-based dimming
+            // when off (which read like a disabled control, reported
+            // directly) — same #1CA7D6 accent the waterway lines themselves
+            // use (BiliranMap.tsx), so the button previews what's on the
+            // map. Icon color via currentColor + a glow box-shadow on top
+            // of the shared .bfw-btn gradient background; off state is just
+            // the default button appearance, same as every other icon-only
+            // header button.
+            style={
+              showWaterways
+                ? {
+                    color: '#1CA7D6',
+                    // Adds a glow on top of (not instead of) .bfw-btn's own
+                    // embossed box-shadow, so this still reads as the same
+                    // pill button, just lit up — an inline boxShadow here
+                    // fully replaces the class's rather than layering with
+                    // it, so the base shadow's values are repeated first.
+                    boxShadow:
+                      '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 10px 2px rgba(28, 167, 214, 0.65)',
+                  }
+                : undefined
+            }
           >
             <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M2 14c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0" />
