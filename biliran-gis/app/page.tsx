@@ -732,14 +732,16 @@ export default function HomePage() {
             aria-label={showWaterways ? 'Hide river/waterway lines on the map' : 'Show river/waterway lines on the map'}
             title={showWaterways ? 'Waterway lines: on' : 'Waterway lines: off (lighter for low-end devices)'}
             className="bfw-btn shrink-0 rounded-full p-2"
-            // Lights up when on, rather than the old opacity-based dimming
-            // when off (which read like a disabled control, reported
-            // directly) — same #1CA7D6 accent the waterway lines themselves
-            // use (BiliranMap.tsx), so the button previews what's on the
-            // map. Icon color via currentColor + a glow box-shadow on top
-            // of the shared .bfw-btn gradient background; off state is just
-            // the default button appearance, same as every other icon-only
-            // header button.
+            // Lights up when on; dims when off — the off-state opacity was
+            // dropped in an earlier pass in favor of color+glow alone, but
+            // --btn-text (this button's default icon color) is already a
+            // near-white #FBFEFF in both themes, so a full-opacity off
+            // state read just as bright as — or brighter than — the
+            // accent-colored on state, reported directly as backwards.
+            // Restoring the dim for off (not a revert to opacity-only: on
+            // still gets the #1CA7D6 accent + glow below, same color the
+            // waterway lines themselves use in BiliranMap.tsx) gives both
+            // states unambiguous contrast regardless of theme.
             style={
               showWaterways
                 ? {
@@ -752,7 +754,7 @@ export default function HomePage() {
                     boxShadow:
                       '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 10px 2px rgba(28, 167, 214, 0.65)',
                   }
-                : undefined
+                : { opacity: 0.45 }
             }
           >
             <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
