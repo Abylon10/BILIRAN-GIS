@@ -485,14 +485,26 @@ saturated `#1CA7D6`, with `strokeWidth` increased from `0.0009` to
 `0.0015` (now comparable in visual weight to a selected barangay's own
 border). `app/page.tsx`'s waterways toggle button previously only dimmed
 via `opacity` when off (`0.55`) — a subtle difference that read like a
-disabled control, not an on/off light. Replaced with a clearer language
-reusing the same `#1CA7D6` accent as the line color (so the button
-visually previews what's on the map): full opacity always now; when on,
-the icon's `currentColor` switches to `#1CA7D6` and a glow `boxShadow` is
-layered on top of (not replacing) `.bfw-btn`'s own embossed shadow values
-— replacing the whole `boxShadow` instead of appending to it would have
-made the button look flat/different from every other header button while
-lit.
+disabled control, not an on/off light. When on, the icon's `currentColor`
+switches to `#1CA7D6` and a glow `boxShadow` is layered on top of (not
+replacing) `.bfw-btn`'s own embossed shadow values — replacing the whole
+`boxShadow` instead of appending to it would have made the button look
+flat/different from every other header button while lit.
+
+**Follow-up: the off state needed its dim back — off was reading brighter
+than on.** The first pass above dropped the off-state opacity entirely
+(full opacity both ways, color+glow as the only differentiator), reported
+directly as backwards: off looked lit, on looked dim. Root cause: `
+--btn-text` (`.bfw-btn`'s default icon color) is `#FBFEFF`, a near-white,
+in *both* themes — at full opacity that reads bright/crisp on its own, and
+`#1CA7D6` (the on-state accent, a mid-saturation blue) is actually *less*
+luminant than near-white, especially against the light theme's own
+blue-teal button background (`#6BA3BE` → `#0C969C`), where it can nearly
+blend in rather than pop. Fixed by restoring `opacity: 0.45` for the off
+state specifically (not a revert to the original opacity-only approach —
+on keeps its `#1CA7D6` color + glow) — off is now dim/muted and on is full
+brightness plus the accent and glow, giving both states unambiguous
+contrast regardless of theme.
 
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
