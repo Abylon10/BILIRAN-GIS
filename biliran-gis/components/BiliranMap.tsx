@@ -842,6 +842,18 @@ export default function BiliranMap({
             own footprint (SVG painter's-model z-order — independent of
             opacity), so this doesn't break barangay-level taps within the
             focused municipality.
+
+            Both layers are called TWICE — shapes (+ weather icons) in this
+            first pass, labels in a second pass further below, with the
+            waterway overlay sandwiched between them. A single call-each-
+            once version painted the waterway overlay either fully under
+            the land (invisible, the previous bug) or fully on top of it
+            INCLUDING every name label (lines cutting through "Culaba",
+            "Naval", etc., reported directly as the very next complaint)
+            — there's no single paint position that's "on top of the map
+            but under the names" without splitting what each layer renders.
+            showLabels={false} here keeps each call doing exactly what it
+            did before, minus its own label pass.
           */}
           <MunicipalityLayer
             municipalities={municipalities}
@@ -852,6 +864,7 @@ export default function BiliranMap({
             barangayOpacity={barangayOpacity}
             weatherByMunicipality={weatherByMunicipality}
             showWeatherIcons={currentView.scale < 1.3}
+            showLabels={false}
           />
           <g
             style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }}
@@ -863,6 +876,7 @@ export default function BiliranMap({
               barangaysByKey={barangaysByKey}
               selectedKey={selectedKey}
               onSelect={handleBarangaySelect}
+              showLabels={false}
             />
           </g>
 
@@ -871,14 +885,17 @@ export default function BiliranMap({
             a real lower-end-device win — ~448 line features, merged into a
             single <path> element rather than 448 separate ones, see
             waterwayPaths' own comment above for the measured cost that fixed).
-            Painted LAST, after both polygon layers above (not first, as it
-            used to be) — SVG paints in document order, and MunicipalityLayer/
-            BarangayLayer's own fills are effectively opaque (fillOpacity
-            0.85-1), so with the overlay painted first it was getting almost
-            entirely covered by land, barely visible — reported directly
-            ("very visible when the toggle is on"). Painting it last makes it
-            a true overlay on top of the land at any zoom level.
-            pointerEvents="none" — new now that this sits on top of every
+            Painted here — after both layers' SHAPES above, but before both
+            layers' LABELS below (see the two-pass comment on
+            MunicipalityLayer above) — SVG paints in document order, and
+            MunicipalityLayer/BarangayLayer's own fills are effectively
+            opaque (fillOpacity 0.85-1), so with the overlay painted before
+            the shapes it was getting almost entirely covered by land,
+            barely visible — reported directly ("very visible when the
+            toggle is on"). Painting it after the shapes (but before the
+            labels) makes it a true overlay on top of the land without also
+            running over every name label.
+            pointerEvents="none" — needed now that this sits on top of every
             interactive polygon instead of under them: without it, this
             stroke-only path (fill="none") would still be hit-testable
             (SVG's default pointer-events: visiblePainted catches a painted
@@ -911,6 +928,35 @@ export default function BiliranMap({
               pointerEvents="none"
             />
           )}
+
+          {/*
+            Second pass: labels only, for both layers, on top of the
+            waterway overlay painted just above — see the two-pass comment
+            on the first MunicipalityLayer call above for why this is split
+            out rather than called once. showShapes={false} skips every-
+            thing these calls already rendered in the first pass.
+          */}
+          <MunicipalityLayer
+            municipalities={municipalities}
+            municipalityPaths={municipalityPaths}
+            barangays={barangays}
+            onSelect={focusMuni}
+            nearestPrefix={nearestPrefix}
+            barangayOpacity={barangayOpacity}
+            weatherByMunicipality={weatherByMunicipality}
+            showWeatherIcons={currentView.scale < 1.3}
+            showShapes={false}
+          />
+          <g style={{ opacity: barangayOpacity, transition: 'opacity 0.4s ease' }} pointerEvents="none">
+            <BarangayLayer
+              brgyGeo={brgyGeo}
+              nearestPrefix={nearestPrefix}
+              barangaysByKey={barangaysByKey}
+              selectedKey={selectedKey}
+              onSelect={handleBarangaySelect}
+              showShapes={false}
+            />
+          </g>
         </g>
       </svg>
 
@@ -1003,6 +1049,8 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   barangayOpacity,
   weatherByMunicipality,
   showWeatherIcons,
+  showShapes = true,
+  showLabels = true,
 }: {
   municipalities: GeoFeatureCollection<MuniProps>
   // Precomputed by the parent (BiliranMap) via useMemo, keyed only on the
@@ -1028,6 +1076,13 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   // user has zoomed into a municipality, so they're skipped entirely past
   // that threshold rather than staying mounted (and animating) underneath.
   showWeatherIcons: boolean
+  // Both default true (every existing call site is unaffected) -- added so
+  // BiliranMap can call this component twice, once per pass, with the
+  // waterway overlay sandwiched between them: shapes (+ weather icons)
+  // first, then labels on top of that. See the waterway <path>'s own
+  // comment below for why this split exists.
+  showShapes?: boolean
+  showLabels?: boolean
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   const bounds = useMemo(() => boundsOf(municipalities.features, project), [municipalities, project])
@@ -1056,31 +1111,33 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
         a scale (full-municipality fills, not fine detail) where slightly
         harder polygon edges aren't perceptible.
       */}
-      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
-        {municipalities.features.map((f) => {
-          const score = municipalityWorstScore(barangays, f.properties.municipality)
-          const d = municipalityPaths.get(f.properties.pgc_prefix)
-          return (
-            <g key={f.properties.pgc_prefix} style={{ opacity: fadeFor(f.properties.pgc_prefix), transition: 'opacity 0.4s ease' }}>
-              <path
-                className="bfw-map-poly"
-                d={d}
-                fill={fsiScoreColor(score)}
-                fillOpacity={0.85}
-                stroke="var(--card-bg)"
-                strokeWidth={0.0006}
-                onClick={() => onSelect(f.properties.pgc_prefix)}
-                style={{ cursor: 'pointer' }}
-              >
-                <title>
-                  {f.properties.municipality} — worst barangay FSI score {score.toFixed(2)} — tap to zoom in
-                </title>
-              </path>
-              <path d={d} fill="url(#bfw-land-sheen)" pointerEvents="none" />
-            </g>
-          )
-        })}
-      </g>
+      {showShapes && (
+        <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
+          {municipalities.features.map((f) => {
+            const score = municipalityWorstScore(barangays, f.properties.municipality)
+            const d = municipalityPaths.get(f.properties.pgc_prefix)
+            return (
+              <g key={f.properties.pgc_prefix} style={{ opacity: fadeFor(f.properties.pgc_prefix), transition: 'opacity 0.4s ease' }}>
+                <path
+                  className="bfw-map-poly"
+                  d={d}
+                  fill={fsiScoreColor(score)}
+                  fillOpacity={0.85}
+                  stroke="var(--card-bg)"
+                  strokeWidth={0.0006}
+                  onClick={() => onSelect(f.properties.pgc_prefix)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <title>
+                    {f.properties.municipality} — worst barangay FSI score {score.toFixed(2)} — tap to zoom in
+                  </title>
+                </path>
+                <path d={d} fill="url(#bfw-land-sheen)" pointerEvents="none" />
+              </g>
+            )
+          })}
+        </g>
+      )}
       {/*
         Each municipality gets its own weather icon, not just the one
         global corner ribbon — real current conditions from Open-Meteo
@@ -1089,7 +1146,7 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
         loading (or whose fetch failed) simply renders no icon this pass,
         rather than a fake/placeholder condition.
       */}
-      {showWeatherIcons && (
+      {showShapes && showWeatherIcons && (
         <>
           <WeatherIconStyles />
           {municipalities.features.map((f) => {
@@ -1111,7 +1168,7 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
           })}
         </>
       )}
-      {municipalities.features.map((f) => {
+      {showLabels && municipalities.features.map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const projected = project(lon, lat)
         // Hard cutoff, not the same continuous fadeFor curve the shape/icon
@@ -1153,6 +1210,8 @@ const BarangayLayer = memo(function BarangayLayer({
   barangaysByKey,
   selectedKey,
   onSelect,
+  showShapes = true,
+  showLabels = true,
 }: {
   // Raw collection + the current municipality prefix, rather than a
   // pre-filtered array — filtering happens inside this component's own
@@ -1167,6 +1226,10 @@ const BarangayLayer = memo(function BarangayLayer({
   barangaysByKey: Map<string, Barangay>
   selectedKey: string | null
   onSelect: (key: string) => void
+  // Same two-pass split as MunicipalityLayer's own showShapes/showLabels —
+  // see its comment and the waterway <path>'s comment in BiliranMap below.
+  showShapes?: boolean
+  showLabels?: boolean
 }) {
   const project = useMemo(() => makeProjector(11.58), [])
   const features = useMemo(
@@ -1235,35 +1298,37 @@ const BarangayLayer = memo(function BarangayLayer({
           though profiling isolated the actual tap-lag report to
           MunicipalityLayer specifically (these shapes weren't the
           bottleneck) -- cheap and harmless to extend to this layer too. */}
-      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
-        {features.map((f) => {
-          const b = barangaysByKey.get(f.properties.key)
-          const selected = f.properties.key === selectedKey
-          const d = barangayPaths.get(f.properties.key)
-          return (
-            <g key={f.properties.key}>
-              <path
-                className="bfw-map-poly"
-                d={d}
-                fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
-                fillOpacity={selected ? 1 : 0.88}
-                stroke={selected ? '#fff' : 'rgba(11, 30, 40, 0.3)'}
-                strokeWidth={selected ? 0.0014 : 0.0003}
-                onClick={() => onSelect(f.properties.key)}
-                style={{ cursor: 'pointer' }}
-              >
-                <title>
-                  {f.properties.barangay}
-                  {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
-                </title>
-              </path>
-              {/* Stronger than the island-overview sheen — these shapes render much larger zoomed in, so the same subtle version reads as flat */}
-              <path d={d} fill="url(#bfw-land-sheen-strong)" pointerEvents="none" />
-            </g>
-          )
-        })}
-      </g>
-      {features.filter((f) => labeledKeys.has(f.properties.key)).map((f) => {
+      {showShapes && (
+        <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
+          {features.map((f) => {
+            const b = barangaysByKey.get(f.properties.key)
+            const selected = f.properties.key === selectedKey
+            const d = barangayPaths.get(f.properties.key)
+            return (
+              <g key={f.properties.key}>
+                <path
+                  className="bfw-map-poly"
+                  d={d}
+                  fill={b ? fsiScoreColor(b.mean_fsi_score) : '#7A8A99'}
+                  fillOpacity={selected ? 1 : 0.88}
+                  stroke={selected ? '#fff' : 'rgba(11, 30, 40, 0.3)'}
+                  strokeWidth={selected ? 0.0014 : 0.0003}
+                  onClick={() => onSelect(f.properties.key)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <title>
+                    {f.properties.barangay}
+                    {b ? ` — ${b.dominant_fsi_label} (score ${b.mean_fsi_score.toFixed(2)})` : ''}
+                  </title>
+                </path>
+                {/* Stronger than the island-overview sheen — these shapes render much larger zoomed in, so the same subtle version reads as flat */}
+                <path d={d} fill="url(#bfw-land-sheen-strong)" pointerEvents="none" />
+              </g>
+            )
+          })}
+        </g>
+      )}
+      {showLabels && features.filter((f) => labeledKeys.has(f.properties.key)).map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const [x, y] = project(lon, lat)
         return (
