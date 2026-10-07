@@ -440,6 +440,60 @@ skip past the transition window) while centered on Culaba, reading both
 the municipality label's and every barangay label's live computed
 opacity at each step — never simultaneously visible at any point.
 
+**Follow-up: `barangayOpacity` could never actually reach 0 — Culaba's
+barangay content was already showing on first page load, before any
+tap/zoom.** The hard-cutoff fix above assumed `barangayOpacity` genuinely
+reaches 0 at the island-overview default — reported directly that it
+didn't: Culaba's barangay-level polygons/labels were partially visible
+right from entering the site. Root cause, traced in the same block as
+`muniFillScale` above: `lowThreshold = muniFillScale * 0.55` and
+`highThreshold = muniFillScale * 0.85` were computed directly against
+`muniFillScale`, which the zoom-cap rounds already left uniformly clamped
+to `MAX_SCALE` (1.5) for every municipality (every real natural fill
+scale, 1.9x-2.8x, exceeds it). That put `lowThreshold` at `0.825` —
+**below 1, the view's own minimum achievable scale** — so
+`barangayOpacity` could never reach exactly 0 for whichever municipality
+`nearestMunicipalityPrefix` resolves to, which happens unconditionally
+even at the untouched default view (Culaba, being geometrically nearest
+the island's own center). This was also silently why the municipality-
+label hard-cutoff above made Culaba's own name invisible even at the
+default view — same root cause, not a separate bug.
+
+Fixed by anchoring the two thresholds to the *achievable* range `[1,
+muniFillScale]` instead of starting from zero:
+```
+const lowThreshold = 1 + (muniFillScale - 1) * 0.55
+const highThreshold = 1 + (muniFillScale - 1) * 0.85
+```
+This guarantees `lowThreshold >= 1` always (since `muniFillScale >= 1` by
+construction), so `barangayOpacity` is exactly 0 at the true minimum scale
+regardless of whatever `MAX_SCALE` happens to be tuned to later — fixing
+the mechanism generically rather than re-deriving magic numbers each time
+`MAX_SCALE` changes. Confirmed via Playwright, reading the actual
+opacity-bearing wrapper (`<g style={{opacity: barangayOpacity}}>` around
+`BarangayLayer` — its own `<text>` children never set their own opacity,
+so `getComputedStyle` on a leaf label is meaningless; CSS `opacity` isn't
+inherited into a child's own computed style, only into rendering) rather
+than any individual label: at a completely fresh load, that wrapper's
+opacity is `0` and Culaba's own municipality name renders at opacity `1`,
+matching every other municipality.
+
+**Waterways made bolder, and the toggle button lights up when on.**
+`#7EC8D9` (the waterway line color) read as a pale, washed-out cyan
+against the warm terrain palette, reported directly — bumped to a more
+saturated `#1CA7D6`, with `strokeWidth` increased from `0.0009` to
+`0.0015` (now comparable in visual weight to a selected barangay's own
+border). `app/page.tsx`'s waterways toggle button previously only dimmed
+via `opacity` when off (`0.55`) — a subtle difference that read like a
+disabled control, not an on/off light. Replaced with a clearer language
+reusing the same `#1CA7D6` accent as the line color (so the button
+visually previews what's on the map): full opacity always now; when on,
+the icon's `currentColor` switches to `#1CA7D6` and a glow `boxShadow` is
+layered on top of (not replacing) `.bfw-btn`'s own embossed shadow values
+— replacing the whole `boxShadow` instead of appending to it would have
+made the button look flat/different from every other header button while
+lit.
+
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
 top-0`, clip-path tapering only the bottom-left corner). Now `absolute

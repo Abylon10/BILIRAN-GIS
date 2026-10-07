@@ -555,8 +555,20 @@ export default function BiliranMap({
   // for most municipalities). Clamping here keeps the reveal reachable
   // regardless of how low MAX_SCALE is tuned.
   const muniFillScale = Math.min(MAX_SCALE, nearestPrefix ? muniFocusByPrefix[nearestPrefix].scale : 3)
-  const lowThreshold = muniFillScale * 0.55
-  const highThreshold = muniFillScale * 0.85
+  // Anchored to the achievable [1, muniFillScale] range, not muniFillScale
+  // directly from zero — with muniFillScale now uniformly clamped to
+  // MAX_SCALE (above) for every municipality, the old `muniFillScale *
+  // 0.55` put lowThreshold at 0.825 for MAX_SCALE=1.5, BELOW 1, the view's
+  // own minimum achievable scale. Since nearestMunicipalityPrefix always
+  // resolves to some municipality (even at the untouched default
+  // full-island view, before any tap/zoom), that meant barangayOpacity
+  // could never actually reach 0 for whichever one is nearest — reported
+  // directly as that municipality's barangay-level content (polygons,
+  // labels) already partially visible on first load. Starting the range at
+  // 1 instead guarantees lowThreshold >= 1 always, so barangayOpacity is
+  // exactly 0 at the true minimum scale regardless of MAX_SCALE's value.
+  const lowThreshold = 1 + (muniFillScale - 1) * 0.55
+  const highThreshold = 1 + (muniFillScale - 1) * 0.85
   const barangayOpacity = Math.min(1, Math.max(0, (currentView.scale - lowThreshold) / (highThreshold - lowThreshold)))
   const isZoomed = currentView.scale > 1.02
 
@@ -805,13 +817,18 @@ export default function BiliranMap({
             clipPath keeps lines from spilling past the coastline into open
             sea (bfw-island-clip, defined above — reported directly, most
             visible around Culaba, but the underlying line data isn't
-            guaranteed to stay inside the landmass anywhere).
+            guaranteed to stay inside the landmass anywhere). Color/width
+            bumped further (darker, more saturated blue; thicker stroke)
+            after the original pale cyan still read as washed-out against
+            the warm terrain palette, reported directly — matches the
+            accent color the waterways toggle button itself now lights up
+            with (app/page.tsx), so the button visually previews this.
           */}
           {showWaterways && (
             <g
               opacity={1}
-              stroke="#7EC8D9"
-              strokeWidth={0.0009}
+              stroke="#1CA7D6"
+              strokeWidth={0.0015}
               fill="none"
               clipPath="url(#bfw-island-clip)"
             >
