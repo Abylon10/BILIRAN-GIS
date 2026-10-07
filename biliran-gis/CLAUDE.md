@@ -639,6 +639,18 @@ text, river network still clearly on top of the land) and re-ran the
 unaffected by this change, but the DOM structure around the waterway
 `<path>` did change, worth reconfirming).
 
+**Follow-up 2: per-municipality weather (cloud) icons were still getting
+covered by the waterway overlay.** The two-pass split above moved each
+layer's own *labels* above the waterway, but `MunicipalityLayer`'s
+weather icons block was still gated on `showShapes` (bundled with the
+first, shapes-only pass) — reported directly as river lines running
+over the cloud icons. Fixed by gating the weather icons block on
+`showLabels` instead, so it renders in the *second* pass alongside the
+labels, both now on top of the waterway overlay. No other change to the
+icons themselves (same `fadeFor` opacity, same positioning). Confirmed
+visually with waterways on and real weather conditions mocked — every
+municipality's cloud icon now sits fully above the river lines.
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars

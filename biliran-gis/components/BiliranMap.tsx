@@ -843,17 +843,18 @@ export default function BiliranMap({
             opacity), so this doesn't break barangay-level taps within the
             focused municipality.
 
-            Both layers are called TWICE — shapes (+ weather icons) in this
-            first pass, labels in a second pass further below, with the
-            waterway overlay sandwiched between them. A single call-each-
-            once version painted the waterway overlay either fully under
-            the land (invisible, the previous bug) or fully on top of it
-            INCLUDING every name label (lines cutting through "Culaba",
-            "Naval", etc., reported directly as the very next complaint)
-            — there's no single paint position that's "on top of the map
-            but under the names" without splitting what each layer renders.
-            showLabels={false} here keeps each call doing exactly what it
-            did before, minus its own label pass.
+            Both layers are called TWICE — shapes only in this first pass,
+            weather icons + labels in a second pass further below, with
+            the waterway overlay sandwiched between them. A single call-
+            each-once version painted the waterway overlay either fully
+            under the land (invisible, the previous bug) or fully on top
+            of it INCLUDING every name label and weather icon (lines
+            cutting through "Culaba", "Naval", etc. and through the cloud
+            icons, both reported directly as follow-ups) — there's no
+            single paint position that's "on top of the map
+            but under the names (and icons)" without splitting what each
+            layer renders. showLabels={false} here keeps each call doing
+            its shapes exactly as before, minus its own labels/icons pass.
           */}
           <MunicipalityLayer
             municipalities={municipalities}
@@ -930,11 +931,11 @@ export default function BiliranMap({
           )}
 
           {/*
-            Second pass: labels only, for both layers, on top of the
-            waterway overlay painted just above — see the two-pass comment
-            on the first MunicipalityLayer call above for why this is split
-            out rather than called once. showShapes={false} skips every-
-            thing these calls already rendered in the first pass.
+            Second pass: weather icons + labels, for both layers, on top
+            of the waterway overlay painted just above — see the two-pass
+            comment on the first MunicipalityLayer call above for why this
+            is split out rather than called once. showShapes={false} skips
+            everything these calls already rendered in the first pass.
           */}
           <MunicipalityLayer
             municipalities={municipalities}
@@ -1078,9 +1079,9 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   showWeatherIcons: boolean
   // Both default true (every existing call site is unaffected) -- added so
   // BiliranMap can call this component twice, once per pass, with the
-  // waterway overlay sandwiched between them: shapes (+ weather icons)
-  // first, then labels on top of that. See the waterway <path>'s own
-  // comment below for why this split exists.
+  // waterway overlay sandwiched between them: shapes first, then weather
+  // icons + labels on top of that. See the waterway <path>'s own comment
+  // below for why this split exists.
   showShapes?: boolean
   showLabels?: boolean
 }) {
@@ -1145,8 +1146,16 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
         from modeled flood-risk data anymore. A municipality still
         loading (or whose fetch failed) simply renders no icon this pass,
         rather than a fake/placeholder condition.
+
+        Gated on showLabels (not showShapes) deliberately — these render
+        in BiliranMap's second pass, after the waterway overlay, not the
+        first. Bundled with the shapes pass originally, the icons were
+        getting covered by river lines running on top of them, reported
+        directly. Same reasoning as labels: small graphical/text content
+        that needs to stay readable on top of the waterway overlay, not
+        buried under it like the land fills are meant to be.
       */}
-      {showShapes && showWeatherIcons && (
+      {showLabels && showWeatherIcons && (
         <>
           <WeatherIconStyles />
           {municipalities.features.map((f) => {
