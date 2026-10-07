@@ -495,7 +495,20 @@ export default function HomePage() {
         */
         .bfw-root[data-theme='light'] {
           --sky-top: #0C969C; --sky-bottom: #CFE4EC;
-          --sea-top: #0C969C; --sea-bottom: #6BA3BE;
+          /*
+            Bluer than the shared --p-mid/--p-light palette tones (#0C969C/
+            #6BA3BE, both G≈B -- a teal/cyan hue with barely any blue
+            dominance) -- reported directly as wanting the sea bluer. These
+            two vars are the ONLY thing driving what's actually visible as
+            "the sea": .bfw-sky sits fully behind the full-bleed map once
+            revealed (confirmed via matching getBoundingClientRect on both,
+            same on the login screen too -- the map backdrop there is the
+            same persisted map, not a separate component), so this is the
+            one spot that needed to change, with no cascade to buttons/
+            separators/sun-glow (those reference the shared palette's own
+            literal hex values, not these vars).
+          */
+          --sea-top: #0B6FB8; --sea-bottom: #5AA7E0;
           --sun-glow: rgba(107, 163, 190, 0.5); --sun-core: #E7F1F5;
           --cloud: rgba(231, 241, 245, 0.9);
           --card-bg: rgba(231, 241, 245, 0.75); --card-border: rgba(107, 163, 190, 0.5);
@@ -511,7 +524,9 @@ export default function HomePage() {
         }
         .bfw-root[data-theme='dark'] {
           --sky-top: #032F30; --sky-bottom: #031716;
-          --sea-top: #031716; --sea-bottom: #032F30;
+          /* Same blue-not-teal shift as the light theme's own --sea-top/
+             --sea-bottom above, kept this dark/desaturated for night mode. */
+          --sea-top: #041B2E; --sea-bottom: #0A3A5C;
           --sun-glow: rgba(39, 77, 96, 0.45); --sun-core: #6BA3BE;
           --cloud: rgba(39, 77, 96, 0.35);
           --card-bg: rgba(3, 23, 22, 0.65); --card-border: rgba(107, 163, 190, 0.18);

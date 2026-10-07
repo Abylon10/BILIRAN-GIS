@@ -611,6 +611,21 @@ topmost hit-tested element at that exact pixel is the underlying
 `bfw-map-poly` polygon, not the waterway path, confirming taps still
 reach the polygons underneath.
 
+**Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
+`#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
+dominance) were reported directly as needing to be bluer. These two vars
+turned out to be the *only* thing actually driving what's visible as
+"the sea": `.bfw-sky` sits fully behind the full-bleed map once revealed
+(confirmed via matching `getBoundingClientRect` on both — true on the
+login screen too, since it persists the same map underneath the sign-in
+card, not a separate static backdrop). Shifted both themes toward a
+clearly blue hue instead of teal — light: `#0B6FB8` → `#5AA7E0`; dark:
+`#041B2E` → `#0A3A5C` (same hue shift, kept dark/desaturated for night
+mode). Neither var is reused elsewhere (buttons/separators/sun-glow all
+reference the shared palette's own literal hex values, not these vars),
+so this was a fully isolated change. Confirmed visually across all four
+combinations (login screen + dashboard, day + night).
+
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
 map in general.** Reported alongside the glow issue above, with a
