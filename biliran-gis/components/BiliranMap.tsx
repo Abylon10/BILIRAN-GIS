@@ -1054,6 +1054,18 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
       {municipalities.features.map((f) => {
         const [lon, lat] = geometryCentroid(f.geometry)
         const projected = project(lon, lat)
+        // Hard cutoff, not the same continuous fadeFor curve the shape/icon
+        // above use — a municipality's own name label sitting at/near its
+        // own barangay cluster's centroid (Culaba, most visibly) means a
+        // slow cross-fade leaves both readable at once for a real stretch
+        // of the zoom range, reported directly. The shape/icon are
+        // colored-area-over-colored-area (no legibility issue, left as
+        // fadeFor's smooth fade); this text snaps to 0 the instant
+        // barangayOpacity rises above 0 for this municipality, and only
+        // reappears once fully back at the island-overview framing —
+        // never simultaneously visible with the barangay labels underneath.
+        const isFocused = f.properties.pgc_prefix === nearestPrefix
+        const labelOpacity = isFocused && barangayOpacity > 0 ? 0 : fadeFor(f.properties.pgc_prefix)
         return (
           <text
             key={`label-${f.properties.pgc_prefix}`}
@@ -1064,7 +1076,7 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
             textAnchor="middle"
             fill="#fff"
             filter="url(#bfw-text-shadow)"
-            opacity={fadeFor(f.properties.pgc_prefix)}
+            opacity={labelOpacity}
             style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 0.0015, transition: 'opacity 0.4s ease' }}
           >
             {f.properties.municipality}

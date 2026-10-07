@@ -407,6 +407,39 @@ keeps its polygon exactly as colored/clickable as always; only its
 `<text>` goes unrendered — selecting it from the list or by its visible
 neighbors still works identically.
 
+**Follow-up: the municipality's own name label could still overlap its
+barangay cluster.** The decluttering above only prevented barangay labels
+from overlapping *each other* — it never accounted for the current
+municipality's own big title (`MunicipalityLayer`), which shares a
+continuous `fadeFor(prefix) = Math.max(0, 1 - barangayOpacity)` cross-fade
+with that municipality's filled shape and weather icon as the barangay
+layer fades in. Being continuous rather than a hard cutoff, there's a real
+window — anywhere a zoom/scroll lands between `lowThreshold` and
+`highThreshold`, not just a tap that jumps straight to max scale — where
+the municipality's own name is still partially-to-fully opaque at the same
+time the barangay labels underneath are too. Culaba is where this read
+worst (reported directly, confirmed via screenshot) because its barangay
+cluster sits right at/near its own municipality centroid, i.e. exactly
+where its own label is positioned — but the mechanism itself isn't
+Culaba-specific.
+
+Fixed by giving **only the text label** (not the shape or weather icon,
+which keep their existing graceful `fadeFor` cross-fade — colored-area-
+over-colored-area has no legibility problem) a hard cutoff instead:
+```
+const labelOpacity = isFocused && barangayOpacity > 0 ? 0 : fadeFor(f.properties.pgc_prefix)
+```
+The moment `barangayOpacity` for the current (`nearestPrefix`-matching)
+municipality rises above 0 at all, its own label snaps toward 0 (the
+existing `transition: 'opacity 0.4s ease'` on that same element still
+animates the snap smoothly, just targeting a binary 0/1 instead of
+continuously tracking `barangayOpacity`) — it only shows again once fully
+back at the island-overview framing. Confirmed via Playwright: swept the
+full achievable zoom range via the slider (not a single tap, which would
+skip past the transition window) while centered on Culaba, reading both
+the municipality label's and every barangay label's live computed
+opacity at each step — never simultaneously visible at any point.
+
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
 top-0`, clip-path tapering only the bottom-left corner). Now `absolute
