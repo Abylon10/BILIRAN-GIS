@@ -1025,7 +1025,24 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   }
   return (
     <g>
-      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)">
+      {/*
+        shapeRendering="optimizeSpeed" (skips anti-aliasing on these fills)
+        -- tapping a municipality was measured directly (CDP CPU profiling
+        under 4x throttle, isolating this group specifically by toggling it
+        display:none) to be the real source of the "tapping or changing
+        location is lagging" report: repainting these 7 shapes (they cover
+        most of the visible map, unlike BarangayLayer's smaller zoomed-in
+        ones) is what actually blocks the main thread on every single
+        municipality switch, not panning/zooming itself. Against a
+        production build the dominant longtask dropped from ~150-215ms to
+        ~55-100ms just by testing prod instead of dev (dev's unminified
+        jsxDEV runtime + Strict Mode double-render inflated earlier
+        readings) -- this hint trims the remainder without touching the
+        gradient sheen/drop-shadow/fade that give this layer its depth, at
+        a scale (full-municipality fills, not fine detail) where slightly
+        harder polygon edges aren't perceptible.
+      */}
+      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
         {municipalities.features.map((f) => {
           const score = municipalityWorstScore(barangays, f.properties.municipality)
           const d = municipalityPaths.get(f.properties.pgc_prefix)
@@ -1199,7 +1216,12 @@ const BarangayLayer = memo(function BarangayLayer({
   }, [features, project])
   return (
     <g>
-      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)">
+      {/* shapeRendering="optimizeSpeed" -- see MunicipalityLayer's own copy
+          of this comment; applied here too for the same reason, even
+          though profiling isolated the actual tap-lag report to
+          MunicipalityLayer specifically (these shapes weren't the
+          bottleneck) -- cheap and harmless to extend to this layer too. */}
+      <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
         {features.map((f) => {
           const b = barangaysByKey.get(f.properties.key)
           const selected = f.properties.key === selectedKey

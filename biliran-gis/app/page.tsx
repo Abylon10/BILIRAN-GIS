@@ -732,27 +732,29 @@ export default function HomePage() {
             aria-label={showWaterways ? 'Hide river/waterway lines on the map' : 'Show river/waterway lines on the map'}
             title={showWaterways ? 'Waterway lines: on' : 'Waterway lines: off (lighter for low-end devices)'}
             className="bfw-btn shrink-0 rounded-full p-2"
-            // Lights up when on; dims when off — the off-state opacity was
-            // dropped in an earlier pass in favor of color+glow alone, but
-            // --btn-text (this button's default icon color) is already a
-            // near-white #FBFEFF in both themes, so a full-opacity off
-            // state read just as bright as — or brighter than — the
-            // accent-colored on state, reported directly as backwards.
-            // Restoring the dim for off (not a revert to opacity-only: on
-            // still gets the #1CA7D6 accent + glow below, same color the
-            // waterway lines themselves use in BiliranMap.tsx) gives both
-            // states unambiguous contrast regardless of theme.
+            // Lights up when on; dims when off. A previous pass used a
+            // cyan (#1CA7D6) icon + glow for "on", confirmed via computed
+            // styles to be technically applied -- but that cyan sits in
+            // the same blue-teal hue family as this button's own gradient
+            // (--btn-from/--btn-to) AND the page's own teal sky/background,
+            // so the "glow" blended into its surroundings instead of
+            // popping, reported as "no light". Swapping to a warm amber --
+            // a near-complementary hue against all that teal -- plus a
+            // lit-bulb radial background and a two-layer halo (tight +
+            // wide) makes "on" unmistakable regardless of theme.
             style={
               showWaterways
                 ? {
-                    color: '#1CA7D6',
-                    // Adds a glow on top of (not instead of) .bfw-btn's own
+                    color: '#FFE8A3',
+                    backgroundImage:
+                      'radial-gradient(circle at 50% 35%, #FFD166, #E8A23D 60%, var(--btn-to))',
+                    // Layers on top of (not instead of) .bfw-btn's own
                     // embossed box-shadow, so this still reads as the same
                     // pill button, just lit up — an inline boxShadow here
                     // fully replaces the class's rather than layering with
                     // it, so the base shadow's values are repeated first.
                     boxShadow:
-                      '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 10px 2px rgba(28, 167, 214, 0.65)',
+                      '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 14px 4px rgba(255, 209, 102, 0.95), 0 0 32px 12px rgba(255, 209, 102, 0.55)',
                   }
                 : { opacity: 0.45 }
             }
