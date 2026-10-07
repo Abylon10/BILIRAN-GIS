@@ -946,7 +946,7 @@ export default function HomePage() {
             data-open={sidebarOpen}
             className="bfw-sidebar-handle bfw-btn flex h-16 w-7 items-center justify-center"
           >
-            <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg viewBox="0 0 20 20" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 4l-7 6 7 6" />
             </svg>
           </button>

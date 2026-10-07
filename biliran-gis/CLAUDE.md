@@ -575,6 +575,16 @@ halo structure as the amber version (`rgba(94, 234, 255, …)`). Confirmed
 visually: reads as a glowing cyan bulb, clearly distinct from both the
 dimmed off state and the darker teal backdrop.
 
+**Sidebar handle arrow enlarged.** `app/page.tsx`'s `.bfw-sidebar-handle`
+chevron icon was `h-4 w-4` (16px) inside a `h-16 w-7` pill — too small to
+read clearly at a glance, reported directly. Bumped to `h-6 w-6` (24px)
+with `strokeWidth` nudged from `2` to `2.25` to keep the line weight
+proportionate at the larger size; still comfortably fits inside the
+pill's 28px width. No change to the pill's own size or the
+`right: calc(100% - 28px)` open-state offset (both already sized for
+the handle's 28px width, not the icon). Confirmed visually in both
+closed and open states via a tightly-cropped 2x-scale screenshot.
+
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
 map in general.** Reported alongside the glow issue above, with a
