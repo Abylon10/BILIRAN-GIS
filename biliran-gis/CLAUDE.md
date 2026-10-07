@@ -542,6 +542,84 @@ on keeps its `#1CA7D6` color + glow) — off is now dim/muted and on is full
 brightness plus the accent and glow, giving both states unambiguous
 contrast regardless of theme.
 
+**Follow-up 2: the on-state "glow" still wasn't reading as a light,
+because its own accent color was too close to its surroundings.**
+Reported again after the above: "no light when the waterway toggle is
+on." Checked via `getComputedStyle` on the button/svg/every `<path>` in
+both states — `color`, `boxShadow`, and `stroke` (inherited via
+`currentColor`) all resolved exactly as coded; this was never a CSS
+correctness bug. The real issue, confirmed by screenshotting the button
+at 2x device-scale zoomed tight to just its own bounds: `#1CA7D6` (both
+the icon and the glow) sits in the same blue-teal hue family as
+`.bfw-btn`'s own gradient (`--btn-from`/`--btn-to`, teal-to-dark-teal in
+both themes) *and* the page's own sky gradient background (`#274D60` →
+`#0A7075`/`#032F30`→`#031716`) — a cyan glow on a teal button on a teal
+page blends in rather than pops, no matter how technically correct the
+box-shadow is. Fixed by swapping the on-state to a warm amber — a
+near-complementary hue against all that teal — with a lit-bulb radial
+background (`radial-gradient(circle at 50% 35%, #FFD166, #E8A23D 60%,
+var(--btn-to))`) and a two-layer halo (tight 14px + wide 32px blur,
+`rgba(255, 209, 102, …)`) layered on `.bfw-btn`'s own embossed shadow.
+Confirmed visually: off is dim teal, on is an unmistakable glowing amber
+bulb with a visible halo — screenshotted side by side.
+
+**`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
+changing location is lagging," isolated to one specific layer, not the
+map in general.** Reported alongside the glow issue above, with a
+specific repro this time ("when tapping or changing location"), not a
+vague "its laggy" — reused the CDP-throttle + longtask-profiling
+methodology from the waterway-merge fix above, this time isolating a
+plain municipality tap with no drag mixed in. Measured a single ~150-
+220ms longtask under 4x CPU throttle purely from tapping Culaba or Naval
+— no panning involved, so the earlier waterway/zoom-range fixes didn't
+touch this path at all.
+
+Bisected by toggling `display:none` on each layer independently
+(content still mounts/computes, just isn't painted) rather than
+guessing: hiding `BarangayLayer` entirely left the stall unchanged;
+hiding only `MunicipalityLayer` eliminated it completely (0 longtasks,
+steady 16.7ms frames) even with `BarangayLayer` still mounting ~24-48
+fresh barangay polygons for the newly-focused municipality in the same
+commit. So the barangay-level content (the layer with *more* elements)
+was never the bottleneck — `MunicipalityLayer`'s own 7 shapes were,
+because they cover most of the visible map (unlike `BarangayLayer`'s
+smaller, already-zoomed shapes) and every tap changes `nearestPrefix`/
+`barangayOpacity`, forcing a real repaint of that large on-screen area.
+No single decoration (the shared `feDropShadow` filter, the gradient
+"sheen" overlay, the opacity cross-fade transition, labels' own
+`feDropShadow`) was individually dominant when removed in isolation —
+each shaved off a modest amount, confirming the cost was spread across
+several stacked rendering techniques on the same large shapes rather
+than one fixable culprit.
+
+**Also surfaced a bigger, previously-unknown confound: this entire
+session's lag profiling (including the waterway-merge fix above) had
+only ever been run against `npm run dev`.** Profiling the identical tap
+against a real production build (`next build && next start`) dropped the
+dominant longtask from ~150-215ms to ~55-100ms — dev's unminified
+`jsxDEV` runtime and Strict Mode's double-invoked renders were inflating
+every dev-mode measurement this session has taken by roughly 2-3x. (Not
+re-litigating the waterway fix — that one's root cause, the 448-vs-1
+`<path>` count, and its relative improvement hold regardless of dev vs.
+prod; this just means its absolute before/after numbers were dev-mode
+numbers, and real production lag was never as severe as those readings
+implied.) Future lag investigations in this repo should profile against
+a production build, not dev, to avoid chasing dev-only overhead.
+
+Fixed by adding `shapeRendering="optimizeSpeed"` (skip anti-aliasing,
+no visual-effect change — same fill/gradient/shadow/stroke, just harder
+polygon edges at a scale too small to notice) to both layers'
+`.bfw-shadow-group` — the one lever that measurably helped without
+touching any of the layer's visual design (gradient sheen, drop-shadow,
+cross-fade all left intact, unlike the individually-tested-and-reverted
+alternative of stripping those effects outright). Verified against a
+production build, same CDP-throttled methodology: Culaba's longtask
+dropped from 55ms to 0ms (no longtask at all) across 3 repeated runs;
+Naval's dropped from ~55-87ms to ~53-67ms. Confirmed visually unchanged
+(full-island overview and a zoomed-into-Culaba screenshot, both at 2x
+device scale) — gradient sheen, drop-shadows, and label text all still
+render identically.
+
 **`WeatherBadge` moved to upper-center.** Previously a right-leaning
 trapezoid flush against the map's top-right corner (`absolute right-0
 top-0`, clip-path tapering only the bottom-left corner). Now `absolute
