@@ -563,6 +563,18 @@ var(--btn-to))`) and a two-layer halo (tight 14px + wide 32px blur,
 Confirmed visually: off is dim teal, on is an unmistakable glowing amber
 bulb with a visible halo — screenshotted side by side.
 
+**Follow-up 3: amber worked, but cyan was asked for specifically.** The
+hue-contrast fix above worked, but the request was for a cyan light, not
+a color change to amber. Went back to cyan without reintroducing the
+original problem (a muted mid-tone cyan blending into the teal
+background) by leaning on a *lightness* jump instead of a hue jump: a
+bright, highly-saturated "electric" cyan (`#7DF9FF` center fading to
+`#11B4D6`, icon `#E0FFFC`) well past the page/button's own darker,
+desaturated teal tones, same lit-bulb radial background + two-layer
+halo structure as the amber version (`rgba(94, 234, 255, …)`). Confirmed
+visually: reads as a glowing cyan bulb, clearly distinct from both the
+dimmed off state and the darker teal backdrop.
+
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
 map in general.** Reported alongside the glow issue above, with a
