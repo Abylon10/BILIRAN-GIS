@@ -282,6 +282,42 @@ the sidebar happens to be open):
   here) — a future pass simplifying that geometry (e.g. via `mapshaper`)
   remains a separate, bigger lever if lag is still reported after this.
 
+**Waterways merged into one `<path>` element instead of 448 separate
+ones — the single biggest measured lag contributor found.** Lag was
+still reported after every pass above, with no specific repro — rather
+than guess again, profiled directly: `page.context().newCDPSession()` +
+`Emulation.setCPUThrottlingRate({ rate: 4 })` (simulating a lower-end
+device on this fast dev machine) + injected `requestAnimationFrame`
+frame-timing and a `PerformanceObserver` for `longtask` entries, run
+across several real interactions. Dragging the map with waterways off
+averaged ~23ms/frame with ~0.3s of main-thread long-task time over a
+~2.3s drag — tolerable. Toggling waterways on and dragging the exact
+same gesture: ~45ms/frame average, a 1.4s single-frame stall, and **35
+long tasks totaling 4.5s of the 6.5s test — 70% of the interaction
+blocked on the main thread.** By a wide margin the worst case measured,
+and the only variable changed between the two runs was the waterways
+toggle.
+
+Root cause: `waterwayPaths` (`BiliranMap.tsx`) rendered each of the
+~448 `LineString` features as its own `<path>` DOM element inside
+`.bfw-zoom-group`, the `<g>` whose `transform` updates every pan/zoom
+frame. 448 separate elements means 448 separate things for the browser
+to paint/recomposite bookkeeping on every transform change, even though
+they share one stroke/fill and have no per-segment interactivity
+(no `onClick`, no distinct styling) — nothing requires them to be
+separate DOM nodes. Fixed by concatenating all 448 `d` strings (each
+already its own complete `M...L...` subpath) into one string, rendered
+as a single `<path>`, via `.join(' ')` — SVG renders multiple
+independent subpaths within one `<path>` element identically to the
+same subpaths as separate elements, but it's one DOM node instead of
+448. Re-ran the identical profiling script afterward: the waterways-on
+drag test's long-task time dropped from 4.5s to 0.7s (an ~84%
+reduction), dropped frames (>33ms) from 42 to 18, frames slower than
+10fps from 17 to 3, and average frame time from ~45ms to ~31ms.
+Confirmed visually unchanged (same screenshot, same coastline clipping)
+and confirmed via DOM query that exactly one `<path
+stroke="#1CA7D6">` element now exists instead of 448.
+
 **Max zoom capped at 1.5x (`MAX_SCALE` in `BiliranMap.tsx`), down from 9x,
 tightened in two steps** — lag was still reported after the fixes above,
 so the next direct ask was to cut the zoom range itself: first to 1.8x

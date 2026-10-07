@@ -139,10 +139,11 @@ export default function BiliranMap({
   // can cover the whole map, since there's no visual reason to keep
   // animating underneath it then.
   pauseAnimations?: boolean
-  // Gates the waterway/river line overlay (~448 SVG <path>s) — real
-  // rendering cost, so this is a genuine lower-end-device toggle, not
-  // cosmetic. Defaults true here for component-level safety; the one real
-  // caller (app/page.tsx) always passes its own explicit state.
+  // Gates the waterway/river line overlay (~448 line features, rendered
+  // as one merged <path> — see waterwayPaths below) — real rendering
+  // cost, so this is a genuine lower-end-device toggle, not cosmetic.
+  // Defaults true here for component-level safety; the one real caller
+  // (app/page.tsx) always passes its own explicit state.
   showWaterways?: boolean
 }) {
   const [municipalities, setMunicipalities] = useState<GeoFeatureCollection<MuniProps> | null>(null)
@@ -251,8 +252,20 @@ export default function BiliranMap({
   // setView() during a drag (see applyPendingPointerMove above) don't
   // re-stringify all 448 line features' `d` attributes on every frame,
   // only whenever the underlying waterways data itself changes.
+  //
+  // Joined into ONE string (rendered as a single <path>, not 448 separate
+  // ones) — measured directly (CPU-throttled Playwright profile, dragging
+  // the map with waterways on): 448 individual <path> DOM nodes inside the
+  // actively-transformed zoom group cost ~4.5s of main-thread long-task
+  // time across a 6.5s drag (vs. ~0.3s with waterways off), the single
+  // biggest lag contributor found. Each line feature's `d` already starts
+  // with its own "M" (moveto), so concatenating them with a space is valid
+  // SVG — multiple independent subpaths in one <path> element render
+  // identically to the same paths as separate elements (same stroke, no
+  // per-segment interactivity needed here), just as one DOM node for the
+  // browser to paint/recomposite instead of 448.
   const waterwayPaths = useMemo(
-    () => waterways?.features.map((f) => lineGeometryToPath(f.geometry, project)) ?? [],
+    () => waterways?.features.map((f) => lineGeometryToPath(f.geometry, project)).join(' ') ?? '',
     [waterways, project]
   )
 
@@ -807,8 +820,10 @@ export default function BiliranMap({
         >
           {/*
             Waterways — off by default (showWaterways toggle in app/page.tsx,
-            a real lower-end-device win since this is ~448 SVG <path>s). When
-            on, rendered at a fixed, fully-visible opacity/width regardless of
+            a real lower-end-device win — ~448 line features, merged into a
+            single <path> element rather than 448 separate ones, see
+            waterwayPaths' own comment above for the measured cost that fixed).
+            When on, rendered at a fixed, fully-visible opacity/width regardless of
             zoom — an earlier version ramped both with barangayOpacity (dim
             at the island overview, more visible near barangay zoom), but
             that read as "faded into the background" rather than the
@@ -825,17 +840,14 @@ export default function BiliranMap({
             with (app/page.tsx), so the button visually previews this.
           */}
           {showWaterways && (
-            <g
+            <path
+              d={waterwayPaths}
               opacity={1}
               stroke="#1CA7D6"
               strokeWidth={0.0015}
               fill="none"
               clipPath="url(#bfw-island-clip)"
-            >
-              {waterwayPaths.map((d, i) => (
-                <path key={i} d={d} />
-              ))}
-            </g>
+            />
           )}
 
           {/* dimmed context outlines of the rest of the island, fading in as barangayOpacity rises */}
