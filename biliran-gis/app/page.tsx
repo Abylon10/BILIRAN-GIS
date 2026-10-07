@@ -717,6 +717,18 @@ export default function HomePage() {
               showChrome={revealed}
               focusedMunicipality={focusedMunicipality}
               onFocusMunicipality={setFocusedMunicipality}
+              // Clears the selected barangay (and with it,
+              // SelectedBarangayCorner's mini FSI card below) specifically
+              // when the user taps the map's own back-to-overview button —
+              // reported directly: the card was staying visible, showing a
+              // barangay no longer anywhere near the current view, after
+              // going back to the full-island map. Deliberately a separate
+              // callback from onFocusMunicipality={setFocusedMunicipality}
+              // above, which also fires from the dashboard's own
+              // municipality-filter dropdown clearing to "all" — clearing
+              // the selection from THAT action wasn't asked for and would
+              // be a different, unrelated behavior change.
+              onResetToOverview={() => setSelectedKey(null)}
               resetToken={mapResetToken}
               nextForecastUpdateAt={nextForecastUpdateAt}
               pauseAnimations={sidebarOpen}

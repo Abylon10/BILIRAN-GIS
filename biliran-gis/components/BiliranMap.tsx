@@ -90,6 +90,7 @@ export default function BiliranMap({
   showChrome = true,
   focusedMunicipality = null,
   onFocusMunicipality,
+  onResetToOverview,
   resetToken = 0,
   nextForecastUpdateAt = null,
   pauseAnimations = false,
@@ -111,6 +112,15 @@ export default function BiliranMap({
   // so the dropdown follows. null means "all municipalities" / full island.
   focusedMunicipality?: string | null
   onFocusMunicipality?: (name: string | null) => void
+  // Fires specifically when the user taps THIS map's own "all
+  // municipalities" reset button below — distinct from
+  // onFocusMunicipality(null), which also fires from the dashboard's own
+  // municipality-filter dropdown clearing to "all" (a different action,
+  // reported directly as NOT what should clear the selected barangay).
+  // app/page.tsx uses this one to clear selectedKey (and with it,
+  // SelectedBarangayCorner's mini FSI card) specifically when the user
+  // goes back to the full-island view from the map itself.
+  onResetToOverview?: () => void
   // Forces the view back to the default whole-island framing, regardless
   // of the current selectedKey/focusedMunicipality — a monotonically
   // incrementing token (not a boolean) since app/page.tsx's handleSignOut
@@ -593,6 +603,7 @@ export default function BiliranMap({
     setInteracting(false)
     setView({ cx: islandCx, cy: islandCy, scale: 1 })
     onFocusMunicipality?.(null)
+    onResetToOverview?.()
   }
 
   // Drag-vs-tap disambiguation: pointer capture is deferred until the
@@ -690,11 +701,11 @@ export default function BiliranMap({
         .bfw-sea-shimmer { animation: bfw-sea-shimmer 16s ease-in-out infinite; }
 
         /* Page Visibility pause — tab backgrounded/screen locked. Every
-           continuous ambient animation in this map (sea shimmer, drifting
-           clouds, per-municipality weather-icon drift/rain — see
-           DriftingClouds/WeatherIconStyles below) is driven by a CSS
-           animation-name, so pausing them all is one blanket rule here
-           rather than touching each @keyframes definition individually. */
+           continuous ambient animation in this map (sea shimmer,
+           per-municipality weather-icon drift/rain — see WeatherIconStyles
+           below) is driven by a CSS animation-name, so pausing them all is
+           one blanket rule here rather than touching each @keyframes
+           definition individually. */
         .bfw-anim-paused, .bfw-anim-paused * { animation-play-state: paused !important; }
 
         /* prefers-reduced-motion: reduce — an explicit OS-level opt-in, not
@@ -756,10 +767,11 @@ export default function BiliranMap({
             <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
           </radialGradient>
           {/*
-            Puffier cloud lobes (DriftingClouds, WeatherIconSVG) use this
-            instead of a flat fill — a soft off-center highlight plus a
-            dimmer rim gives each lobe volume instead of reading as a flat
-            gray/white blob. Purely a styling gradient, not tied to any data.
+            Puffier cloud lobes (WeatherIconSVG's per-municipality icons)
+            use this instead of a flat fill — a soft off-center highlight
+            plus a dimmer rim gives each lobe volume instead of reading as
+            a flat gray/white blob. Purely a styling gradient, not tied to
+            any data.
           */}
           <radialGradient id="bfw-cloud-body" cx="38%" cy="32%" r="70%">
             <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
@@ -811,7 +823,6 @@ export default function BiliranMap({
           fill="url(#bfw-sea-glow)"
           pointerEvents="none"
         />
-        {currentView.scale < 1.3 && <DriftingClouds bounds={islandBounds} />}
 
         <g
           className="bfw-zoom-group"
@@ -843,17 +854,18 @@ export default function BiliranMap({
             opacity), so this doesn't break barangay-level taps within the
             focused municipality.
 
-            Both layers are called TWICE — shapes (+ weather icons) in this
-            first pass, labels in a second pass further below, with the
-            waterway overlay sandwiched between them. A single call-each-
-            once version painted the waterway overlay either fully under
-            the land (invisible, the previous bug) or fully on top of it
-            INCLUDING every name label (lines cutting through "Culaba",
-            "Naval", etc., reported directly as the very next complaint)
-            — there's no single paint position that's "on top of the map
-            but under the names" without splitting what each layer renders.
-            showLabels={false} here keeps each call doing exactly what it
-            did before, minus its own label pass.
+            Both layers are called TWICE — shapes only in this first pass,
+            weather icons + labels in a second pass further below, with
+            the waterway overlay sandwiched between them. A single call-
+            each-once version painted the waterway overlay either fully
+            under the land (invisible, the previous bug) or fully on top
+            of it INCLUDING every name label and weather icon (lines
+            cutting through "Culaba", "Naval", etc. and through the cloud
+            icons, both reported directly as follow-ups) — there's no
+            single paint position that's "on top of the map
+            but under the names (and icons)" without splitting what each
+            layer renders. showLabels={false} here keeps each call doing
+            its shapes exactly as before, minus its own labels/icons pass.
           */}
           <MunicipalityLayer
             municipalities={municipalities}
@@ -930,11 +942,11 @@ export default function BiliranMap({
           )}
 
           {/*
-            Second pass: labels only, for both layers, on top of the
-            waterway overlay painted just above — see the two-pass comment
-            on the first MunicipalityLayer call above for why this is split
-            out rather than called once. showShapes={false} skips every-
-            thing these calls already rendered in the first pass.
+            Second pass: weather icons + labels, for both layers, on top
+            of the waterway overlay painted just above — see the two-pass
+            comment on the first MunicipalityLayer call above for why this
+            is split out rather than called once. showShapes={false} skips
+            everything these calls already rendered in the first pass.
           */}
           <MunicipalityLayer
             municipalities={municipalities}
@@ -986,60 +998,14 @@ export default function BiliranMap({
   )
 }
 
-/**
- * Purely decorative, ambient clouds drifting across the whole-island view
- * — not per-municipality data (see MunicipalityLayer for that). Island
- * overview only; showing these over a zoomed single-municipality view
- * would add motion right where the user is trying to read barangay-level
- * detail. Travel distance is computed from the real island bounds (baked
- * directly into the keyframe, not a CSS custom property) so it scales
- * with the actual map extent rather than a guessed pixel value.
- */
-// React.memo-wrapped (here and MunicipalityLayer/BarangayLayer/
-// WeatherIconSVG below): these can render a large SVG subtree (up to ~500
-// nodes combined at worst case), and without memo, any unrelated parent
-// re-render (a weather-poll tick, a viewport resize) forces React to
-// reconcile that whole tree even when none of a given layer's own props
-// changed. Relies on their callers passing stable prop references
-// (useCallback/useMemo) — see focusMuni/handleBarangaySelect above and
-// municipalityPaths/barangayPaths/waterwayPaths elsewhere in this file.
-const DriftingClouds = memo(function DriftingClouds({ bounds }: { bounds: Bounds }) {
-  const width = bounds.maxX - bounds.minX
-  const height = bounds.maxY - bounds.minY
-  const travel = width * 1.3
-  const cx = bounds.minX + width / 2
-
-  return (
-    <g pointerEvents="none">
-      <style>{`
-        @keyframes bfw-cloud-cross {
-          from { transform: translateX(${-travel}px); }
-          to { transform: translateX(${travel}px); }
-        }
-      `}</style>
-      <g style={{ animation: 'bfw-cloud-cross 65s linear infinite' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.16}) scale(${width * 0.09})`} opacity={0.26}>
-          <ellipse cx="-0.6" cy="0.08" rx="0.9" ry="0.55" fill="#B9C7CE" opacity={0.5} />
-          <ellipse cx="0.9" cy="0.22" rx="1.1" ry="0.55" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="-0.65" cy="-0.05" rx="0.75" ry="0.48" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.3" cy="-0.3" rx="0.8" ry="0.5" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="1.35" cy="0.1" rx="0.6" ry="0.4" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.05" cy="0.05" rx="1.05" ry="0.42" fill="url(#bfw-cloud-body)" />
-        </g>
-      </g>
-      <g style={{ animation: 'bfw-cloud-cross 82s linear infinite', animationDelay: '-35s' }}>
-        <g transform={`translate(${cx},${bounds.minY + height * 0.34}) scale(${width * 0.065})`} opacity={0.2}>
-          <ellipse cx="-0.5" cy="0.06" rx="0.75" ry="0.45" fill="#B9C7CE" opacity={0.5} />
-          <ellipse cx="0.85" cy="0.18" rx="0.9" ry="0.45" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="-0.55" cy="-0.04" rx="0.6" ry="0.38" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.35" cy="-0.24" rx="0.65" ry="0.4" fill="url(#bfw-cloud-body)" />
-          <ellipse cx="0.05" cy="0.04" rx="0.85" ry="0.34" fill="url(#bfw-cloud-body)" />
-        </g>
-      </g>
-    </g>
-  )
-})
-
+// React.memo-wrapped (here and BarangayLayer/WeatherIconSVG below): these
+// can render a large SVG subtree (up to ~500 nodes combined at worst
+// case), and without memo, any unrelated parent re-render (a weather-poll
+// tick, a viewport resize) forces React to reconcile that whole tree even
+// when none of a given layer's own props changed. Relies on their callers
+// passing stable prop references (useCallback/useMemo) — see focusMuni/
+// handleBarangaySelect above and municipalityPaths/barangayPaths/
+// waterwayPaths elsewhere in this file.
 const MunicipalityLayer = memo(function MunicipalityLayer({
   municipalities,
   municipalityPaths,
@@ -1070,17 +1036,17 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   nearestPrefix: string | null
   barangayOpacity: number
   weatherByMunicipality: Record<string, WeatherCondition | null>
-  // Same scale < 1.3 threshold DriftingClouds already uses (approved
-  // decorative-cost trade-off) — up to 7 icons' worth of continuous
-  // cloud-drift + rain-drop CSS animation isn't the visual focus once a
-  // user has zoomed into a municipality, so they're skipped entirely past
-  // that threshold rather than staying mounted (and animating) underneath.
+  // scale < 1.3 (approved decorative-cost trade-off) — up to 7 icons'
+  // worth of continuous cloud-drift + rain-drop CSS animation isn't the
+  // visual focus once a user has zoomed into a municipality, so they're
+  // skipped entirely past that threshold rather than staying mounted
+  // (and animating) underneath.
   showWeatherIcons: boolean
   // Both default true (every existing call site is unaffected) -- added so
   // BiliranMap can call this component twice, once per pass, with the
-  // waterway overlay sandwiched between them: shapes (+ weather icons)
-  // first, then labels on top of that. See the waterway <path>'s own
-  // comment below for why this split exists.
+  // waterway overlay sandwiched between them: shapes first, then weather
+  // icons + labels on top of that. See the waterway <path>'s own comment
+  // below for why this split exists.
   showShapes?: boolean
   showLabels?: boolean
 }) {
@@ -1145,8 +1111,16 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
         from modeled flood-risk data anymore. A municipality still
         loading (or whose fetch failed) simply renders no icon this pass,
         rather than a fake/placeholder condition.
+
+        Gated on showLabels (not showShapes) deliberately — these render
+        in BiliranMap's second pass, after the waterway overlay, not the
+        first. Bundled with the shapes pass originally, the icons were
+        getting covered by river lines running on top of them, reported
+        directly. Same reasoning as labels: small graphical/text content
+        that needs to stay readable on top of the waterway overlay, not
+        buried under it like the land fills are meant to be.
       */}
-      {showShapes && showWeatherIcons && (
+      {showLabels && showWeatherIcons && (
         <>
           <WeatherIconStyles />
           {municipalities.features.map((f) => {

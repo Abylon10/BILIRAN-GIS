@@ -639,6 +639,78 @@ text, river network still clearly on top of the land) and re-ran the
 unaffected by this change, but the DOM structure around the waterway
 `<path>` did change, worth reconfirming).
 
+**Follow-up 2: per-municipality weather (cloud) icons were still getting
+covered by the waterway overlay.** The two-pass split above moved each
+layer's own *labels* above the waterway, but `MunicipalityLayer`'s
+weather icons block was still gated on `showShapes` (bundled with the
+first, shapes-only pass) — reported directly as river lines running
+over the cloud icons. Fixed by gating the weather icons block on
+`showLabels` instead, so it renders in the *second* pass alongside the
+labels, both now on top of the waterway overlay. No other change to the
+icons themselves (same `fadeFor` opacity, same positioning). Confirmed
+visually with waterways on and real weather conditions mocked — every
+municipality's cloud icon now sits fully above the river lines.
+
+**`SelectedBarangayCorner`'s mini FSI card now clears when going back to
+the full-island map.** `app/page.tsx` renders this "quick glance" card
+(`components/SelectedBarangayCorner.tsx`) whenever `selectedKey` is set
+and the sidebar is closed. Tapping the map's own "← All municipalities"
+button (`BiliranMap`'s `resetView()`) only ever reset the *view*
+(pan/zoom) and `focusedMunicipality` — it never touched `selectedKey` —
+so the card kept showing a barangay no longer anywhere near the current
+(now zoomed-out) view, reported directly, confirmed in the reported
+screenshot (full island overview, card still reading "Kawayan... 0.26
+Low"). Reusing the existing `onFocusMunicipality(null)` callback to also
+clear `selectedKey` wasn't safe: that callback *also* fires from the
+dashboard's own municipality-filter dropdown clearing to "all" (a
+different, unrelated action — `onMunicipalityChange={setFocusedMunicipality}`
+elsewhere in `app/page.tsx`), and clearing the selected barangay from
+that action wasn't asked for. Added a new, narrower `onResetToOverview`
+callback prop to `BiliranMap`, fired only from inside `resetView()`
+itself (the map's own back button, its one and only call site), wired
+in `app/page.tsx` to `() => setSelectedKey(null)`. Verified via
+Playwright: selecting a barangay shows the card (`.bfw-selected-corner`
+count 1); tapping "All municipalities" removes it (count 0) and the
+resulting screenshot shows a clean full-island view with no leftover
+card.
+
+**Drifting-clouds animation removed from the island-overview sea
+entirely.** `components/BiliranMap.tsx`'s `DriftingClouds` component (two
+ambient cloud shapes cross-fading across the full-island view on a
+65s/82s CSS animation loop) was reported directly as no longer wanted.
+Removed the component, its `<DriftingClouds bounds={islandBounds} />`
+invocation, and its `@keyframes bfw-cloud-cross` entirely. Left the
+`bfw-cloud-body` radial gradient in place — it's shared with
+`WeatherIconSVG`'s own per-municipality weather icons (confirmed via its
+own doc comment before touching it), which still use it and are
+unaffected. Updated the handful of other comments that referenced
+`DriftingClouds` by name (the Page Visibility pause rule, the shared
+`React.memo` rationale comment, `showWeatherIcons`'s own doc comment)
+so none of them dangle on a component that no longer exists. Confirmed
+via Playwright: no `bfw-cloud-cross` keyframe anywhere in the page, no
+console errors, and a screenshot of the full-island view shows a clean
+sea with no cloud shapes.
+
+**"?" help button added to the Hydrograph and Precipitation charts.**
+`components/DischargeChart.tsx` (shared by both — see its own doc
+comment) gained an optional `infoText` prop: when passed, a small "?"
+button renders next to the chart's title, toggling a plain-language
+explanation inline below it. Deliberately reused the exact convention
+already established by `FactorBreakdown`'s own "?" buttons just below
+in `BarangayDetailPanel.tsx` (same tap-to-toggle inline-expand behavior,
+same button styling) rather than inventing a new one — an earlier pass
+at this wrote a separate floating-popover version with its own click-
+outside/Escape handling before noticing the existing pattern already
+covers this exact case more simply. Wired `infoText` into the two real
+(non-simulated) `DischargeChart` calls only — Hydrograph and
+Precipitation, matching the request's literal scope; the "Simulated
+hydrograph"/"Simulated precipitation" calls elsewhere in the same file
+don't pass it, so they render no button, unchanged from before. Omitting
+the prop entirely (every other existing caller) renders no button at
+all — fully backward compatible. Confirmed via Playwright: both buttons
+render (`button[aria-label^="What is"]`), and clicking Hydrograph's
+expands its explanation inline, screenshotted.
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars
