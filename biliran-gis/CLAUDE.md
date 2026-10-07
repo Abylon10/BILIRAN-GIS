@@ -611,6 +611,34 @@ topmost hit-tested element at that exact pixel is the underlying
 `bfw-map-poly` polygon, not the waterway path, confirming taps still
 reach the polygons underneath.
 
+**Follow-up: the overlay also needed to stay below the name labels, not
+just above the land.** The fix above painted the waterway `<path>` as
+the very last child of `.bfw-zoom-group`, which meant on top of
+*everything* each layer renders, labels included — a screenshot showed
+river lines running straight through "Culaba", "Caibiran", barangay
+names like "Acaban"/"Patag", etc., reported directly. Root cause:
+`MunicipalityLayer` and `BarangayLayer` each render their own shapes AND
+their own labels together as one self-contained `<g>` return, so a
+single sibling `<path>` placed after both components has no way to land
+"on top of shapes, below labels" without splitting what each component
+renders. Fixed by giving both layers two new optional props,
+`showShapes`/`showLabels` (both default `true`, so no other caller is
+affected), and calling each layer *twice* from `BiliranMap`: a first
+pass with `showLabels={false}` (shapes + weather icons only, in the
+original position), then the waterway `<path>` unchanged from the fix
+above, then a second pass with `showShapes={false}` (labels only) on
+top of that. `BarangayLayer`'s existing opacity/pointerEvents wrapper
+`<g>` now wraps both calls — the label-pass wrapper simplifies to
+`pointerEvents="none"` unconditionally since text has no click handler
+to gate. Net stacking order: context outlines → municipality + barangay
+shapes (+ weather icons) → waterway overlay → municipality + barangay
+labels. Verified visually (both the full-island overview and zoomed
+into Culaba — every label now fully legible, no line crossing through
+text, river network still clearly on top of the land) and re-ran the
+`elementFromPoint` tap-through check from the fix above (still passes —
+unaffected by this change, but the DOM structure around the waterway
+`<path>` did change, worth reconfirming).
+
 **Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
 `#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
 dominance) were reported directly as needing to be bluer. These two vars
@@ -625,6 +653,15 @@ mode). Neither var is reused elsewhere (buttons/separators/sun-glow all
 reference the shared palette's own literal hex values, not these vars),
 so this was a fully isolated change. Confirmed visually across all four
 combinations (login screen + dashboard, day + night).
+
+**Follow-up: night's sea lightened a notch, then again.** The dark-theme
+`--sea-top`/`--sea-bottom` above (`#041B2E`/`#0A3A5C`) read as quite
+inky, reported directly as wanting it a little lighter at night. Bumped
+to `#0A2C47`/`#1A5684`, then — "a little bit more light during night" —
+bumped again to `#15426A`/`#2D77AD`. Still reads as night (the header's
+own "Night" chip + moon icon don't change), just a clear medium ocean
+blue instead of near-black. Same two isolated vars both times, no other
+theme values touched.
 
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
