@@ -563,6 +563,69 @@ var(--btn-to))`) and a two-layer halo (tight 14px + wide 32px blur,
 Confirmed visually: off is dim teal, on is an unmistakable glowing amber
 bulb with a visible halo — screenshotted side by side.
 
+**Follow-up 3: amber worked, but cyan was asked for specifically.** The
+hue-contrast fix above worked, but the request was for a cyan light, not
+a color change to amber. Went back to cyan without reintroducing the
+original problem (a muted mid-tone cyan blending into the teal
+background) by leaning on a *lightness* jump instead of a hue jump: a
+bright, highly-saturated "electric" cyan (`#7DF9FF` center fading to
+`#11B4D6`, icon `#E0FFFC`) well past the page/button's own darker,
+desaturated teal tones, same lit-bulb radial background + two-layer
+halo structure as the amber version (`rgba(94, 234, 255, …)`). Confirmed
+visually: reads as a glowing cyan bulb, clearly distinct from both the
+dimmed off state and the darker teal backdrop.
+
+**Sidebar handle arrow enlarged.** `app/page.tsx`'s `.bfw-sidebar-handle`
+chevron icon was `h-4 w-4` (16px) inside a `h-16 w-7` pill — too small to
+read clearly at a glance, reported directly. Bumped to `h-6 w-6` (24px)
+with `strokeWidth` nudged from `2` to `2.25` to keep the line weight
+proportionate at the larger size; still comfortably fits inside the
+pill's 28px width. No change to the pill's own size or the
+`right: calc(100% - 28px)` open-state offset (both already sized for
+the handle's 28px width, not the icon). Confirmed visually in both
+closed and open states via a tightly-cropped 2x-scale screenshot.
+
+**Waterway overlay painted last, so it's actually visible on top of
+the land when the toggle is on.** Reported directly. Root cause:
+`components/BiliranMap.tsx` renders inside `.bfw-zoom-group` in document
+order (later siblings paint on top), and the waterway `<path>` used to be
+the *first* child — painted *before* the dimmed context outlines,
+`MunicipalityLayer`, and `BarangayLayer`. Both of those layers' own
+polygons are filled at `fillOpacity` 0.85-1 (effectively opaque), so the
+line work was getting buried under nearly-opaque land almost everywhere,
+only visible in the rare gap between polygons — the toggle genuinely
+changed the DOM (previously confirmed via computed styles and a single
+merged `<path>`) but the lines themselves were mostly invisible. Fixed
+by moving the same `<path>` (unchanged color/width/clip-path) to be the
+*last* child of `.bfw-zoom-group` instead of the first, so it paints on
+top of every polygon layer at any zoom level. Added `pointerEvents="none"`
+to it at the same time — new now that it sits on top of every interactive
+polygon instead of under them; without it, this stroke-only path's
+hit-testable stroke (SVG's default `pointer-events: visiblePainted`)
+could swallow taps on a municipality/barangay exactly where a river line
+crosses it. Verified two ways: visually (screenshotted both the
+full-island overview and zoomed into Culaba — the river network is now
+clearly visible running over the land in both) and via `elementFromPoint`
+sampled directly on the waterway path's own rendered geometry — the
+topmost hit-tested element at that exact pixel is the underlying
+`bfw-map-poly` polygon, not the waterway path, confirming taps still
+reach the polygons underneath.
+
+**Sea made bluer.** `app/page.tsx`'s `--sea-top`/`--sea-bottom` (light:
+`#0C969C`/`#6BA3BE`, both G≈B — a teal/cyan hue with barely any blue
+dominance) were reported directly as needing to be bluer. These two vars
+turned out to be the *only* thing actually driving what's visible as
+"the sea": `.bfw-sky` sits fully behind the full-bleed map once revealed
+(confirmed via matching `getBoundingClientRect` on both — true on the
+login screen too, since it persists the same map underneath the sign-in
+card, not a separate static backdrop). Shifted both themes toward a
+clearly blue hue instead of teal — light: `#0B6FB8` → `#5AA7E0`; dark:
+`#041B2E` → `#0A3A5C` (same hue shift, kept dark/desaturated for night
+mode). Neither var is reused elsewhere (buttons/separators/sun-glow all
+reference the shared palette's own literal hex values, not these vars),
+so this was a fully isolated change. Confirmed visually across all four
+combinations (login screen + dashboard, day + night).
+
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
 map in general.** Reported alongside the glow issue above, with a

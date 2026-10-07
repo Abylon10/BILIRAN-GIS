@@ -495,7 +495,20 @@ export default function HomePage() {
         */
         .bfw-root[data-theme='light'] {
           --sky-top: #0C969C; --sky-bottom: #CFE4EC;
-          --sea-top: #0C969C; --sea-bottom: #6BA3BE;
+          /*
+            Bluer than the shared --p-mid/--p-light palette tones (#0C969C/
+            #6BA3BE, both G≈B -- a teal/cyan hue with barely any blue
+            dominance) -- reported directly as wanting the sea bluer. These
+            two vars are the ONLY thing driving what's actually visible as
+            "the sea": .bfw-sky sits fully behind the full-bleed map once
+            revealed (confirmed via matching getBoundingClientRect on both,
+            same on the login screen too -- the map backdrop there is the
+            same persisted map, not a separate component), so this is the
+            one spot that needed to change, with no cascade to buttons/
+            separators/sun-glow (those reference the shared palette's own
+            literal hex values, not these vars).
+          */
+          --sea-top: #0B6FB8; --sea-bottom: #5AA7E0;
           --sun-glow: rgba(107, 163, 190, 0.5); --sun-core: #E7F1F5;
           --cloud: rgba(231, 241, 245, 0.9);
           --card-bg: rgba(231, 241, 245, 0.75); --card-border: rgba(107, 163, 190, 0.5);
@@ -511,7 +524,9 @@ export default function HomePage() {
         }
         .bfw-root[data-theme='dark'] {
           --sky-top: #032F30; --sky-bottom: #031716;
-          --sea-top: #031716; --sea-bottom: #032F30;
+          /* Same blue-not-teal shift as the light theme's own --sea-top/
+             --sea-bottom above, kept this dark/desaturated for night mode. */
+          --sea-top: #041B2E; --sea-bottom: #0A3A5C;
           --sun-glow: rgba(39, 77, 96, 0.45); --sun-core: #6BA3BE;
           --cloud: rgba(39, 77, 96, 0.35);
           --card-bg: rgba(3, 23, 22, 0.65); --card-border: rgba(107, 163, 190, 0.18);
@@ -733,28 +748,33 @@ export default function HomePage() {
             title={showWaterways ? 'Waterway lines: on' : 'Waterway lines: off (lighter for low-end devices)'}
             className="bfw-btn shrink-0 rounded-full p-2"
             // Lights up when on; dims when off. A previous pass used a
-            // cyan (#1CA7D6) icon + glow for "on", confirmed via computed
-            // styles to be technically applied -- but that cyan sits in
-            // the same blue-teal hue family as this button's own gradient
-            // (--btn-from/--btn-to) AND the page's own teal sky/background,
-            // so the "glow" blended into its surroundings instead of
-            // popping, reported as "no light". Swapping to a warm amber --
-            // a near-complementary hue against all that teal -- plus a
-            // lit-bulb radial background and a two-layer halo (tight +
-            // wide) makes "on" unmistakable regardless of theme.
+            // muted cyan (#1CA7D6) icon + glow for "on", confirmed via
+            // computed styles to be technically applied -- but that
+            // particular cyan was close enough in both hue AND lightness
+            // to this button's own gradient (--btn-from/--btn-to) AND the
+            // page's own teal sky/background that the "glow" blended into
+            // its surroundings instead of popping, reported as "no light".
+            // A warm amber fixed that via hue contrast, but cyan was
+            // asked for specifically -- so the fix here leans on a big
+            // lightness jump instead: a bright, highly-saturated electric
+            // cyan (not the original muted mid-tone) for both the icon and
+            // a lit-bulb radial background, plus a two-layer halo (tight +
+            // wide), makes "on" read as a light turning on rather than a
+            // color swap, even while staying in the same hue family as the
+            // background.
             style={
               showWaterways
                 ? {
-                    color: '#FFE8A3',
+                    color: '#E0FFFC',
                     backgroundImage:
-                      'radial-gradient(circle at 50% 35%, #FFD166, #E8A23D 60%, var(--btn-to))',
+                      'radial-gradient(circle at 50% 35%, #7DF9FF, #11B4D6 60%, var(--btn-to))',
                     // Layers on top of (not instead of) .bfw-btn's own
                     // embossed box-shadow, so this still reads as the same
                     // pill button, just lit up — an inline boxShadow here
                     // fully replaces the class's rather than layering with
                     // it, so the base shadow's values are repeated first.
                     boxShadow:
-                      '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 14px 4px rgba(255, 209, 102, 0.95), 0 0 32px 12px rgba(255, 209, 102, 0.55)',
+                      '0 3px 8px rgba(3, 23, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(3, 23, 22, 0.25), 0 0 14px 4px rgba(94, 234, 255, 0.95), 0 0 32px 12px rgba(94, 234, 255, 0.55)',
                   }
                 : { opacity: 0.45 }
             }
@@ -941,7 +961,7 @@ export default function HomePage() {
             data-open={sidebarOpen}
             className="bfw-sidebar-handle bfw-btn flex h-16 w-7 items-center justify-center"
           >
-            <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg viewBox="0 0 20 20" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 4l-7 6 7 6" />
             </svg>
           </button>

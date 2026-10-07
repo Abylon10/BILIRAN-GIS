@@ -818,38 +818,6 @@ export default function BiliranMap({
           transform={transform}
           style={{ transition: interacting ? 'none' : 'transform 0.7s cubic-bezier(0.22,1,0.36,1)' }}
         >
-          {/*
-            Waterways — off by default (showWaterways toggle in app/page.tsx,
-            a real lower-end-device win — ~448 line features, merged into a
-            single <path> element rather than 448 separate ones, see
-            waterwayPaths' own comment above for the measured cost that fixed).
-            When on, rendered at a fixed, fully-visible opacity/width regardless of
-            zoom — an earlier version ramped both with barangayOpacity (dim
-            at the island overview, more visible near barangay zoom), but
-            that read as "faded into the background" rather than the
-            permanently-visible overlay this toggle is meant to be, reported
-            directly. The toggle itself is still the only on/off switch.
-            clipPath keeps lines from spilling past the coastline into open
-            sea (bfw-island-clip, defined above — reported directly, most
-            visible around Culaba, but the underlying line data isn't
-            guaranteed to stay inside the landmass anywhere). Color/width
-            bumped further (darker, more saturated blue; thicker stroke)
-            after the original pale cyan still read as washed-out against
-            the warm terrain palette, reported directly — matches the
-            accent color the waterways toggle button itself now lights up
-            with (app/page.tsx), so the button visually previews this.
-          */}
-          {showWaterways && (
-            <path
-              d={waterwayPaths}
-              opacity={1}
-              stroke="#1CA7D6"
-              strokeWidth={0.0015}
-              fill="none"
-              clipPath="url(#bfw-island-clip)"
-            />
-          )}
-
           {/* dimmed context outlines of the rest of the island, fading in as barangayOpacity rises */}
           <g opacity={0.12 * barangayOpacity} pointerEvents="none">
             {municipalities.features.map((f) => (
@@ -897,6 +865,52 @@ export default function BiliranMap({
               onSelect={handleBarangaySelect}
             />
           </g>
+
+          {/*
+            Waterways — off by default (showWaterways toggle in app/page.tsx,
+            a real lower-end-device win — ~448 line features, merged into a
+            single <path> element rather than 448 separate ones, see
+            waterwayPaths' own comment above for the measured cost that fixed).
+            Painted LAST, after both polygon layers above (not first, as it
+            used to be) — SVG paints in document order, and MunicipalityLayer/
+            BarangayLayer's own fills are effectively opaque (fillOpacity
+            0.85-1), so with the overlay painted first it was getting almost
+            entirely covered by land, barely visible — reported directly
+            ("very visible when the toggle is on"). Painting it last makes it
+            a true overlay on top of the land at any zoom level.
+            pointerEvents="none" — new now that this sits on top of every
+            interactive polygon instead of under them: without it, this
+            stroke-only path (fill="none") would still be hit-testable
+            (SVG's default pointer-events: visiblePainted catches a painted
+            stroke even with no fill) and could swallow taps on a
+            municipality/barangay exactly where a river line crosses it.
+            When on, rendered at a fixed, fully-visible opacity/width regardless of
+            zoom — an earlier version ramped both with barangayOpacity (dim
+            at the island overview, more visible near barangay zoom), but
+            that read as "faded into the background" rather than the
+            permanently-visible overlay this toggle is meant to be, reported
+            directly. The toggle itself is still the only on/off switch.
+            clipPath keeps lines from spilling past the coastline into open
+            sea (bfw-island-clip, defined above — reported directly, most
+            visible around Culaba, but the underlying line data isn't
+            guaranteed to stay inside the landmass anywhere). Color/width
+            bumped further (darker, more saturated blue; thicker stroke)
+            after the original pale cyan still read as washed-out against
+            the warm terrain palette, reported directly — matches the
+            accent color the waterways toggle button itself now lights up
+            with (app/page.tsx), so the button visually previews this.
+          */}
+          {showWaterways && (
+            <path
+              d={waterwayPaths}
+              opacity={1}
+              stroke="#1CA7D6"
+              strokeWidth={0.0015}
+              fill="none"
+              clipPath="url(#bfw-island-clip)"
+              pointerEvents="none"
+            />
+          )}
         </g>
       </svg>
 
