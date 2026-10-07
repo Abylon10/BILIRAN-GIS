@@ -585,6 +585,32 @@ pill's 28px width. No change to the pill's own size or the
 the handle's 28px width, not the icon). Confirmed visually in both
 closed and open states via a tightly-cropped 2x-scale screenshot.
 
+**Waterway overlay painted last, so it's actually visible on top of
+the land when the toggle is on.** Reported directly. Root cause:
+`components/BiliranMap.tsx` renders inside `.bfw-zoom-group` in document
+order (later siblings paint on top), and the waterway `<path>` used to be
+the *first* child — painted *before* the dimmed context outlines,
+`MunicipalityLayer`, and `BarangayLayer`. Both of those layers' own
+polygons are filled at `fillOpacity` 0.85-1 (effectively opaque), so the
+line work was getting buried under nearly-opaque land almost everywhere,
+only visible in the rare gap between polygons — the toggle genuinely
+changed the DOM (previously confirmed via computed styles and a single
+merged `<path>`) but the lines themselves were mostly invisible. Fixed
+by moving the same `<path>` (unchanged color/width/clip-path) to be the
+*last* child of `.bfw-zoom-group` instead of the first, so it paints on
+top of every polygon layer at any zoom level. Added `pointerEvents="none"`
+to it at the same time — new now that it sits on top of every interactive
+polygon instead of under them; without it, this stroke-only path's
+hit-testable stroke (SVG's default `pointer-events: visiblePainted`)
+could swallow taps on a municipality/barangay exactly where a river line
+crosses it. Verified two ways: visually (screenshotted both the
+full-island overview and zoomed into Culaba — the river network is now
+clearly visible running over the land in both) and via `elementFromPoint`
+sampled directly on the waterway path's own rendered geometry — the
+topmost hit-tested element at that exact pixel is the underlying
+`bfw-map-poly` polygon, not the waterway path, confirming taps still
+reach the polygons underneath.
+
 **`MunicipalityLayer` tap-to-zoom stall — the real source of "tapping or
 changing location is lagging," isolated to one specific layer, not the
 map in general.** Reported alongside the glow issue above, with a
