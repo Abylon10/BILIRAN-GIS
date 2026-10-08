@@ -691,6 +691,36 @@ via Playwright: no `bfw-cloud-cross` keyframe anywhere in the page, no
 console errors, and a screenshot of the full-island view shows a clean
 sea with no cloud shapes.
 
+**More barangay names recovered in dense municipalities — fewer labels
+dropped by the decluttering heuristic.** Reported directly: "some names
+are lost in the map." Confirmed by zooming into Culaba (34 barangays
+island-wide, the densest): 17 barangay polygons rendered, but only 11
+got a visible label — 6 completely unlabeled, confirmed via both a DOM
+query (`barangayPolyCount`/labeled `<text>` count) and a screenshot
+showing visible empty space around several unlabeled wedges. Root cause
+in `BarangayLayer`'s `labeledKeys` `useMemo` (`components/BiliranMap.tsx`):
+`PADDING_FACTOR = 1.15` added a flat 15% safety margin *on top of* the
+already-estimated text bounding box before the overlap test ran,
+rejecting labels that wouldn't have actually overlapped at their real
+rendered size. Tested empirically against Culaba (screenshot + DOM
+label-count each time, same methodology as every other map-rendering fix
+this session): `1.0` and `0.85` made no difference at all (still 11/17);
+`0.8` recovers one more ("Salvacion") with zero visible crowding; `0.75`/
+`0.7` recover three more but visibly cram "Bool Central"/"Bool West"/
+"Bacolod" together — not a true AABB overlap (the algorithm still
+guarantees that), but reads cluttered, reintroducing a milder version of
+the exact illegible-density complaint that caused this heuristic to
+exist in the first place. Also tried shrinking `LABEL_FONT_SIZE`/the
+rendered `<text>`'s own `fontSize` together with a milder padding
+reduction (`0.9`/`0.0028`) — landed at the same 12/17 result as `0.8`
+alone, so the simpler single-constant change was kept instead. Shipped:
+`PADDING_FACTOR = 0.8` only, font size unchanged. Verified Culaba went
+from 11/17 to 12/17 labeled, then spot-checked three more municipalities
+to confirm this isn't overfit to one case: Kawayan 16/20, Caibiran
+16/17, Naval 21/24 — all screenshotted, labels legible with no crowding
+(Naval's screenshot in particular shows a dense cluster of ~24 barangays
+all cleanly labeled).
+
 **"?" help button added to the Hydrograph and Precipitation charts.**
 `components/DischargeChart.tsx` (shared by both — see its own doc
 comment) gained an optional `infoText` prop: when passed, a small "?"
