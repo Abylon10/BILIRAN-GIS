@@ -65,6 +65,11 @@ export async function GET(req: NextRequest) {
   const currentHourIndex = hourlyTimes.indexOf(data.current_weather?.time ?? '')
   const currentPrecipitationProbability =
     currentHourIndex >= 0 ? data.hourly?.precipitation_probability?.[currentHourIndex] ?? null : null
+  // Same currentHourIndex lookup as the probability above, just against the
+  // hourly precipitation-amount series instead — Open-Meteo's hourly
+  // resolution means this mm value already reads as an mm/h rate.
+  const currentPrecipitationMm =
+    currentHourIndex >= 0 ? data.hourly?.precipitation?.[currentHourIndex] ?? null : null
 
   return NextResponse.json({
     municipality,
@@ -72,6 +77,7 @@ export async function GET(req: NextRequest) {
       weatherCode: data.current_weather?.weathercode ?? null,
       temperatureC: data.current_weather?.temperature ?? null,
       precipitationProbability: currentPrecipitationProbability,
+      precipitationMm: currentPrecipitationMm,
     },
     hourly: {
       time: data.hourly?.time ?? [],

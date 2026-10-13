@@ -11,6 +11,9 @@ export interface WeatherData {
   weatherCode: number | null
   temperatureC: number | null
   precipitationProbability: number | null
+  // Current-hour precipitation amount (mm) — at Open-Meteo's hourly
+  // resolution this doubles as an mm/h rate.
+  precipitationMm: number | null
   hourlyPrecipitationMm: number[]
 }
 
@@ -37,6 +40,7 @@ export async function loadWeather(municipality: string): Promise<WeatherData | n
       weatherCode: json.current?.weatherCode ?? null,
       temperatureC: json.current?.temperatureC ?? null,
       precipitationProbability: json.current?.precipitationProbability ?? null,
+      precipitationMm: json.current?.precipitationMm ?? null,
       hourlyPrecipitationMm: json.hourly?.precipitationMm ?? [],
     }))
     .then((data) => {
