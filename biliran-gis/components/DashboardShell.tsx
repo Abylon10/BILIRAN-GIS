@@ -105,7 +105,7 @@ export default function DashboardShell({
         }
       >
         {liveActive
-          ? "Computed from today's live Open-Meteo forecast — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
+          ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
           : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
       </div>
 

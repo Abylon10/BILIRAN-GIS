@@ -1234,7 +1234,18 @@ const BarangayLayer = memo(function BarangayLayer({
     const LABEL_FONT_SIZE = 0.0032
     const CHAR_WIDTH_FACTOR = 0.62
     const LINE_HEIGHT_FACTOR = 1.4
-    const PADDING_FACTOR = 1.15
+    // Was 1.15 -- an extra 15% safety margin on top of the already-
+    // estimated text box, rejecting labels that wouldn't have actually
+    // overlapped at their real rendered size. Reported directly ("some
+    // names are lost in the map"): Culaba alone was dropping 6 of its 17
+    // barangay labels. Tested empirically against Culaba (screenshot +
+    // DOM label-count each time): 1.0 and 0.85 made no difference (still
+    // 11/17); 0.8 recovers one more ("Salvacion") with zero visible
+    // crowding; 0.75/0.7 recover three more but visibly cram "Bool
+    // Central"/"Bool West"/"Bacolod" together, reintroducing a milder
+    // version of the exact illegible-overlap complaint this heuristic
+    // exists to prevent. 0.8 is the accepted trade-off.
+    const PADDING_FACTOR = 0.8
 
     const candidates = features
       .map((f) => {

@@ -691,6 +691,36 @@ via Playwright: no `bfw-cloud-cross` keyframe anywhere in the page, no
 console errors, and a screenshot of the full-island view shows a clean
 sea with no cloud shapes.
 
+**More barangay names recovered in dense municipalities — fewer labels
+dropped by the decluttering heuristic.** Reported directly: "some names
+are lost in the map." Confirmed by zooming into Culaba (34 barangays
+island-wide, the densest): 17 barangay polygons rendered, but only 11
+got a visible label — 6 completely unlabeled, confirmed via both a DOM
+query (`barangayPolyCount`/labeled `<text>` count) and a screenshot
+showing visible empty space around several unlabeled wedges. Root cause
+in `BarangayLayer`'s `labeledKeys` `useMemo` (`components/BiliranMap.tsx`):
+`PADDING_FACTOR = 1.15` added a flat 15% safety margin *on top of* the
+already-estimated text bounding box before the overlap test ran,
+rejecting labels that wouldn't have actually overlapped at their real
+rendered size. Tested empirically against Culaba (screenshot + DOM
+label-count each time, same methodology as every other map-rendering fix
+this session): `1.0` and `0.85` made no difference at all (still 11/17);
+`0.8` recovers one more ("Salvacion") with zero visible crowding; `0.75`/
+`0.7` recover three more but visibly cram "Bool Central"/"Bool West"/
+"Bacolod" together — not a true AABB overlap (the algorithm still
+guarantees that), but reads cluttered, reintroducing a milder version of
+the exact illegible-density complaint that caused this heuristic to
+exist in the first place. Also tried shrinking `LABEL_FONT_SIZE`/the
+rendered `<text>`'s own `fontSize` together with a milder padding
+reduction (`0.9`/`0.0028`) — landed at the same 12/17 result as `0.8`
+alone, so the simpler single-constant change was kept instead. Shipped:
+`PADDING_FACTOR = 0.8` only, font size unchanged. Verified Culaba went
+from 11/17 to 12/17 labeled, then spot-checked three more municipalities
+to confirm this isn't overfit to one case: Kawayan 16/20, Caibiran
+16/17, Naval 21/24 — all screenshotted, labels legible with no crowding
+(Naval's screenshot in particular shows a dense cluster of ~24 barangays
+all cleanly labeled).
+
 **"?" help button added to the Hydrograph and Precipitation charts.**
 `components/DischargeChart.tsx` (shared by both — see its own doc
 comment) gained an optional `infoText` prop: when passed, a small "?"
@@ -3141,6 +3171,55 @@ Not touched, per the plan's own scope: `DischargeChart.tsx` (confirmed non-hot-p
 weather-poll loops' architecture (only their interval literal changed, not merged into one shared source), and
 no virtualization library was added for `BarangayList.tsx` (115 rows is a modest, bounded count — memoization
 was judged the right-sized fix, matching this app's existing "no new dependency unless necessary" posture).
+
+## FSI factor weights changed to a provisional rainfall-weighted set
+
+By direct request, the FSI factor weights were changed from the external pipeline's original
+`0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·Rainfall` to a provisional `0.25·HAND + 0.15·TWI + 0.15·LCLU +
+0.45·Rainfall` ("use this factor for now" — read as an explicit, deliberate, but not-necessarily-final
+choice). This is a single-source-of-truth change: `public/data/fsi_factors.json`'s own `factor_weights`
+field is what `lib/islandSimulation.ts` (Simulation Mode) and `lib/liveIslandState.ts` (the live dashboard's
+default FSI/countdown recompute) both read at runtime — changing that one field alone correctly updates
+every live-computed FSI value and the "this factor contributes X%" text in `BarangayDetailPanel.tsx`'s
+`FactorBreakdown` "?" buttons, with no code change needed in either of those three places.
+
+Two things the weights field alone does *not* auto-update, handled explicitly:
+
+- **`fsi_recomputed`** — a static, precomputed-offline field stored per barangay in the same JSON, never
+  itself recalculated at runtime (it predates the live/simulation recompute paths and nothing reads it back
+  through `factor_weights` dynamically). Recomputed for all 115 barangays from their already-stored
+  `hand`/`twi`/`lclu`/`rainfall` values under the new weights (pure arithmetic, no new data needed), so the
+  file stays internally consistent and Simulation Mode's self-consistency property ("inputting the real
+  design storm's own parameters exactly reproduces the stored `fsi_recomputed`") still holds under the new
+  weights, not just the old ones.
+- **Hardcoded formula/weight strings in 3 user-facing spots** — `components/DashboardShell.tsx`'s live
+  honesty banner, `components/AdminGisDataTab.tsx`'s `FACTORS` array + formula string, and a code comment in
+  `lib/islandSimulation.ts` — all had the old `0.30/0.30/0.20/0.20` literally typed out and needed a direct
+  edit; nothing reads these from `factor_weights` itself since they're prose/comments, not computed display.
+
+**Validation numbers in `AdminGisDataTab.tsx` recomputed for real, not left stale.** The existing
+correlation/mean-absolute-difference claim (0.85 / 0.038, against the original 0.30/0.30/0.20/0.20 weights)
+would have been factually wrong left as-is once the weights and `fsi_recomputed` changed — recomputed
+directly from `fsi_factors.json`'s new `fsi_recomputed` values against `barangay_dashboard_data.json`'s
+authoritative `mean_fsi_score` (115-barangay Pearson correlation + mean absolute difference, plain Python,
+no library): **correlation 0.57, mean absolute difference 0.077, largest outlier +0.29 (San Roque, Naval)**
+— meaningfully weaker than the original weights' 0.85/0.038. This is an expected, disclosed consequence, not
+a bug: rainfall is one of the two FSI inputs already known to be reconstructed from a substitute/derived
+raster rather than the pipeline's own canonical file (see "Provenance and how this was built" above); raising
+its weight from 20%→45% necessarily amplifies that approximation's effect on agreement with the authoritative
+score. The tab's own copy was reworded to show both figures side by side (original-weights validation, then
+current-provisional-weights validation) rather than silently replacing one with the other, and "Reused
+unchanged from the external pipeline's own `compute_fsi.py`" was corrected to describe the weights as
+changed by direct request — leaving that sentence would have been a false claim once the weights diverged
+from the pipeline's own values.
+
+Verified via mocked-auth Playwright (admin session): the GIS & FSI Data tab renders all four new weights
+(`weight 0.25`/`0.15`/`0.15`/`0.45`) and the updated formula/validation text correctly; the live (non-admin)
+dashboard's honesty banner reads the new formula string too. `npm run lint` clean; `npm run build` hits a
+pre-existing, unrelated failure (`supabaseKey is required` collecting `/api/admin/fsi-snapshot`'s page data —
+confirmed via `git stash` to reproduce identically on the pre-existing commit, not caused by this change) —
+`next build`'s own TypeScript pass completed successfully before that unrelated route's build-time env-var
+error, so this change's own type-safety isn't in question.
 
 ## Open items
 

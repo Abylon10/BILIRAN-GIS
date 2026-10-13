@@ -14,8 +14,10 @@
 //   their real static times (see crossingTimeHours/simulateIsland below).
 //
 // - FSI score/label: NO real formula turns a discharge curve into an FSI
-//   score — the real FSI (fsi_factors.json) is 0.30*hand + 0.30*twi +
-//   0.20*lclu + 0.20*rainfall, where hand/twi/lclu are static terrain
+//   score — the real FSI (fsi_factors.json) is weighted by whatever
+//   factor_weights currently holds (0.25*hand + 0.15*twi + 0.15*lclu +
+//   0.45*rainfall as of this writing — see fsi_factors.json's own
+//   factor_weights field, not hardcoded here), where hand/twi/lclu are static terrain
 //   factors (genuinely storm-independent) and rainfall is already stored
 //   pre-normalized (no raw mm total to rescale a simulated value against).
 //   This was disclosed plainly and the user chose to build an approximate
