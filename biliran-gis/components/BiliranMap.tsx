@@ -1525,19 +1525,30 @@ export function Legend({
   // this app's other enlarged card-style chrome instead.
   return (
     <div
-      className="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col items-start gap-4 rounded-2xl border px-5 py-4 text-sm shadow-lg ring-1 ring-white/10 backdrop-blur-md"
+      className="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col items-start gap-3 rounded-2xl border px-5 py-4 text-sm shadow-lg ring-1 ring-white/10 backdrop-blur-md"
       style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text-strong)' }}
     >
-      {stops.map(([label, score]) => (
-        <span key={label} className="flex items-center gap-3">
-          <span
-            className="inline-block h-8 w-8 shrink-0 rounded-full"
-            style={{ background: fsiScoreColor(score), boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }}
-            aria-hidden
-          />
-          {label}
-        </span>
-      ))}
+      {/*
+        Spells out what "FSI" stands for, matching this app's own established
+        abbreviation-labeling convention ("HAND (elevation above drainage)",
+        "TWI (wetness index)" in BarangayDetailPanel.tsx) — direct request,
+        since the 5 severity stops below never say what they're stops of.
+      */}
+      <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+        FSI (Flood Susceptibility Index)
+      </div>
+      <div className="flex flex-col items-start gap-4">
+        {stops.map(([label, score]) => (
+          <span key={label} className="flex items-center gap-3">
+            <span
+              className="inline-block h-8 w-8 shrink-0 rounded-full"
+              style={{ background: fsiScoreColor(score), boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }}
+              aria-hidden
+            />
+            {label}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }

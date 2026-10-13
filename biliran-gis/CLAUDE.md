@@ -3269,6 +3269,45 @@ with the actual tertile boundaries), the "?" explainer expands with the updated 
 percentage, and both themes read correctly (the translucent badge holds contrast in both light and dark).
 `npm run lint` clean.
 
+## Clearer hydrograph/precipitation charts + "FSI" full-name heading on the map Legend
+
+Two direct reports, both fixed without changing either component's prop signature (so every existing
+caller benefits automatically with zero caller-side changes):
+
+**`DischargeChart.tsx`** (shared by all 4 chart call sites in `BarangayDetailPanel.tsx` — real Hydrograph,
+real Precipitation, Simulated hydrograph, Simulated precipitation): "make the graph clearer and easy to
+understand," reported against the Hydrograph specifically. The old chart was a bare `280x90` `<polyline>`
+with no fill, a thin 1.5px stroke, and only 2 labels per axis (min/max). Now: a bigger `300x150` canvas; 3
+recessive horizontal gridlines (0/mid/max) each with a real tick label instead of two bare numbers; 5
+evenly-spaced x-axis tick labels instead of just the endpoints; a subtle area fill under the curve
+(`fillOpacity={0.15}`, same `color` prop) so magnitude reads at a glance; a thicker `strokeWidth={2}` line
+with rounded caps/joins; a filled peak-point marker at the curve's own max value (already captioned
+elsewhere as "peak X m³/s"/"peak X mm/hr," now visually findable on the curve too); and a pointer-based
+hover (works for touch and mouse via `onPointerMove`/`onPointerLeave`, `touchAction: 'none'`) that snaps to
+the nearest sample and shows a dashed vertical guide line plus a small value-readout label pinned near the
+top of the plot (not following the cursor vertically, so it can't run off this small canvas) — the readout
+lives entirely inside the SVG; the HTML caption text below the chart stays always-visible regardless of
+hover state. All styling routes through the same `--card-bg`/`--card-border`/`--text-soft`/`--text-strong`
+CSS variables the rest of the chart already used, so both themes work with no new theme-specific code.
+
+**`BiliranMap.tsx`'s `Legend` function** (the full-size `lg` variant specifically — the large labeled
+severity-dot column on the main dashboard map): "add fsi(full name) legend above it," since nothing
+explained what "FSI" stands for. Added a small muted uppercase heading reading
+`FSI (Flood Susceptibility Index)` above the 5 severity stops, matching this app's own established
+abbreviation-labeling convention (`BarangayDetailPanel.tsx`'s "HAND (elevation above drainage)," "TWI
+(wetness index)" — short form first, full name in parens) and its section-header styling (`text-xs
+font-semibold uppercase tracking-wide`, muted color, same treatment as "HYDROGRAPH"/"BARANGAY FACTOR
+PROFILE"). Added **only** to the `lg` branch — the `compact` dots-only pill has no text anywhere by design,
+and `size="md"` (used by `StaticIslandMap.tsx` for the admin Barangays tab's height-constrained map) was
+left untouched to avoid reintroducing the "legend taller than its own map" bug that variant was created to
+fix; confirmed via Playwright that the `md` legend still renders with no FSI heading.
+
+Verified via mocked-auth Playwright: selected a barangay with real hydrograph/precipitation data and
+confirmed gridlines/fill/peak marker/hover tooltip all render correctly with real values (e.g. hovering
+showed "1.25h: 39.30" with its guide line) in light mode; the Legend heading was screenshotted and confirmed
+correct in both light and dark theme on the main dashboard map, and confirmed absent from the admin
+Barangays tab's `md` legend via a direct text-content check. `npm run lint` clean.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
