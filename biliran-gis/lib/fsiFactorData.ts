@@ -60,3 +60,44 @@ export async function loadFsiFactors(): Promise<RawFactorData> {
 export function factorsForBarangay(data: RawFactorData, barangayKey: string): BarangayFactors | null {
   return data.barangays[barangayKey] ?? null
 }
+
+export interface FactorTertiles {
+  hand: [number, number]
+  twi: [number, number]
+  lclu: [number, number]
+}
+
+function percentile(sorted: number[], p: number): number {
+  const idx = p * (sorted.length - 1)
+  const lo = Math.floor(idx)
+  const hi = Math.min(lo + 1, sorted.length - 1)
+  const frac = idx - lo
+  return sorted[lo] * (1 - frac) + sorted[hi] * frac
+}
+
+let tertileCache: { data: RawFactorData; tertiles: FactorTertiles } | null = null
+
+/**
+ * Real, data-driven tertile (33rd/66th percentile) boundaries for HAND/TWI/
+ * LCLU, computed directly from every barangay's own factor value rather than
+ * a hardcoded guess — used to sort a barangay into one of 3 plain-language
+ * categories per factor (BarangayDetailPanel's "Barangay Factor Profile").
+ * Stays correct automatically if the underlying raster data is ever
+ * reprocessed, instead of drifting from a stale hardcoded boundary. Cached
+ * against the same RawFactorData reference loadFsiFactors() already caches,
+ * so the O(n log n) sort only runs once per page load, not once per
+ * barangay selected.
+ */
+export function getFactorTertiles(data: RawFactorData): FactorTertiles {
+  if (tertileCache && tertileCache.data === data) return tertileCache.tertiles
+  const values = Object.values(data.barangays)
+  const sortedOf = (key: 'hand' | 'twi' | 'lclu') => values.map((f) => f[key]).sort((a, b) => a - b)
+  const bounds = (sorted: number[]): [number, number] => [percentile(sorted, 1 / 3), percentile(sorted, 2 / 3)]
+  const tertiles: FactorTertiles = {
+    hand: bounds(sortedOf('hand')),
+    twi: bounds(sortedOf('twi')),
+    lclu: bounds(sortedOf('lclu')),
+  }
+  tertileCache = { data, tertiles }
+  return tertiles
+}
