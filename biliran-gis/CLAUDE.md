@@ -3308,6 +3308,56 @@ showed "1.25h: 39.30" with its guide line) in light mode; the Legend heading was
 correct in both light and dark theme on the main dashboard map, and confirmed absent from the admin
 Barangays tab's `md` legend via a direct text-content check. `npm run lint` clean.
 
+## Weather badge redesigned from a corner-ribbon trapezoid into a "Weather Now" card
+
+Direct request, against a reference mockup: replace the map's current-weather readout — previously a
+`clip-path` right-trapezoid ribbon, a *deliberate* shape choice documented elsewhere in this file ("a
+pill/chip reads as clickable... this is a passive readout") — with a rounded, bordered card: a small
+"WEATHER NOW" pill, the existing cloud/rain icon + condition label enlarged, two new stat tiles ("Chance of
+rain" % and "Estimated rain rate" mm/h), and a footer row ("Open-Meteo forecast · Updated HH:MM"). This is
+an explicit, direct reversal of that documented ribbon rationale — recorded here rather than silently
+dropped.
+
+Two data points the mockup wanted didn't exist in this app yet, both wired from real sources rather than
+invented:
+- **Rain rate (mm/h)**: `app/api/weather/route.ts` already computed `currentHourIndex` to pick out the
+  current hour's *probability* from Open-Meteo's hourly series; now also picks the matching current-hour
+  *precipitation amount* the same way (`currentPrecipitationMm`), returned as `current.precipitationMm`.
+  Threaded through `lib/liveWeather.ts`'s `WeatherData` and `components/BiliranMap.tsx`'s `WeatherCondition`/
+  `weatherConditionForBucket()` the same way `precipitationProbability` already was. Only rendered when
+  non-null — same "don't invent a placeholder" rule the rest of this badge already followed.
+- **"Updated HH:MM"**: a new `weatherUpdatedAt` state in `BiliranMap.tsx` (alongside `weatherByMunicipality`),
+  stamped via `Date.now()` at the top of the weather-refresh effect's `refresh()` — the exact same pattern
+  `app/page.tsx` already uses for `nextForecastUpdateAt`/`NextForecastBadge`. `null` until the first fetch
+  completes hides the footer row entirely rather than showing a placeholder time.
+
+The modeled Alert/Danger crossing countdown is untouched — it still only ever shows up in the card's hover
+tooltip (`title`), exactly as before; the mockup itself shows no such field in the visible card, so nothing
+about what's exposed where changed, only the shape/data of the always-real-weather readout.
+
+**A real layout bug was found and fixed during verification, not just a style preference**: this card is
+substantially wider than the old ribbon (a "WEATHER NOW" pill + icon + label + two stat tiles + footer, vs.
+a single icon + two lines of text), and at a narrow phone width its centered position (`left-1/2
+-translate-x-1/2`) put it in the exact same horizontal+vertical band as `app/page.tsx`'s own right-anchored
+header row (the Day/Profile/avatar cluster, `absolute right-5 top-5`) — confirmed via a bounding-box
+measurement at a 390px viewport (header spans x147-370, this card's own center point sits at x195, so no
+amount of narrowing the card could ever keep its right edge left of the header's left edge). Fixed two ways:
+the stat-tiles row stacks vertically by default (`flex-col`, only becoming `sm:flex-row` once there's
+enough width), and the whole card sits at `top-20` on mobile (`sm:top-2` reverts to the old near-top
+position once screens are wide enough that the two elements no longer share a horizontal band at all).
+
+Verified: since this sandbox has no outbound network to Open-Meteo (the same blocked-network limitation
+noted elsewhere in this file) and no `SUPABASE_SERVICE_ROLE_KEY` configured (unrelated pre-existing gap,
+confirmed via `git stash` that `npm run build` fails identically on unmodified `main` for a different route,
+`/api/admin/fsi-snapshot`), real end-to-end weather data couldn't be fetched live in this environment.
+Verified instead by temporarily stubbing `loadWeather()`'s return value and the dashboard's `revealed` state
+(both reverted before committing — never shipped) to render the card with realistic data matching the
+mockup's own example numbers, then mocked-auth-equivalent Playwright screenshots in both themes at both a
+1400px desktop and 390px phone viewport confirmed: layout/colors match the mockup in both themes, the
+header-overlap bug above (caught this way, not guessed at), and no regression to the existing hover-tooltip
+behavior. `npm run lint` clean; TypeScript compiles clean (`next build`'s unrelated failure confirmed
+pre-existing on `main`, see above).
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

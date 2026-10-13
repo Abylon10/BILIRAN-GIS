@@ -364,18 +364,24 @@ export default function BiliranMap({
   // absent from this map (still loading, or the fetch failed) simply
   // doesn't render an icon yet — no placeholder/fake condition invented.
   const [weatherByMunicipality, setWeatherByMunicipality] = useState<Record<string, WeatherCondition | null>>({})
+  // Stamped on every refresh() call below (same pattern as app/page.tsx's
+  // nextForecastUpdateAt) — drives WeatherBadge's "Updated HH:MM" footer.
+  // null until the first fetch completes, so the badge just omits that row
+  // rather than showing a placeholder time.
+  const [weatherUpdatedAt, setWeatherUpdatedAt] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     function refresh() {
+      setWeatherUpdatedAt(Date.now())
       for (const name of Object.keys(MUNICIPALITY_COORDS)) {
         loadWeather(name).then((data) => {
           if (cancelled) return
           setWeatherByMunicipality((prev) => ({
             ...prev,
             [name]: data
-              ? weatherConditionForBucket(conditionForWeatherCode(data.weatherCode), data.precipitationProbability)
+              ? weatherConditionForBucket(conditionForWeatherCode(data.weatherCode), data.precipitationProbability, data.precipitationMm)
               : null,
           }))
         })
@@ -991,6 +997,7 @@ export default function BiliranMap({
         <WeatherBadge
           crossing={urgentCrossing}
           condition={urgentCrossing ? weatherByMunicipality[urgentCrossing.barangay.municipality] ?? null : null}
+          updatedAt={weatherUpdatedAt}
         />
       )}
       {showChrome && <Legend size={isNarrowViewport ? 'md' : 'lg'} />}
@@ -1567,6 +1574,10 @@ interface WeatherCondition {
   // static hydrograph/FSI pipeline ("if it rains, here's how risky it
   // is"), independent of any real forecast. Null while loading/unavailable.
   precipitationProbability: number | null
+  // Open-Meteo's hourly precipitation amount (mm) for the current hour —
+  // same "readout only" status as precipitationProbability above. Null
+  // while loading/unavailable.
+  precipitationMm: number | null
 }
 
 /**
@@ -1575,18 +1586,18 @@ interface WeatherCondition {
  * exact same cloud-color palettes/dropCount/duration values this app
  * already had per severity level, just re-keyed by real condition.
  */
-function weatherConditionForBucket(bucket: WeatherBucket, precipitationProbability: number | null): WeatherCondition {
+function weatherConditionForBucket(bucket: WeatherBucket, precipitationProbability: number | null, precipitationMm: number | null): WeatherCondition {
   switch (bucket) {
     case 'Heavy rain':
-      return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65, precipitationProbability }
+      return { label: 'Heavy rain', cloud: ['#71828E', '#5C6C77', '#47555F'], dropColor: '#0F5A91', dropCount: 4, duration: 0.65, precipitationProbability, precipitationMm }
     case 'Rain':
-      return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1, precipitationProbability }
+      return { label: 'Rain', cloud: ['#8B9BA6', '#71828E', '#5C6C77'], dropColor: '#1B6FA8', dropCount: 3, duration: 1.1, precipitationProbability, precipitationMm }
     case 'Light rain':
-      return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6, precipitationProbability }
+      return { label: 'Light rain', cloud: ['#A9B7C0', '#8B9BA6', '#71828E'], dropColor: '#2E86C1', dropCount: 2, duration: 1.6, precipitationProbability, precipitationMm }
     case 'Calm':
     case 'Cloudy':
     default:
-      return { label: bucket, cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6, precipitationProbability }
+      return { label: bucket, cloud: ['#CBD5DC', '#AEBBC4', '#93A2AD'], dropColor: '#2E86C1', dropCount: 0, duration: 1.6, precipitationProbability, precipitationMm }
   }
 }
 
@@ -1653,22 +1664,29 @@ function WeatherIconStyles() {
   )
 }
 
+// Fixed brand accent for the "Estimated rain rate" tile and its footer
+// clock — not a CSS theme variable, same reasoning as condition.dropColor
+// above (a weather-semantic color, not one that should flip with the
+// light/dark theme toggle).
+const RAIN_RATE_ACCENT = '#0C969C'
+
 /**
- * Cloud/rain badge — now shows REAL current weather (Open-Meteo) for
- * whichever municipality the modeled Alert/Danger crossing below belongs
- * to, decoupled from that crossing's own severity (previously the same
- * scalar drove both the icon and the text — see CLAUDE.md for why they
- * were split). The tooltip is careful to name both signals separately so
- * neither implies the other.
+ * Weather-now card — shows REAL current weather (Open-Meteo) for whichever
+ * municipality the modeled Alert/Danger crossing below belongs to,
+ * decoupled from that crossing's own severity (previously the same scalar
+ * drove both the icon and the text — see CLAUDE.md for why they were
+ * split). The tooltip is careful to name both signals separately so
+ * neither implies the other; the modeled crossing/countdown itself still
+ * only ever shows up in that tooltip, same as before this redesign — the
+ * visible card below only ever shows real-forecast numbers.
  *
- * Shaped as a corner ribbon (clip-path right-trapezoid), not a rounded
- * pill, deliberately — a pill/chip reads as clickable, like the back
- * button next to it, but this is a passive readout. Flush to the
- * container's own top-right corner: the map card's `overflow-hidden` +
- * `rounded-xl` clips the ribbon's outer corner to match the card's curve
- * for free, so the ribbon itself needs no border-radius. A plain
- * border/box-shadow doesn't follow a clip-path'd box correctly, so depth
- * comes from `filter: drop-shadow(...)` instead.
+ * Rounded bordered card with a "WEATHER NOW" pill, not the corner-ribbon
+ * clip-path trapezoid this used to be — a deliberate reversal of that
+ * shape's original "passive readout, not a clickable chip" rationale (see
+ * CLAUDE.md), made on direct request against a reference mockup. Stacked
+ * into 4 rows (pill / icon+label / stat tiles / updated-at footer) rather
+ * than the mockup's single wide row, since this sits in a much narrower
+ * on-map footprint than that mockup's full-width screenshot.
  *
  * memo-wrapped — crossing is already a stable useMemo (mostUrgentCrossing)
  * and condition is a direct weatherByMunicipality[...] lookup (same object
@@ -1676,10 +1694,11 @@ function WeatherIconStyles() {
  * re-rendering — including its mount-independent drop-shadow filter and
  * nested WeatherIconSVG — on every pan/zoom frame for no reason.
  */
-const WeatherBadge = memo(function WeatherBadge({ crossing, condition }: { crossing: Crossing; condition: WeatherCondition | null }) {
+const WeatherBadge = memo(function WeatherBadge({ crossing, condition, updatedAt }: { crossing: Crossing; condition: WeatherCondition | null; updatedAt: number | null }) {
   if (!condition) return null
 
   const chance = condition.precipitationProbability
+  const rate = condition.precipitationMm
   // Shown purely as a readout of the real forecast — the modeled
   // Alert/Danger countdown text never factors this in (it's computed
   // entirely from the static hydrograph/FSI pipeline: "if it rains, here's
@@ -1691,40 +1710,97 @@ const WeatherBadge = memo(function WeatherBadge({ crossing, condition }: { cross
     ? `${condition.label}${chanceText ? ` (${chanceText})` : ''} (real current weather) in ${crossing.barangay.municipality} — separately, ${crossing.barangay.barangay} reaches ${crossing.tier} at ${formatHoursAsCountdown(crossing.hours)} into the modeled storm`
     : `${condition.label}${chanceText ? ` (${chanceText})` : ''} (real current weather) — no modeled crossings in range`
 
+  // null (not yet fetched) renders no footer row at all, rather than a
+  // placeholder time — same "don't invent it" rule as the stat tiles below.
+  const updatedText = updatedAt != null ? new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null
+
   return (
     <div
-      // Mobile-first sizing, same reasoning as ZoomControls above — tighter
-      // padding by default, growing at sm:. Upper-center, not flush against
-      // an edge, so the clip-path below is a symmetric trapezoid (both
-      // bottom corners taper inward) rather than the old flush-right shape
-      // (only the bottom-left corner tapered). Shorter/wider ribbon by
-      // direct request — reduced vertical padding, increased horizontal
-      // padding, with the clip-path's taper scaled down to match the
-      // shorter height (the old 24px diagonal looked proportionate at the
-      // old ~48px height; unscaled it would read too steep on this flatter
-      // shape) and the icon shrunk slightly to fit the tighter vertical space.
-      className="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-1.5 py-1 pl-9 pr-9 backdrop-blur-md sm:gap-2 sm:py-1.5 sm:pl-11 sm:pr-11"
+      // top-20 on mobile drops this below the header row's own buttons
+      // (Day/Profile/avatar, app/page.tsx's absolute right-5 top-5 cluster)
+      // — this card is wide enough even stacked that a centered position
+      // shares that cluster's vertical band and can't clear it just by
+      // narrowing (confirmed via bounding-box measurement: header spans
+      // x147-370 at a 390px viewport, this card's own center point at
+      // x195 can never keep its right edge left of 147). sm:top-2 reverts
+      // to the old near-top position once there's enough width that the
+      // two don't share the same horizontal band at all.
+      className="absolute left-1/2 top-20 flex -translate-x-1/2 flex-col gap-1.5 rounded-xl border px-2.5 py-2 backdrop-blur-md sm:top-2 sm:gap-2 sm:px-3.5 sm:py-2.5"
       style={{
         background: 'var(--card-bg)',
-        clipPath: 'polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%)',
-        filter: 'drop-shadow(0 3px 5px rgba(11,30,40,0.35))',
+        borderColor: 'var(--card-border)',
+        filter: 'drop-shadow(0 3px 8px rgba(11,30,40,0.3))',
       }}
       title={title}
     >
       <WeatherIconStyles />
-      <svg className="h-5 w-6 sm:h-6 sm:w-7" viewBox="0 0 44 36" aria-hidden>
-        <WeatherIconSVG condition={condition} />
-      </svg>
-      <span className="flex flex-col leading-tight">
-        <span className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>
+
+      <span
+        className="w-fit rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider sm:px-2 sm:text-[9px]"
+        style={{ background: `${condition.dropColor}26`, color: condition.dropColor }}
+      >
+        Weather now
+      </span>
+
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <svg className="h-6 w-7 shrink-0 sm:h-8 sm:w-9" viewBox="0 0 44 36" aria-hidden>
+          <WeatherIconSVG condition={condition} />
+        </svg>
+        <span className="text-sm font-bold leading-tight sm:text-base" style={{ color: 'var(--text-strong)' }}>
           {condition.label}
         </span>
-        {chance !== null && (
-          <span className="text-[10px] font-medium" style={{ color: 'var(--text-soft)' }}>
-            {Math.round(chance)}% rain
-          </span>
-        )}
-      </span>
+      </div>
+
+      {(chance !== null || rate !== null) && (
+        // Stacked by default — side-by-side needs ~160-180px just for the
+        // two tiles, which collides with the header's Day/Profile controls
+        // on a narrow phone (confirmed via screenshot); stacking keeps this
+        // card no wider than its icon+label row above until there's room.
+        <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center sm:gap-2">
+          {chance !== null && (
+            <div className="flex items-center gap-1 rounded-lg px-1.5 py-1 sm:gap-1.5 sm:px-2" style={{ background: `${condition.dropColor}1A` }}>
+              <svg className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" viewBox="0 0 24 24" fill={condition.dropColor} aria-hidden>
+                <path d="M12 2c-4 5.5-7 9.3-7 13a7 7 0 0 0 14 0c0-3.7-3-7.5-7-13z" />
+              </svg>
+              <span className="flex flex-col leading-none">
+                <span className="text-xs font-bold sm:text-sm" style={{ color: 'var(--text-strong)' }}>
+                  {Math.round(chance)}%
+                </span>
+                <span className="text-[7px] font-medium sm:text-[8px]" style={{ color: 'var(--text-soft)' }}>
+                  Chance of rain
+                </span>
+              </span>
+            </div>
+          )}
+          {rate !== null && (
+            <div className="flex items-center gap-1 rounded-lg px-1.5 py-1 sm:gap-1.5 sm:px-2" style={{ background: `${RAIN_RATE_ACCENT}1A` }}>
+              <svg className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" viewBox="0 0 24 24" fill="none" stroke={RAIN_RATE_ACCENT} strokeWidth={2.2} strokeLinecap="round" aria-hidden>
+                <line x1="3" y1="7" x2="15" y2="7" />
+                <line x1="3" y1="12.5" x2="19" y2="12.5" />
+                <line x1="3" y1="18" x2="11" y2="18" />
+              </svg>
+              <span className="flex flex-col leading-none">
+                <span className="text-xs font-bold sm:text-sm" style={{ color: 'var(--text-strong)' }}>
+                  {rate.toFixed(1)}<span className="text-[7px] font-semibold sm:text-[8px]"> mm/h</span>
+                </span>
+                <span className="text-[7px] font-medium sm:text-[8px]" style={{ color: 'var(--text-soft)' }}>
+                  Rain rate
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {updatedText && (
+        <div className="flex items-center gap-1 border-t pt-1 text-[8px] sm:text-[9px]" style={{ borderColor: 'var(--card-border)', color: 'var(--text-soft)' }}>
+          <svg className="h-2.5 w-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" strokeLinecap="round" />
+          </svg>
+          Open-Meteo forecast · Updated {updatedText}
+        </div>
+      )}
     </div>
   )
 })
