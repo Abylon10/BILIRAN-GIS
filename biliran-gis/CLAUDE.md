@@ -3172,6 +3172,55 @@ weather-poll loops' architecture (only their interval literal changed, not merge
 no virtualization library was added for `BarangayList.tsx` (115 rows is a modest, bounded count — memoization
 was judged the right-sized fix, matching this app's existing "no new dependency unless necessary" posture).
 
+## FSI factor weights changed to a provisional rainfall-weighted set
+
+By direct request, the FSI factor weights were changed from the external pipeline's original
+`0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·Rainfall` to a provisional `0.25·HAND + 0.15·TWI + 0.15·LCLU +
+0.45·Rainfall` ("use this factor for now" — read as an explicit, deliberate, but not-necessarily-final
+choice). This is a single-source-of-truth change: `public/data/fsi_factors.json`'s own `factor_weights`
+field is what `lib/islandSimulation.ts` (Simulation Mode) and `lib/liveIslandState.ts` (the live dashboard's
+default FSI/countdown recompute) both read at runtime — changing that one field alone correctly updates
+every live-computed FSI value and the "this factor contributes X%" text in `BarangayDetailPanel.tsx`'s
+`FactorBreakdown` "?" buttons, with no code change needed in either of those three places.
+
+Two things the weights field alone does *not* auto-update, handled explicitly:
+
+- **`fsi_recomputed`** — a static, precomputed-offline field stored per barangay in the same JSON, never
+  itself recalculated at runtime (it predates the live/simulation recompute paths and nothing reads it back
+  through `factor_weights` dynamically). Recomputed for all 115 barangays from their already-stored
+  `hand`/`twi`/`lclu`/`rainfall` values under the new weights (pure arithmetic, no new data needed), so the
+  file stays internally consistent and Simulation Mode's self-consistency property ("inputting the real
+  design storm's own parameters exactly reproduces the stored `fsi_recomputed`") still holds under the new
+  weights, not just the old ones.
+- **Hardcoded formula/weight strings in 3 user-facing spots** — `components/DashboardShell.tsx`'s live
+  honesty banner, `components/AdminGisDataTab.tsx`'s `FACTORS` array + formula string, and a code comment in
+  `lib/islandSimulation.ts` — all had the old `0.30/0.30/0.20/0.20` literally typed out and needed a direct
+  edit; nothing reads these from `factor_weights` itself since they're prose/comments, not computed display.
+
+**Validation numbers in `AdminGisDataTab.tsx` recomputed for real, not left stale.** The existing
+correlation/mean-absolute-difference claim (0.85 / 0.038, against the original 0.30/0.30/0.20/0.20 weights)
+would have been factually wrong left as-is once the weights and `fsi_recomputed` changed — recomputed
+directly from `fsi_factors.json`'s new `fsi_recomputed` values against `barangay_dashboard_data.json`'s
+authoritative `mean_fsi_score` (115-barangay Pearson correlation + mean absolute difference, plain Python,
+no library): **correlation 0.57, mean absolute difference 0.077, largest outlier +0.29 (San Roque, Naval)**
+— meaningfully weaker than the original weights' 0.85/0.038. This is an expected, disclosed consequence, not
+a bug: rainfall is one of the two FSI inputs already known to be reconstructed from a substitute/derived
+raster rather than the pipeline's own canonical file (see "Provenance and how this was built" above); raising
+its weight from 20%→45% necessarily amplifies that approximation's effect on agreement with the authoritative
+score. The tab's own copy was reworded to show both figures side by side (original-weights validation, then
+current-provisional-weights validation) rather than silently replacing one with the other, and "Reused
+unchanged from the external pipeline's own `compute_fsi.py`" was corrected to describe the weights as
+changed by direct request — leaving that sentence would have been a false claim once the weights diverged
+from the pipeline's own values.
+
+Verified via mocked-auth Playwright (admin session): the GIS & FSI Data tab renders all four new weights
+(`weight 0.25`/`0.15`/`0.15`/`0.45`) and the updated formula/validation text correctly; the live (non-admin)
+dashboard's honesty banner reads the new formula string too. `npm run lint` clean; `npm run build` hits a
+pre-existing, unrelated failure (`supabaseKey is required` collecting `/api/admin/fsi-snapshot`'s page data —
+confirmed via `git stash` to reproduce identically on the pre-existing commit, not caused by this change) —
+`next build`'s own TypeScript pass completed successfully before that unrelated route's build-time env-var
+error, so this change's own type-safety isn't in question.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

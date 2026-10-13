@@ -13,22 +13,22 @@
 const FACTORS: { name: string; weight: string; description: string }[] = [
   {
     name: 'HAND (inverted)',
-    weight: '0.30',
+    weight: '0.25',
     description: 'Height Above Nearest Drainage — lower elevation above the nearest stream means higher flood susceptibility, so this factor is inverted before combining.',
   },
   {
     name: 'TWI',
-    weight: '0.30',
+    weight: '0.15',
     description: 'Topographic Wetness Index — how much a location tends to accumulate water based on slope and upstream drainage area.',
   },
   {
     name: 'LCLU',
-    weight: '0.20',
+    weight: '0.15',
     description: 'Land cover / land use — a runoff score per land-cover class (e.g. built-up areas shed more water than forest).',
   },
   {
     name: 'Rainfall',
-    weight: '0.20',
+    weight: '0.45',
     description: 'A 6-hour rainfall total, interpolated across the 7 monitored municipalities.',
   },
 ]
@@ -41,11 +41,12 @@ export default function AdminGisDataTab() {
           FSI formula
         </h3>
         <p className="rounded-lg border px-3 py-2 font-mono text-sm" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}>
-          FSI = 0.30·HAND(inverted) + 0.30·TWI + 0.20·LCLU + 0.20·Rainfall
+          FSI = 0.25·HAND(inverted) + 0.15·TWI + 0.15·LCLU + 0.45·Rainfall
         </p>
         <p className="mt-1 text-xs" style={{ color: 'var(--text-soft)' }}>
-          Each factor is min-max normalized globally across the island before combining. Reused unchanged from the
-          external pipeline&apos;s own <code>compute_fsi.py</code>.
+          Each factor is min-max normalized globally across the island before combining. Weights changed from the
+          external pipeline&apos;s original <code>compute_fsi.py</code> values (0.30/0.30/0.20/0.20) to this
+          rainfall-weighted provisional set by direct request.
         </p>
       </div>
 
@@ -72,16 +73,21 @@ export default function AdminGisDataTab() {
         </h3>
         <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}>
           <p>
-            The recomputed per-barangay score (<code>fsi_recomputed</code>) was cross-checked against the 115
-            barangays&apos; authoritative <code>mean_fsi_score</code>: <strong>correlation 0.85</strong>, mean signed
-            difference −0.0003 (unbiased), <strong>mean absolute difference 0.038</strong> on the 0-1 scale, largest
-            single outlier +0.23 (San Roque, Naval).
+            With the original pipeline weights (0.30/0.30/0.20/0.20), the recomputed per-barangay score
+            (<code>fsi_recomputed</code>) was cross-checked against the 115 barangays&apos; authoritative
+            <code> mean_fsi_score</code>: correlation 0.85, mean absolute difference 0.038 on the 0-1 scale.
+          </p>
+          <p className="mt-2">
+            With the current provisional weights above (rainfall raised to 0.45), that agreement is weaker —
+            <strong> correlation 0.57</strong>, <strong>mean absolute difference 0.077</strong>, largest single
+            outlier +0.29 (San Roque, Naval) — expected, since rainfall is one of the two factors reconstructed
+            from a substitute/derived raster rather than the pipeline&apos;s own canonical file, and giving it
+            more weight amplifies that approximation&apos;s effect.
           </p>
           <p className="mt-2 text-xs" style={{ color: 'var(--text-soft)' }}>
             Two of the four inputs (TWI&apos;s flow-accumulation input, and rainfall) were reconstructed from
-            substitute/derived rasters rather than the pipeline&apos;s own canonical files — the agreement above is
-            consistent with those known approximations, not a broken join. <code>mean_fsi_score</code> remains the
-            one authoritative score used everywhere else in this app; nothing here changes it.
+            substitute/derived rasters rather than the pipeline&apos;s own canonical files. <code>mean_fsi_score</code>{' '}
+            remains the one authoritative score used everywhere else in this app; nothing here changes it.
           </p>
         </div>
       </div>
