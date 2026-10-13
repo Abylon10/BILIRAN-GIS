@@ -3221,6 +3221,54 @@ confirmed via `git stash` to reproduce identically on the pre-existing commit, n
 `next build`'s own TypeScript pass completed successfully before that unrelated route's build-time env-var
 error, so this change's own type-safety isn't in question.
 
+## Factor breakdown redesigned as "Barangay Factor Profile" — plain-language categories instead of raw percentage bars
+
+By direct request, with two reference mockups showing the target layout and suggested category names.
+`BarangayDetailPanel.tsx`'s `FactorBreakdown` (percentage bars for HAND/TWI/LCLU/Rainfall) is now
+`BarangayFactorProfile`: each of HAND, TWI, and LCLU still shows its real 0-1 score, but now paired with a
+plain-language category badge (e.g. "Drainage-Adjacent Lowland," "High Water Accumulation," "Runoff-Prone
+Cover") instead of a blue progress bar. Rainfall keeps its real value with no category badge — it changes
+with the weather, so a fixed island-wide rank for it wouldn't stay meaningful day to day, and the reference
+mockup itself only categorized the three static terrain factors.
+
+**Category boundaries are real tertiles computed from the actual 115-barangay dataset, not invented
+numbers.** The mockup's own accompanying guidance was explicit about this: "define thresholds... based on
+your data or defensible literature. Do not assign arbitrary numerical boundaries just to make the interface
+look specific." `lib/fsiFactorData.ts`'s new `getFactorTertiles()` sorts every barangay's own HAND/TWI/LCLU
+value and takes the 33rd/66th percentile as the low/mid boundary — genuinely data-driven quantile
+classification, matching how the mockup itself said this should be done, and automatically correct if the
+underlying raster data is ever reprocessed rather than needing a hand-maintained constant. Cached against
+the same `RawFactorData` reference `loadFsiFactors()` already caches, so the sort runs once per page load,
+not once per barangay selected.
+
+**Category labels use the mockup's own suggested names directly** (HAND: Elevated Terrain / Intermediate
+Drainage Elevation / Drainage-Adjacent Lowland; TWI: Low / Moderate / High Water Accumulation; LCLU:
+Infiltration-Supporting Cover / Mixed or Modified Cover / Runoff-Prone Cover), mapped so each factor's "high"
+tier always means "more flood-susceptible" — consistent with how each factor's own existing explanation text
+already describes its direction (HAND is pre-inverted so a high score means closer to drainage; see its own
+provenance comment).
+
+**Badge colors reuse the app's one existing severity palette (`urgencyTierColor`), not a new color
+scheme** — low/mid/high tiers map to `urgencyTierColor('Low'/'Moderate'/'High')`, and the badge itself uses
+the same `${color}33` translucent-background + solid-color-text convention already established by
+`SelectedBarangayCorner.tsx`/`AdminDashboardTab.tsx`/`UserDashboardModal.tsx`'s own severity badges, rather
+than inventing a fourth badge style for this one card.
+
+What's unchanged: the real-tap-target "?" explainer convention (same single-open-at-a-time state, same
+styling) — each factor's explanation now also states its real category-assignment basis ("this barangay's
+real rank among all 115... bottom/middle/top third"), replacing the old "0 means lowest, 1 means highest"
+framing that no longer matches what's actually shown. The weight-contribution sentence ("This factor
+contributes X% to the FSI score") is untouched, still computed from the real `factor_weights`, not
+hardcoded. No new data source — the 0-1 values feeding both the real number and the category still come
+from `fsi_factors.json`, the same file this breakdown always read from.
+
+Verified via mocked-auth Playwright: all four factor rows render with their correct `aria-label`s, categories
+compute correctly against the real data (confirmed Naval's Padre Sergio Eamiguel: HAND 0.86 → "Intermediate
+Drainage Elevation," TWI 0.15 → "High Water Accumulation," LCLU 0.53 → "Runoff-Prone Cover," all consistent
+with the actual tertile boundaries), the "?" explainer expands with the updated wording and correct weight
+percentage, and both themes read correctly (the translucent badge holds contrast in both light and dark).
+`npm run lint` clean.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
