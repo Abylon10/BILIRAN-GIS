@@ -212,7 +212,7 @@ export default function AdminShell({
       content = <AdminBarangaysTab barangays={barangays} theme={theme} />
       break
     case 'gis':
-      content = <AdminGisDataTab />
+      content = <AdminGisDataTab barangays={barangays} />
       break
     case 'rainfall':
       content = <UserDashboardModal embedded theme={theme} />

@@ -3358,6 +3358,64 @@ header-overlap bug above (caught this way, not guessed at), and no regression to
 behavior. `npm run lint` clean; TypeScript compiles clean (`next build`'s unrelated failure confirmed
 pre-existing on `main`, see above).
 
+## "Terrain base" / "Rainfall base" FSI weighting-scheme toggle
+
+Direct request to make the two FSI factor-weighting schemes introduced this session — the original
+pipeline's "terrain-majority" set (HAND 0.30/TWI 0.30/LCLU 0.20/Rainfall 0.20) and the current provisional
+"rainfall-majority" set (0.25/0.15/0.15/0.45, live in `public/data/fsi_factors.json`'s `factor_weights`) —
+switchable in the app itself, not just a one-off comparison Artifact. Added as a two-button pill toggle in
+**both** the main user-facing dashboard (`components/DashboardShell.tsx`) and the Admin → GIS & FSI Data tab
+(`components/AdminGisDataTab.tsx`), per direct confirmation both should exist. Selecting a scheme actually
+re-ranks/re-colors all 115 barangays live, not just swapping some summary text.
+
+**Deliberate scope decision**: this toggle shows a **static** comparison — each barangay's already-stored
+HAND/TWI/LCLU/Rainfall factor values (ratio=1, no live-weather or simulated-storm scaling), recombined
+under whichever scheme is selected. It does **not** interact with the real dashboard's existing
+live-weather-driven FSI (`lib/liveIslandState.ts`) or Simulation Mode — those answer "what happens under
+different rainfall," this toggle answers "what happens under different *weights*," a different, independent
+question, matching exactly what the earlier comparison Artifact already demonstrated. Default selection is
+`'rainfall'` everywhere; in that state nothing about previously-shipped behavior changes at all (the real
+dashboard's live-weather override still applies exactly as before). Only switching to `'terrain'`
+introduces the new static-comparison view, shown with a banner in the same visual family as the existing
+"SIMULATED" banner (amber `#B8860B`/`#3D2B00`) so it's never mistaken for live/current conditions.
+
+**`lib/fsiFactorData.ts`**: added `TERRAIN_BASE_WEIGHTS` (the original pipeline weights, hardcoded since
+nothing in code or data stored them anymore — only prose in this file and `AdminGisDataTab.tsx`'s old
+validation text) and `recomputeFsiStatic(factors, weights)` — the same ratio=1 recombination already used
+offline to produce each barangay's stored `fsi_recomputed` under the current weights, generalized so it can
+run for either scheme, live, in the browser. Deliberately simpler than
+`lib/islandSimulation.ts`/`lib/liveIslandState.ts`'s versions of this same sum, which additionally scale the
+rainfall term by a scenario/forecast ratio.
+
+**Main dashboard** (`app/page.tsx` + `DashboardShell.tsx`): new `weightScheme` state in `app/page.tsx`
+(lifted the same way `selectedKey`/`municipality` already are), a new `terrainBaseOverride` memo parallel to
+the existing `liveIslandState` one, and `displayBarangays`'s merge logic gained one more branch — when
+`terrainBaseOverride` is non-null it wins over the live-weather override (only ever replacing
+`mean_fsi_score`/`dominant_fsi_label`, never the countdown fields, since those come from hydrograph
+crossing times this static weight-only comparison has no opinion on). `DashboardShell.tsx` renders the
+toggle pills and swaps its top banner to the terrain-comparison text when active.
+
+**Admin GIS & FSI Data tab**: now takes a `barangays` prop from `AdminShell.tsx` (added to its own call,
+mirroring `AdminBarangaysTab`'s existing signature) and loads `factorData` itself via `loadFsiFactors()`.
+The "FSI formula"/per-factor weight display strings are now reactive to the toggle instead of hardcoded.
+**The "Validation" correlation/mean-absolute-difference numbers are now computed live in-browser** (plain
+Pearson correlation + mean absolute difference over all 115 barangays' `recomputeFsiStatic(...)` vs. their
+authoritative `mean_fsi_score`) for whichever scheme is selected, replacing the two fixed paragraphs that
+previously reported an earlier manual offline pass — confirmed via Playwright the live-computed numbers
+reproduce the already-documented ones exactly (terrain: correlation 0.85, mean abs diff 0.038, outlier +0.23
+San Roque; rainfall: 0.57/0.077/+0.29 San Roque). Also added a "barangays that change severity tier between
+schemes" summary (count + top-5 movers by score delta) for a concrete, visible "different result" in this
+tab too.
+
+Verified via Playwright screenshots in both themes: the main dashboard's barangay list genuinely re-sorts
+(e.g. "Padre Sergio Eamiguel" drops from #1/0.621/High under Rainfall base to #2/0.530/Moderate under
+Terrain base) and the map polygons visibly recolor; the admin tab's live validation numbers match CLAUDE.md's
+documented figures exactly for both schemes. A test-harness-only bug (not a real code defect) was caught and
+fixed during verification: an earlier TEMP-VERIFY auth bypass set a derived `revealed` boolean directly
+instead of the actual `authState` the FSI-factor-loading effect gates on, making `factorData` never load and
+masking the whole feature as a no-op — corrected by driving the real `authState` state instead, after which
+the toggle worked correctly on the first real test. `npm run lint` clean.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
