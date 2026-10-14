@@ -49,6 +49,8 @@ export default function DashboardShell({
   liveActive,
   liveHydrograph,
   liveRainfallFactor,
+  weightScheme,
+  onWeightSchemeChange,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
@@ -78,6 +80,13 @@ export default function DashboardShell({
   // rather than per-render here.
   liveHydrograph?: LiveHydrograph | null
   liveRainfallFactor?: number | null
+  // "Terrain base" / "Rainfall base" FSI weighting-scheme comparison toggle
+  // — lifted to app/page.tsx (same reason as selectedKey/municipality
+  // above) since it changes what displayBarangays' mean_fsi_score/
+  // dominant_fsi_label actually are, not just something local to this
+  // component's own rendering.
+  weightScheme: 'rainfall' | 'terrain'
+  onWeightSchemeChange: (scheme: 'rainfall' | 'terrain') => void
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -96,17 +105,45 @@ export default function DashboardShell({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
+          FSI weighting:
+        </span>
+        <div className="flex gap-1.5">
+          {(['rainfall', 'terrain'] as const).map((scheme) => (
+            <button
+              key={scheme}
+              type="button"
+              aria-pressed={weightScheme === scheme}
+              onClick={() => onWeightSchemeChange(scheme)}
+              className="rounded-full border px-3 py-1 text-xs font-medium"
+              style={
+                weightScheme === scheme
+                  ? { background: 'var(--btn-to)', borderColor: 'var(--btn-to)', color: 'var(--btn-text)' }
+                  : { background: 'transparent', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }
+              }
+            >
+              {scheme === 'rainfall' ? 'Rainfall base' : 'Terrain base'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div
         className="rounded-lg border px-3 py-2 text-xs"
         style={
-          liveActive
-            ? { background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }
-            : { background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: 'var(--text-strong)' }
+          weightScheme === 'terrain'
+            ? { background: '#B8860B', borderColor: '#B8860B', color: '#3D2B00' }
+            : liveActive
+              ? { background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }
+              : { background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: 'var(--text-strong)' }
         }
       >
-        {liveActive
-          ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
-          : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
+        {weightScheme === 'terrain'
+          ? 'Showing a static Terrain base comparison — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·rainfall, recombined from each barangay’s own real factor values at today’s conditions (not scaled by live weather or a simulated storm). Switch back to Rainfall base for the real live-forecast numbers.'
+          : liveActive
+            ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
+            : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
       </div>
 
       {loadError && (

@@ -28,9 +28,9 @@ import Image from 'next/image'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { fetchOwnProfile, formatDisplayName, getAvatarUrl } from '@/lib/profile'
-import { loadBarangays, type Barangay } from '@/lib/dashboardData'
+import { loadBarangays, fsiLabelForScore, type Barangay } from '@/lib/dashboardData'
 import { loadBasinHydrographs, type RawHydrographData } from '@/lib/hydrographData'
-import { loadFsiFactors, type RawFactorData } from '@/lib/fsiFactorData'
+import { loadFsiFactors, recomputeFsiStatic, TERRAIN_BASE_WEIGHTS, type RawFactorData } from '@/lib/fsiFactorData'
 import { loadWeather, type WeatherData } from '@/lib/liveWeather'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
 import { computeLiveIslandState } from '@/lib/liveIslandState'
@@ -117,6 +117,13 @@ export default function HomePage() {
   // "Next forecast update in Xm." The actual refresh is still driven
   // entirely by the effect below; this is just stamped alongside it.
   const [nextForecastUpdateAt, setNextForecastUpdateAt] = useState<number | null>(null)
+  // "Terrain base" / "Rainfall base" comparison toggle — which of the two
+  // FSI factor-weighting schemes introduced this session is shown. Default
+  // 'rainfall' changes nothing about today's shipped behavior (the live-
+  // weather override below still applies); 'terrain' is a static (ratio=1)
+  // comparison using the original pipeline weights, independent of live
+  // weather or Simulation Mode — see displayBarangays below and CLAUDE.md.
+  const [weightScheme, setWeightScheme] = useState<'rainfall' | 'terrain'>('rainfall')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   // Two-way synced with the map: tapping a municipality on the map sets
   // this (via BiliranMap's onFocusMunicipality), and it also drives
@@ -333,6 +340,24 @@ export default function HomePage() {
     return computeLiveIslandState(hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey)
   }, [hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey, barangays])
 
+  // "Terrain base" comparison — a static (ratio=1) recombination of each
+  // barangay's own stored HAND/TWI/LCLU/Rainfall factor values under the
+  // original pipeline weights, independent of live weather or Simulation
+  // Mode (see TERRAIN_BASE_WEIGHTS/recomputeFsiStatic in lib/fsiFactorData.ts
+  // for why this is deliberately a different, simpler computation than
+  // liveIslandState's). Barangays missing factor data are simply absent
+  // from this map, same "don't invent it" fallback displayBarangays below
+  // already uses for the live path.
+  const terrainBaseOverride = useMemo(() => {
+    if (weightScheme !== 'terrain' || !factorData) return null
+    const m = new Map<string, { fsi: number; label: ReturnType<typeof fsiLabelForScore> }>()
+    for (const [key, factors] of Object.entries(factorData.barangays)) {
+      const fsi = recomputeFsiStatic(factors, TERRAIN_BASE_WEIGHTS)
+      m.set(key, { fsi, label: fsiLabelForScore(fsi) })
+    }
+    return m
+  }, [weightScheme, factorData])
+
   // Overlays each barangay's real static FSI/countdown fields with its
   // live-forecast-computed ones — every downstream consumer (sort, filter,
   // list rows, map polygon color, detail panel) only ever reads whatever
@@ -343,8 +368,25 @@ export default function HomePage() {
   // basin-less barangays specifically (no discharge curve to derive a
   // live crossing time from at all) — same honest-absence pattern as
   // their missing hydrograph chart.
+  //
+  // weightScheme === 'terrain' takes over this same override slot instead —
+  // only ever changing mean_fsi_score/dominant_fsi_label, never the
+  // countdown fields (those come from hydrograph crossing times, which
+  // this static weight-only comparison has no opinion on, so they stay at
+  // each barangay's own real static value rather than mixing in the live
+  // path's numbers). weightScheme === 'rainfall' (the default) falls
+  // straight through to the exact pre-existing live-weather behavior below,
+  // unchanged.
   const displayBarangays = useMemo(() => {
-    if (!barangays || !liveIslandState) return barangays
+    if (!barangays) return barangays
+    if (terrainBaseOverride) {
+      return barangays.map((b) => {
+        const terrain = terrainBaseOverride.get(b.key)
+        if (!terrain) return b
+        return { ...b, mean_fsi_score: terrain.fsi, dominant_fsi_label: terrain.label }
+      })
+    }
+    if (!liveIslandState) return barangays
     return barangays.map((b) => {
       const live = liveIslandState.get(b.key)
       if (!live) return b
@@ -357,7 +399,7 @@ export default function HomePage() {
         danger_time_hours: live.dangerTimeHours ?? b.danger_time_hours,
       }
     })
-  }, [barangays, liveIslandState])
+  }, [barangays, liveIslandState, terrainBaseOverride])
 
   // The selected barangay's own live discharge curve, forwarded to
   // BarangayDetailPanel (via DashboardShell) — null while live data hasn't
@@ -1050,6 +1092,8 @@ export default function HomePage() {
                 liveActive={liveIslandState != null}
                 liveHydrograph={liveHydrograph}
                 liveRainfallFactor={liveRainfallFactor}
+                weightScheme={weightScheme}
+                onWeightSchemeChange={setWeightScheme}
               />
             </div>
           </aside>

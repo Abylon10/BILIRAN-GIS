@@ -61,6 +61,29 @@ export function factorsForBarangay(data: RawFactorData, barangayKey: string): Ba
   return data.barangays[barangayKey] ?? null
 }
 
+// The external pipeline's original "terrain-majority" weights — live in
+// fsi_factors.json's own factor_weights until a direct request changed it
+// to the "rainfall-majority" set currently there (see CLAUDE.md). No longer
+// stored anywhere in data, so it's hardcoded here — the one place in code
+// that needs it, for the Terrain base / Rainfall base comparison toggle
+// (components/DashboardShell.tsx, components/AdminGisDataTab.tsx).
+export const TERRAIN_BASE_WEIGHTS: FactorWeights = { hand: 0.3, twi: 0.3, lclu: 0.2, rainfall: 0.2 }
+
+/**
+ * Static (ratio=1, no live-weather or simulated-storm scaling) recombination
+ * of a barangay's own stored factor values under an arbitrary weight set —
+ * the exact formula already used offline to produce each barangay's stored
+ * fsi_recomputed under the current weights, generalized so it can run for
+ * either weighting scheme, live, in the browser. Deliberately simpler than
+ * lib/islandSimulation.ts/lib/liveIslandState.ts's versions of this same sum,
+ * which additionally scale the rainfall term by a scenario/forecast ratio —
+ * this one answers "what do different weights do," not "what does different
+ * rainfall do," so it never touches the rainfall factor's stored value.
+ */
+export function recomputeFsiStatic(factors: BarangayFactors, weights: FactorWeights): number {
+  return weights.hand * factors.hand + weights.twi * factors.twi + weights.lclu * factors.lclu + weights.rainfall * factors.rainfall
+}
+
 export interface FactorTertiles {
   hand: [number, number]
   twi: [number, number]
