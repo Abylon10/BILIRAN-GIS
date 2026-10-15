@@ -3416,6 +3416,80 @@ instead of the actual `authState` the FSI-factor-loading effect gates on, making
 masking the whole feature as a no-op — corrected by driving the real `authState` state instead, after which
 the toggle worked correctly on the first real test. `npm run lint` clean.
 
+## Third "Equal weights" (25/25/25/25) FSI scheme added everywhere
+
+By direct request ("try 25 all and observe and record the results"), a third weighting scheme — equal
+weights, 0.25 each — was added alongside Terrain base/Rainfall base in all three places those two already
+existed (main dashboard, Admin GIS & FSI Data tab) **and** added to Simulation Mode, which previously had no
+weighting-scheme picker of its own at all (confirmed via AskUserQuestion: Simulation Mode gets its own
+picker, not just inheriting whatever's live).
+
+**Real, verified numbers for the third scheme** (same methodology as the two existing schemes — Python
+script cross-checked against `public/data/fsi_factors.json`/`barangay_dashboard_data.json` directly, first
+reproducing the already-known Terrain 0.85/0.038 and Rainfall 0.57/0.077 figures before trusting its
+Equal-weights output):
+
+| Scheme | Mean FSI | Correlation vs. authoritative | Mean abs. diff | Largest outlier |
+|---|---|---|---|---|
+| Terrain-majority (0.30/0.30/0.20/0.20) | 0.473 | 0.85 | 0.038 | +0.23 (San Roque) |
+| Rainfall-majority (0.25/0.15/0.15/0.45) | 0.515 | 0.57 | 0.077 | +0.29 (San Roque) |
+| **Equal (0.25/0.25/0.25/0.25)** | **0.476** | **0.81** | **0.044** | **+0.23 (San Roque)** |
+
+Equal weights shifts severity tier for only 5/115 barangays relative to Terrain-majority, vs. 33/115
+relative to Rainfall-majority — it sits much closer to Terrain-majority than to Rainfall-majority (also true
+barangay-by-barangay: its score falls between the other two schemes' scores for 87/115 barangays).
+38/115 still shift between Terrain and Rainfall directly (reconfirms the existing toggle's own number,
+unchanged by this round).
+
+**`lib/fsiFactorData.ts`**: added `EQUAL_WEIGHTS` alongside `TERRAIN_BASE_WEIGHTS`. Centralized what had
+been two separate hand-written 2-way label/formula ternaries (`DashboardShell.tsx`, `AdminGisDataTab.tsx`)
+into shared exports consumed by all three UIs now: `WeightScheme = 'rainfall' | 'terrain' | 'equal'`,
+`WEIGHT_SCHEME_LABEL`, `WEIGHT_SCHEME_FORMULA`, `WEIGHT_SCHEME_WEIGHTS` (keyed `'terrain' | 'equal'` only —
+`'rainfall'` has no entry, meaning "read `factor_weights` live from `fsi_factors.json`," same as before).
+This was a deliberate refactor, not just an addition — three independent copies of the same scheme→label
+mapping would otherwise drift out of sync with each other's button labels/formula strings as more schemes
+are added.
+
+**Main dashboard** (`app/page.tsx` + `DashboardShell.tsx`): `weightScheme` widened to the 3-way type; the
+former `terrainBaseOverride` memo (renamed `staticWeightOverride`) now looks up `WEIGHT_SCHEME_WEIGHTS[scheme]`
+for either non-`'rainfall'` value instead of a hardcoded single branch. Button tuple widened to 3, banner
+ternary gained an `'equal'` branch (same amber "static comparison" framing as `'terrain'`, naming the real
+0.25/0.25/0.25/0.25 formula).
+
+**Admin GIS & FSI Data tab**: `scheme` widened the same way; the `movers` comparison (previously hardcoded
+to always compare Terrain vs. Rainfall regardless of the toggle) was generalized to compare whichever scheme
+is currently selected against each of the other two, rendering as a 2-column grid of comparison cards — a
+real redesign, not a one-off patch, so a hypothetical 4th scheme added later wouldn't need this logic
+touched again.
+
+**Simulation Mode** (`lib/islandSimulation.ts` + `SimulationModePanel.tsx`): `simulateIsland()` gained an
+optional 6th parameter, `weights?: FactorWeights`, defaulting to `factorData.factor_weights` when omitted —
+confirmed via `grep -rn "simulateIsland("` that `SimulationModePanel.tsx` is the only caller, so this is a
+fully backward-compatible addition. The panel itself gained a local `scheme` state (default `'rainfall'`,
+preserving exact pre-existing behavior) and the same 3-button pill picker, resolving to a concrete
+`FactorWeights` passed into `simulateIsland()`. Verified via Playwright: running the identical storm scenario
+under all three schemes produced genuinely different "Predicted alert count" distributions (Rainfall:
+0 Very Low/5 Low/39 Moderate/69 High/2 Very High; Terrain: 0/16/75/24/0; Equal: 0/16/66/33/0) — confirming
+the picker actually changes `simulateIsland()`'s output, not just cosmetic UI.
+
+Verified via Playwright: the Admin GIS & FSI Data tab's live-computed validation numbers reproduce the table
+above exactly for all three schemes (including the generalized movers' tier-shift counts — 38/115 Terrain
+vs. Rainfall, 5/115 Terrain vs. Equal, 33/115 Rainfall vs. Equal); the main dashboard's barangay list
+genuinely re-ranks under each scheme (top barangay's score moves 0.62 → 0.64 → 0.66 across Rainfall →
+Terrain → Equal) and the honesty banner's text/color updates correctly for all three. `npm run lint` and
+`npx tsc --noEmit` both clean.
+
+**The "FSI Weighting Comparison" Artifact** (built earlier this session to compare the original two schemes)
+was redesigned for three: a third weight stackbar, a 3-series distribution chart, a second scatter pane
+(Terrain vs. Equal, alongside the original Terrain vs. Rainfall — visibly tighter around the y=x diagonal,
+confirming Equal clusters closer to Terrain), a 2-series municipality diverging-bar chart (Rainfall and Equal,
+both relative to Terrain as the baseline), a 3-way agreement-with-authoritative-score stat row, and the full
+115-row table extended with Equal's score/class/delta. Republished to the same URL (this session already
+owned/read it) — data recomputed directly from `fsi_factors.json`/`barangay_dashboard_data.json` (same
+Python methodology as the table above, not hand-copied), and visually verified via a local Playwright render
+(correct element counts: 115 scatter points per pane, 15 distribution bars, 14 municipality bars, 115 full
+table rows) before publishing.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.

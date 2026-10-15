@@ -17,9 +17,12 @@
 //   score — the real FSI (fsi_factors.json) is weighted by whatever
 //   factor_weights currently holds (0.25*hand + 0.15*twi + 0.15*lclu +
 //   0.45*rainfall as of this writing — see fsi_factors.json's own
-//   factor_weights field, not hardcoded here), where hand/twi/lclu are static terrain
-//   factors (genuinely storm-independent) and rainfall is already stored
-//   pre-normalized (no raw mm total to rescale a simulated value against).
+//   factor_weights field, not hardcoded here) unless simulateIsland's own
+//   optional `weights` parameter overrides it (Simulation Mode's weighting-
+//   scheme picker — see components/SimulationModePanel.tsx), where
+//   hand/twi/lclu are static terrain factors (genuinely storm-independent)
+//   and rainfall is already stored pre-normalized (no raw mm total to
+//   rescale a simulated value against).
 //   This was disclosed plainly and the user chose to build an approximate
 //   recompute anyway. The approach: scale each barangay's own REAL
 //   rainfall factor by the ratio of the simulated storm's total rainfall
@@ -32,7 +35,7 @@
 //   layered on an approximation — every caller must label it as such.
 
 import type { RawHydrographData } from './hydrographData'
-import type { RawFactorData } from './fsiFactorData'
+import type { RawFactorData, FactorWeights } from './fsiFactorData'
 import { fsiLabelForScore, type FsiLabel } from './dashboardData'
 import {
   buildRaisedTriangularHyetograph,
@@ -94,13 +97,21 @@ function clamp01(x: number): number {
  * (all 115 — a superset of the 113 with basin/hydrograph data). No new
  * fetch: both `hydrographData`/`factorData` are already-loaded, cached
  * results from loadBasinHydrographs()/loadFsiFactors().
+ *
+ * `weights` optionally overrides which FSI weighting scheme the simulated
+ * FSI is recombined under (e.g. TERRAIN_BASE_WEIGHTS/EQUAL_WEIGHTS from
+ * lib/fsiFactorData.ts, for Simulation Mode's own weighting-scheme picker —
+ * see components/SimulationModePanel.tsx) — omitted, it falls back to
+ * `factorData.factor_weights` exactly as before this parameter existed, so
+ * every pre-existing caller is unaffected.
  */
 export function simulateIsland(
   hydrographData: RawHydrographData,
   factorData: RawFactorData,
   params: SimulationParams,
   dtHours: number,
-  totalHours: number
+  totalHours: number,
+  weights?: FactorWeights
 ): Map<string, IslandSimResult> {
   // Real design storm's own hyetograph, reconstructed from its own stored
   // storm_params (not hardcoded) via minRate:0 — buildRaisedTriangularHyetograph's
@@ -124,7 +135,7 @@ export function simulateIsland(
   const ratio = realTotalMm > RATIO_EPS ? simTotalMm / realTotalMm : 1
 
   const results = new Map<string, IslandSimResult>()
-  const w = factorData.factor_weights
+  const w = weights ?? factorData.factor_weights
 
   for (const key of Object.keys(factorData.barangays)) {
     const factors = factorData.barangays[key]

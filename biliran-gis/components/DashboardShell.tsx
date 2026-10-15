@@ -33,6 +33,7 @@
 
 import { useCallback, useMemo } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
+import { WEIGHT_SCHEME_LABEL, type WeightScheme } from '@/lib/fsiFactorData'
 import type { LiveHydrograph } from '@/lib/liveIslandState'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
@@ -80,13 +81,13 @@ export default function DashboardShell({
   // rather than per-render here.
   liveHydrograph?: LiveHydrograph | null
   liveRainfallFactor?: number | null
-  // "Terrain base" / "Rainfall base" FSI weighting-scheme comparison toggle
-  // — lifted to app/page.tsx (same reason as selectedKey/municipality
-  // above) since it changes what displayBarangays' mean_fsi_score/
-  // dominant_fsi_label actually are, not just something local to this
-  // component's own rendering.
-  weightScheme: 'rainfall' | 'terrain'
-  onWeightSchemeChange: (scheme: 'rainfall' | 'terrain') => void
+  // "Terrain base" / "Rainfall base" / "Equal weights" FSI weighting-scheme
+  // comparison toggle — lifted to app/page.tsx (same reason as selectedKey/
+  // municipality above) since it changes what displayBarangays'
+  // mean_fsi_score/dominant_fsi_label actually are, not just something
+  // local to this component's own rendering.
+  weightScheme: WeightScheme
+  onWeightSchemeChange: (scheme: WeightScheme) => void
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -110,7 +111,7 @@ export default function DashboardShell({
           FSI weighting:
         </span>
         <div className="flex gap-1.5">
-          {(['rainfall', 'terrain'] as const).map((scheme) => (
+          {(['rainfall', 'terrain', 'equal'] as const).map((scheme) => (
             <button
               key={scheme}
               type="button"
@@ -123,7 +124,7 @@ export default function DashboardShell({
                   : { background: 'transparent', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }
               }
             >
-              {scheme === 'rainfall' ? 'Rainfall base' : 'Terrain base'}
+              {WEIGHT_SCHEME_LABEL[scheme]}
             </button>
           ))}
         </div>
@@ -132,7 +133,7 @@ export default function DashboardShell({
       <div
         className="rounded-lg border px-3 py-2 text-xs"
         style={
-          weightScheme === 'terrain'
+          weightScheme !== 'rainfall'
             ? { background: '#B8860B', borderColor: '#B8860B', color: '#3D2B00' }
             : liveActive
               ? { background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }
@@ -141,9 +142,11 @@ export default function DashboardShell({
       >
         {weightScheme === 'terrain'
           ? 'Showing a static Terrain base comparison — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·rainfall, recombined from each barangay’s own real factor values at today’s conditions (not scaled by live weather or a simulated storm). Switch back to Rainfall base for the real live-forecast numbers.'
-          : liveActive
-            ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
-            : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
+          : weightScheme === 'equal'
+            ? 'Showing a static Equal weights comparison — FSI = 0.25·HAND + 0.25·TWI + 0.25·LCLU + 0.25·rainfall, recombined from each barangay’s own real factor values at today’s conditions (not scaled by live weather or a simulated storm). Switch back to Rainfall base for the real live-forecast numbers.'
+            : liveActive
+              ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
+              : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
       </div>
 
       {loadError && (

@@ -31,11 +31,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Barangay, FsiLabel } from '@/lib/dashboardData'
 import { urgencyTierColor } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographData'
-import { loadFsiFactors } from '@/lib/fsiFactorData'
+import { loadFsiFactors, WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_WEIGHTS, type WeightScheme } from '@/lib/fsiFactorData'
 import { type SimulationParams } from '@/lib/simulationMode'
 import { simulateIsland, type IslandSimResult } from '@/lib/islandSimulation'
 
 const ALERT_LABELS: FsiLabel[] = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
+const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
 
 const DEFAULT_MIN_RATE = 5
 const DEFAULT_MAX_RATE = 50
@@ -72,6 +73,13 @@ export default function SimulationModePanel({
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
   const [durationHours, setDurationHours] = useState(DEFAULT_DURATION_HOURS)
   const [scenarioName, setScenarioName] = useState('')
+  // Which FSI weighting scheme the simulated FSI is recombined under —
+  // default 'rainfall' keeps this component's exact pre-existing behavior
+  // (always whatever factor_weights currently holds); 'terrain'/'equal'
+  // pass a fixed override into simulateIsland() instead. Local to this
+  // component, not lifted — this panel already owns all its own scenario-
+  // form state.
+  const [scheme, setScheme] = useState<WeightScheme>('rainfall')
   // Keyed by barangay.key rather than reset-on-effect-entry, so switching
   // barangays never needs a synchronous setState at the top of the effect
   // (see the same pattern in BarangayDetailPanel.tsx).
@@ -111,8 +119,9 @@ export default function SimulationModePanel({
     if (!inputsValid) return
     setRunning(true)
     const params: SimulationParams = { minRate, maxRate, durationHours }
+    const weights = scheme === 'rainfall' ? undefined : WEIGHT_SCHEME_WEIGHTS[scheme]
     Promise.all([loadBasinHydrographs(), loadFsiFactors()]).then(([hydrographData, factorData]) => {
-      const results = simulateIsland(hydrographData, factorData, params, DT_HOURS, TOTAL_WINDOW_HOURS)
+      const results = simulateIsland(hydrographData, factorData, params, DT_HOURS, TOTAL_WINDOW_HOURS, weights)
       setRunning(false)
       setLastResults(results)
       onSimulate(results, params)
@@ -124,6 +133,7 @@ export default function SimulationModePanel({
     setMaxRate(DEFAULT_MAX_RATE)
     setDurationHours(DEFAULT_DURATION_HOURS)
     setScenarioName('')
+    setScheme('rainfall')
     setLastResults(null)
     onReset?.()
   }
@@ -187,6 +197,30 @@ export default function SimulationModePanel({
           change, but its FSI estimate still will.
         </p>
       )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs" style={{ color: 'var(--text-soft)' }}>
+          FSI weighting
+        </span>
+        <div className="flex gap-1.5">
+          {SCHEMES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              aria-pressed={scheme === s}
+              onClick={() => setScheme(s)}
+              className="rounded-full border px-3 py-1 text-xs font-medium"
+              style={
+                scheme === s
+                  ? { background: 'var(--btn-to)', borderColor: 'var(--btn-to)', color: 'var(--btn-text)' }
+                  : { background: 'transparent', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }
+              }
+            >
+              {WEIGHT_SCHEME_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="flex flex-col gap-3">
         <NumberField label="Min rain (mm/hr)" value={minRate} onChange={setMinRate} />
