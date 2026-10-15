@@ -69,6 +69,35 @@ export function factorsForBarangay(data: RawFactorData, barangayKey: string): Ba
 // (components/DashboardShell.tsx, components/AdminGisDataTab.tsx).
 export const TERRAIN_BASE_WEIGHTS: FactorWeights = { hand: 0.3, twi: 0.3, lclu: 0.2, rainfall: 0.2 }
 
+// A third comparison scheme — equal weight for all four factors — added
+// alongside Terrain base/Rainfall base by direct request. Verified
+// (correlation 0.81, mean abs. diff 0.044 against the authoritative score)
+// to sit much closer to Terrain base than to Rainfall base: only 5 of 115
+// barangays change severity tier relative to Terrain base, vs. 33 relative
+// to Rainfall base — see CLAUDE.md and the "FSI Weighting Comparison"
+// Artifact for the full comparison.
+export const EQUAL_WEIGHTS: FactorWeights = { hand: 0.25, twi: 0.25, lclu: 0.25, rainfall: 0.25 }
+
+// Shared across every weighting-scheme picker (components/DashboardShell.tsx,
+// components/AdminGisDataTab.tsx, components/SimulationModePanel.tsx) so the
+// three UIs can't drift out of sync with each other's button labels/formula
+// strings. 'rainfall' has no entry in WEIGHT_SCHEME_WEIGHTS — it means "read
+// factor_weights live from fsi_factors.json," not a fixed constant.
+export type WeightScheme = 'rainfall' | 'terrain' | 'equal'
+export const WEIGHT_SCHEME_LABEL: Record<WeightScheme, string> = {
+  rainfall: 'Rainfall base',
+  terrain: 'Terrain base',
+  equal: 'Equal weights',
+}
+export const WEIGHT_SCHEME_FORMULA: Record<Exclude<WeightScheme, 'rainfall'>, string> = {
+  terrain: '0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·Rainfall',
+  equal: '0.25·HAND + 0.25·TWI + 0.25·LCLU + 0.25·Rainfall',
+}
+export const WEIGHT_SCHEME_WEIGHTS: Record<Exclude<WeightScheme, 'rainfall'>, FactorWeights> = {
+  terrain: TERRAIN_BASE_WEIGHTS,
+  equal: EQUAL_WEIGHTS,
+}
+
 /**
  * Static (ratio=1, no live-weather or simulated-storm scaling) recombination
  * of a barangay's own stored factor values under an arbitrary weight set —

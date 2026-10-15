@@ -24,9 +24,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { Barangay } from '@/lib/dashboardData'
-import { loadFsiFactors, recomputeFsiStatic, TERRAIN_BASE_WEIGHTS, type RawFactorData, type FactorWeights } from '@/lib/fsiFactorData'
+import {
+  loadFsiFactors,
+  recomputeFsiStatic,
+  WEIGHT_SCHEME_LABEL,
+  WEIGHT_SCHEME_FORMULA,
+  WEIGHT_SCHEME_WEIGHTS,
+  type RawFactorData,
+  type FactorWeights,
+  type WeightScheme,
+} from '@/lib/fsiFactorData'
 
-type Scheme = 'rainfall' | 'terrain'
+const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
 
 const FACTOR_META: { key: keyof FactorWeights; name: string; description: string }[] = [
   {
@@ -69,7 +78,7 @@ function pearsonCorrelation(xs: number[], ys: number[]): number {
 }
 
 export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] | null }) {
-  const [scheme, setScheme] = useState<Scheme>('rainfall')
+  const [scheme, setScheme] = useState<WeightScheme>('rainfall')
   const [factorData, setFactorData] = useState<RawFactorData | null>(null)
 
   useEffect(() => {
@@ -83,8 +92,8 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
   }, [])
 
   const weights: FactorWeights | null = useMemo(() => {
-    if (scheme === 'terrain') return TERRAIN_BASE_WEIGHTS
-    return factorData?.factor_weights ?? null
+    if (scheme === 'rainfall') return factorData?.factor_weights ?? null
+    return WEIGHT_SCHEME_WEIGHTS[scheme]
   }, [scheme, factorData])
 
   // Live, in-browser Pearson correlation + mean absolute difference between
@@ -120,29 +129,50 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
   }, [weights, factorData, barangays])
 
   // Which barangays' severity tier (fsiLabelForScore band) differs between
-  // the two schemes — computed once both schemes' recomputations are
-  // available, regardless of which one is currently toggled, so this list
-  // doesn't flicker empty while only one scheme's data is "selected."
+  // the currently-selected scheme and each of the other two — computed for
+  // all three schemes' recomputations regardless of which is toggled, so
+  // switching the toggle re-targets the comparison instead of needing a
+  // separate control. Generalizes the original 2-scheme version of this
+  // list to the 3-scheme case by comparing "what you're looking at" against
+  // each alternative rather than hardcoding one fixed pair.
   const movers = useMemo(() => {
     if (!factorData || !barangays) return null
     const authoritativeByKey = new Map(barangays.map((b) => [b.key, b.barangay]))
-    const rows: { name: string; terrainFsi: number; rainfallFsi: number }[] = []
+    const allWeights: Record<WeightScheme, FactorWeights> = {
+      rainfall: factorData.factor_weights,
+      terrain: WEIGHT_SCHEME_WEIGHTS.terrain,
+      equal: WEIGHT_SCHEME_WEIGHTS.equal,
+    }
+    const rows: { name: string; scores: Record<WeightScheme, number> }[] = []
     for (const [key, factors] of Object.entries(factorData.barangays)) {
       const name = authoritativeByKey.get(key)
       if (!name) continue
       rows.push({
         name,
-        terrainFsi: recomputeFsiStatic(factors, TERRAIN_BASE_WEIGHTS),
-        rainfallFsi: recomputeFsiStatic(factors, factorData.factor_weights),
+        scores: {
+          rainfall: recomputeFsiStatic(factors, allWeights.rainfall),
+          terrain: recomputeFsiStatic(factors, allWeights.terrain),
+          equal: recomputeFsiStatic(factors, allWeights.equal),
+        },
       })
     }
     const tier = (score: number) => (score < 0.2 ? 0 : score < 0.4 ? 1 : score < 0.6 ? 2 : score < 0.8 ? 3 : 4)
-    const changed = rows
-      .map((r) => ({ ...r, delta: r.rainfallFsi - r.terrainFsi, tierChanged: tier(r.terrainFsi) !== tier(r.rainfallFsi) }))
-      .filter((r) => r.tierChanged)
-      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-    return { total: rows.length, changedCount: changed.length, top: changed.slice(0, 5) }
-  }, [factorData, barangays])
+    const others = SCHEMES.filter((s) => s !== scheme)
+    const comparisons = others.map((other) => {
+      const changed = rows
+        .map((r) => ({
+          name: r.name,
+          from: r.scores[other],
+          to: r.scores[scheme],
+          delta: r.scores[scheme] - r.scores[other],
+          tierChanged: tier(r.scores[scheme]) !== tier(r.scores[other]),
+        }))
+        .filter((r) => r.tierChanged)
+        .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      return { other, changedCount: changed.length, top: changed.slice(0, 5) }
+    })
+    return { total: rows.length, comparisons }
+  }, [factorData, barangays, scheme])
 
   const formula = weights
     ? `FSI = ${weights.hand.toFixed(2)}·HAND(inverted) + ${weights.twi.toFixed(2)}·TWI + ${weights.lclu.toFixed(2)}·LCLU + ${weights.rainfall.toFixed(2)}·Rainfall`
@@ -155,7 +185,7 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
           FSI weighting:
         </span>
         <div className="flex gap-1.5">
-          {(['rainfall', 'terrain'] as const).map((s) => (
+          {SCHEMES.map((s) => (
             <button
               key={s}
               type="button"
@@ -168,7 +198,7 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
                   : { background: 'transparent', borderColor: 'var(--card-border)', color: 'var(--text-soft)' }
               }
             >
-              {s === 'rainfall' ? 'Rainfall base' : 'Terrain base'}
+              {WEIGHT_SCHEME_LABEL[s]}
             </button>
           ))}
         </div>
@@ -183,9 +213,9 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
         </p>
         <p className="mt-1 text-xs" style={{ color: 'var(--text-soft)' }}>
           Each factor is min-max normalized globally across the island before combining.{' '}
-          {scheme === 'terrain'
-            ? "Showing the external pipeline's original weights (0.30/0.30/0.20/0.20) — switch to Rainfall base for the current provisional set."
-            : 'Weights changed from the original pipeline values (0.30/0.30/0.20/0.20) to this rainfall-weighted provisional set by direct request — switch to Terrain base to compare.'}
+          {scheme === 'rainfall'
+            ? `Weights changed from the original pipeline values (${WEIGHT_SCHEME_FORMULA.terrain}) to this rainfall-weighted provisional set by direct request — switch schemes above to compare.`
+            : `Showing the ${scheme === 'terrain' ? "external pipeline's original" : 'equal (25/25/25/25)'} weights (${WEIGHT_SCHEME_FORMULA[scheme]}) — switch schemes above to compare.`}
         </p>
       </div>
 
@@ -210,7 +240,7 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
 
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-          Validation — {scheme === 'terrain' ? 'Terrain base' : 'Rainfall base'}
+          Validation — {WEIGHT_SCHEME_LABEL[scheme]}
         </h3>
         <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}>
           {validation ? (
@@ -238,26 +268,30 @@ export default function AdminGisDataTab({ barangays }: { barangays: Barangay[] |
       {movers && (
         <div>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-soft)' }}>
-            Barangays that change severity tier between schemes
+            Barangays that change severity tier vs. {WEIGHT_SCHEME_LABEL[scheme]}
           </h3>
-          <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}>
-            <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-              {movers.changedCount} of {movers.total} barangays shift severity tier (Very Low/Low/Moderate/High/Very
-              High) between Terrain base and Rainfall base weights.
-            </p>
-            {movers.top.length > 0 && (
-              <ul className="mt-2 flex flex-col gap-1">
-                {movers.top.map((m) => (
-                  <li key={m.name} className="flex items-center justify-between text-xs">
-                    <span style={{ color: 'var(--text-strong)' }}>{m.name}</span>
-                    <span style={{ color: 'var(--text-soft)' }}>
-                      {m.terrainFsi.toFixed(2)} → {m.rainfallFsi.toFixed(2)} ({m.delta >= 0 ? '+' : ''}
-                      {m.delta.toFixed(2)})
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {movers.comparisons.map((c) => (
+              <div key={c.other} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-strong)' }}>
+                <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                  {c.changedCount} of {movers.total} barangays shift severity tier (Very Low/Low/Moderate/High/Very
+                  High) between {WEIGHT_SCHEME_LABEL[scheme]} and {WEIGHT_SCHEME_LABEL[c.other]}.
+                </p>
+                {c.top.length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {c.top.map((m) => (
+                      <li key={m.name} className="flex items-center justify-between text-xs">
+                        <span style={{ color: 'var(--text-strong)' }}>{m.name}</span>
+                        <span style={{ color: 'var(--text-soft)' }}>
+                          {m.from.toFixed(2)} → {m.to.toFixed(2)} ({m.delta >= 0 ? '+' : ''}
+                          {m.delta.toFixed(2)})
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
