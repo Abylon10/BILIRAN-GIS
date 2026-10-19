@@ -70,8 +70,10 @@ function designStormTotalMm(hydrographData: RawHydrographData): number {
   return 0.5 * peak_mm_hr * duration_hours
 }
 
-// How far into an hourly forecast to sum for the FSI rainfall-factor
-// ratio — matches the real design storm's own 6-hour display window.
+// How many hours forward (from the current hour, not from the start of
+// Open-Meteo's own local-calendar-day array) to sum for the FSI
+// rainfall-factor ratio — matches the real design storm's own 6-hour
+// display window.
 const FSI_WINDOW_HOURS = 6
 
 function clamp01(x: number): number {
@@ -99,10 +101,14 @@ export function computeLiveIslandState(
     const municipality = municipalityByBarangayKey.get(key)
     const weather = municipality ? weatherByMunicipality[municipality] ?? null : null
 
+    // currentHourIndex < 0 means the API couldn't place "now" in its own
+    // hourly array (rare) — treated the same as weather being entirely
+    // unavailable (ratio stays 1, i.e. unscaled static factor) rather than
+    // silently reading from the wrong offset.
     let ratio = 1
-    if (weather && weather.hourlyPrecipitationMm.length > 0) {
+    if (weather && weather.currentHourIndex >= 0 && weather.hourlyPrecipitationMm.length > 0) {
       const liveTotalMm = weather.hourlyPrecipitationMm
-        .slice(0, FSI_WINDOW_HOURS)
+        .slice(weather.currentHourIndex, weather.currentHourIndex + FSI_WINDOW_HOURS)
         .reduce((a, b) => a + b, 0)
       ratio = designTotalMm > 0 ? liveTotalMm / designTotalMm : 0
     }
@@ -117,8 +123,12 @@ export function computeLiveIslandState(
     let dangerTimeHours: number | null = null
 
     const primary = hydrographForBarangay(hydrographData, key)
-    if (primary && weather && weather.hourlyPrecipitationMm.length > 0) {
-      const rainfallMmHr = weather.hourlyPrecipitationMm
+    if (primary && weather && weather.currentHourIndex >= 0 && weather.hourlyPrecipitationMm.length > 0) {
+      // Sliced from currentHourIndex, not the array's own start — so index
+      // 0 here (and therefore timeHours[0]) genuinely means "right now,"
+      // not "midnight." This is what makes the Warning/Alert/Danger
+      // countdown read as hours-from-now instead of hours-since-midnight.
+      const rainfallMmHr = weather.hourlyPrecipitationMm.slice(weather.currentHourIndex)
       const q = recomputeHydrograph(primary.A, 1, rainfallMmHr)
       const timeHours = rainfallMmHr.map((_, i) => i)
       warningTimeHours = crossingTimeHours(timeHours, q, 0.5)
