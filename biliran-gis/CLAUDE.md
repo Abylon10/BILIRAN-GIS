@@ -3490,6 +3490,64 @@ Python methodology as the table above, not hand-copied), and visually verified v
 (correct element counts: 115 scatter points per pane, 15 distribution bars, 14 municipality bars, 115 full
 table rows) before publishing.
 
+## Map performance: removed remaining per-zoom-frame recomputation in MunicipalityLayer
+
+Direct request ("optimize map"), after this file's own many prior performance rounds on this exact
+component. Re-confirmed all of that prior work is still genuinely in place (waterway merging, `shapeRendering
+="optimizeSpeed"`, the `MAX_SCALE` cap, `React.memo` on the layer components, `useCallback` stabilization,
+rAF-throttled drag, memoized path-string generation, animation pausing) before looking for what's left.
+
+**Root cause**: `MunicipalityLayer` — the one component this file's own prior profiling already localized as
+the real source of pan/zoom lag — is `React.memo`-wrapped, but one of its own props, `barangayOpacity`
+(derived from `view.scale` relative to the current municipality's own fill-scale thresholds), changes
+continuously throughout any zoom gesture, not just when crossing into a different municipality. So the memo
+boundary does nothing during an actual pinch/wheel-zoom — the whole component body re-executes on every rAF
+tick for the gesture's duration. Inside that body, two real costs were running fresh every frame, for all 7
+municipalities each time: `municipalityWorstScore()` (a linear scan over all 115 barangays per municipality,
+~805 comparisons/frame) for the fill color, and `geometryCentroid()` (walks every vertex of a municipality's
+full boundary ring — the largest, most vertex-heavy polygons on this map) called twice per municipality per
+frame, once for the weather-icon anchor and once for the label anchor. Both are the same class of bug the
+existing `municipalityPaths`/`waterwayPaths` memoization already fixed for path strings, just not extended to
+these two other per-feature computations.
+
+One candidate finding did **not** hold up on direct verification and was excluded: `BarangayLayer`'s own
+`geometryCentroid` call looked parallel at first glance, but every prop it actually receives (`brgyGeo`,
+`nearestPrefix`, `barangaysByKey`, `selectedKey`, `onSelect`) is stable across a zoom gesture — none of them is
+`barangayOpacity` or anything `view.scale`-derived — so its `React.memo` genuinely does skip re-rendering
+during zoom, and that call site isn't actually re-executed per frame. Left untouched.
+
+**Fix**: two new `useMemo`s in `BiliranMap` itself, same lifetime/keying pattern as `municipalityPaths`:
+`municipalityScores` (`Map<string, number>`, keyed on `[municipalities, barangays]`) and
+`municipalityCentroids` (`Map<string, Position>`, keyed on `[municipalities]`), each computed once instead of
+recomputed by `MunicipalityLayer` inline. Threaded into `MunicipalityLayer` as two new props, replacing the
+`barangays` prop it used to take just for the inline `municipalityWorstScore` call. Two small free wins
+alongside: `Legend` (taking only primitive `compact`/`size` props, previously unmemoized despite its siblings
+`ZoomControls`/`WeatherBadge`/`NextForecastBadge` already getting this treatment) is now `React.memo`-wrapped;
+and `WeatherIconStyles` (a static, prop-less `<style>` tag) moved from being re-invoked inside
+`MunicipalityLayer`'s per-frame-re-rendering labels pass to rendering once from `BiliranMap`'s own top-level
+return, alongside its existing main `<style>` block.
+
+**Verification**: `npm run lint`/`npx tsc --noEmit` both clean. Visually confirmed via Playwright (both
+themes, full-island overview and zoomed into a municipality) that every municipality's fill color, worst-FSI
+tooltip text, and label/weather-icon position are pixel-identical to before — this change only alters *how*
+those values are computed, never what they are. A dev-mode CDP-throttled before/after comparison (git-stash
+toggling just this one file, same zoom gesture, same session) was inconclusive on its own — dev-mode longtask
+noise swamped the signal, consistent with this file's own prior documented lesson that dev numbers shouldn't
+be trusted — and a true production-build profile couldn't be obtained in this sandbox (blocked by the
+pre-existing, already-documented `SUPABASE_SERVICE_ROLE_KEY` gap affecting `/api/admin/fsi-snapshot`'s
+build-time page-data collection, confirmed unrelated to this change). The fix itself is a provable Big-O
+improvement regardless (O(805) scans + 7 polygon-boundary walks per frame, replaced with O(1) map lookups per
+frame) rather than a speculative one needing empirical confirmation — unlike some of this file's earlier,
+more exploratory performance rounds.
+
+**Not touched, scope boundaries confirmed deliberate**: geometry simplification (reducing the ~4,700-11,600
+raw polygon vertices via `mapshaper` or similar) — already flagged elsewhere in this file as "a separate,
+bigger lever," requiring an offline reprocessing script outside this repo; merging the two independent
+weather-poll loops (`BiliranMap.tsx`'s own vs. `app/page.tsx`'s) — these are deliberately decoupled (an
+ambient icon bucket vs. live FSI/countdown computation), a real architecture decision, not pure duplication;
+`BarangayList.tsx` virtualization — already explicitly decided against in an earlier round; two-finger
+pinch-zoom — a feature gap, not a performance fix, already a documented accepted rough edge.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
