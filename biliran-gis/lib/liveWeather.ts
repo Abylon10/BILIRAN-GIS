@@ -15,6 +15,11 @@ export interface WeatherData {
   // resolution this doubles as an mm/h rate.
   precipitationMm: number | null
   hourlyPrecipitationMm: number[]
+  // Index into hourlyPrecipitationMm (and the API route's own hourly.time)
+  // where "now" falls — -1 if the API couldn't place it. Consumers reading
+  // a forward window from hourlyPrecipitationMm (lib/liveIslandState.ts)
+  // must slice from here, not assume the array starts at the current hour.
+  currentHourIndex: number
 }
 
 const CACHE_TTL_MS = 10 * 60 * 1000 // slightly under the API route's own 15-minute revalidate
@@ -42,6 +47,7 @@ export async function loadWeather(municipality: string): Promise<WeatherData | n
       precipitationProbability: json.current?.precipitationProbability ?? null,
       precipitationMm: json.current?.precipitationMm ?? null,
       hourlyPrecipitationMm: json.hourly?.precipitationMm ?? [],
+      currentHourIndex: json.currentHourIndex ?? -1,
     }))
     .then((data) => {
       cache.set(municipality, { data, fetchedAt: Date.now() })

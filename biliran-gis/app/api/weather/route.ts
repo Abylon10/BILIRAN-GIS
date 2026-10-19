@@ -10,11 +10,10 @@
 // involved, so there's nothing to gate behind requireAdmin.
 //
 // `current` drives the map's weather icon (components/BiliranMap.tsx).
-// `hourly` isn't consumed by any component right now (Simulation Mode's
-// "Use today's forecast" prefill, its one past consumer, was removed —
-// see CLAUDE.md) but stays in the response since it's already part of
-// the same upstream call current needs; no cost to leaving it available
-// for a future real-forecast feature.
+// `hourly` feeds lib/liveIslandState.ts's live rainfall factor/countdown
+// recompute — paired with `currentHourIndex` below so that consumer can
+// slice forward from "now" instead of assuming the array starts there
+// (see CLAUDE.md's "live rainfall factor always reads midnight" fix).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { MUNICIPALITY_COORDS } from '@/lib/municipalityCoords'
@@ -41,7 +40,10 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('longitude', String(coords.lon))
   url.searchParams.set('current_weather', 'true')
   url.searchParams.set('hourly', 'precipitation,precipitation_probability,weathercode')
-  url.searchParams.set('forecast_days', '1')
+  // 2 days, not 1 — lib/liveIslandState.ts reads a forward-looking window
+  // anchored to currentHourIndex below; a visit late in the day would
+  // otherwise run out of array before completing a real 6-hour window.
+  url.searchParams.set('forecast_days', '2')
   url.searchParams.set('timezone', 'Asia/Manila')
 
   let upstream: Response
@@ -73,6 +75,12 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     municipality,
+    // Index into the `hourly` arrays below where "now" actually falls —
+    // -1 if current_weather.time genuinely isn't in hourly.time (should be
+    // rare; consumers should treat that as "no live data," not silently
+    // read from the wrong offset). Exposed so lib/liveIslandState.ts can
+    // slice forward from here instead of assuming hourly starts at "now".
+    currentHourIndex,
     current: {
       weatherCode: data.current_weather?.weathercode ?? null,
       temperatureC: data.current_weather?.temperature ?? null,

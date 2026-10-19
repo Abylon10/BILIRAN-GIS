@@ -3548,6 +3548,59 @@ ambient icon bucket vs. live FSI/countdown computation), a real architecture dec
 `BarangayList.tsx` virtualization — already explicitly decided against in an earlier round; two-finger
 pinch-zoom — a feature gap, not a performance fix, already a documented accepted rough edge.
 
+## Fixed: live rainfall factor always read midnight-5am instead of "now"
+
+Reported on the live production deployment: the Barangay Factor Profile showed "Today's live rainfall
+forecast: 0.00" for a selected barangay even while the map's own weather badge showed "Light rain" for the
+same municipality, and every barangay in the ranked list showed an identical countdown regardless of basin
+("the timer resets" on every visit, always to the same numbers).
+
+**Root cause, confirmed by reading the code, not guessed**: `app/api/weather/route.ts` requested
+`forecast_days=1` from Open-Meteo, so `hourly.time`/`hourly.precipitation` was always today's full local
+calendar day starting at midnight — regardless of what time it actually is. The route already computed
+`currentHourIndex` (`hourlyTimes.indexOf(current_weather.time)`) but only used it to pick out the `current`
+object's own fields; it was never applied to the `hourly` arrays themselves. `lib/liveIslandState.ts` then
+always summed `hourlyPrecipitationMm.slice(0, FSI_WINDOW_HOURS)` — array indices 0-5, i.e. midnight-5am — for
+the live rainfall ratio, and fed the *entire unsliced* array into the hydrograph/countdown computation with
+`timeHours = rainfallMmHr.map((_, i) => i)`, meaning the countdown's "Xh" was hours-since-midnight (raw array
+index), not hours-from-now. `lib/islandSimulation.ts`'s `crossingTimeHours()` zero-rainfall guard (when a
+basin's discharge curve never exceeds `1e-9`) returns `timeHours[timeHours.length - 1]` — the same,
+basin-independent value for every barangay whose window happened to be flat, which a quiet overnight window
+usually is for most basins at once, exactly matching the reported "every barangay shows the same number."
+Confirmed via direct grep that `hourlyPrecipitationMm` has exactly one consumer in the whole codebase —
+`lib/liveIslandState.ts` — so none of this touches the weather badge (a separate, correctly-working read of
+just `current.weatherCode`) or any chart.
+
+**Fix**: `app/api/weather/route.ts` now requests `forecast_days=2` (so a late-day visit still has a real
+forward window instead of running out of array) and returns `currentHourIndex` as a top-level JSON field
+(already computed, just exposed). `lib/liveWeather.ts`'s `WeatherData` carries it through. `lib/
+liveIslandState.ts` now slices both consumers from `currentHourIndex` forward instead of from array index 0:
+the ratio window becomes `.slice(currentHourIndex, currentHourIndex + FSI_WINDOW_HOURS)`, and the hydrograph/
+countdown array becomes `.slice(currentHourIndex)` — so index 0 of that array, and therefore `timeHours[0]`,
+now genuinely means "right now," making the countdown's hour-labeling correct as a direct consequence (no
+separate change needed to `crossingTimeHours()` itself). A `currentHourIndex < 0` guard (current_weather.time
+genuinely not found in hourly.time — should be rare) treats that municipality exactly like "weather is null"
+already does: falls back to `ratio = 1`/static countdown, rather than silently reading from the wrong offset.
+
+**Verified with a mocked `/api/weather` response** (this sandbox can't reach the real Open-Meteo API) shaped
+like a real one — a 48-entry hourly array, `currentHourIndex` set mid-array, a deliberate rain spike a couple
+of hours after "now" for one municipality and none for another: the factor panel's live rainfall value came
+back genuinely nonzero (0.09) for the municipality with rain in its forward window and genuinely zero for the
+one without, and the two municipalities' countdowns diverged for real ("2h 0m" for the one with a rain spike
+vs. "37h 0m" — the now-correct, hours-*from-now* zero-guard fallback — for the one without), confirming the
+uniform-across-every-barangay symptom is gone. Also verified the `currentHourIndex = -1` fallback case: a
+municipality mocked this way correctly fell back to each of its barangays' own distinct real static
+`danger_time_hours` (confirmed against `barangay_dashboard_data.json` directly — several Kawayan barangays'
+static values cluster tightly, 0.9505-0.9527h, and all happen to round to the same displayed "57 min" at the
+UI's minute granularity, which looked suspicious at first glance but is real per-basin variation, not a bug).
+`npm run lint`/`npx tsc --noEmit` clean.
+
+**Not touched**: `app/page.tsx`'s `hasAnyWeather` gate (a single OR across all 7 municipalities deciding
+whether to show the "live" banner at all) is a separate, real honesty gap the same investigation surfaced — a
+municipality whose own fetch fails quietly falls back to its static factor while the page-wide banner still
+claims "live" for everyone. Real, but not what was reported (the per-barangay `ratio = 1` fallback already
+keeps that municipality's numbers sane, just unflagged as degraded) — left as a known follow-up.
+
 ## Open items
 
 - Hydrograph chart is now real for 113 of 115 barangays (`public/data/basin_hydrographs.json`, `lib/hydrographData.ts`), alongside it a real precipitation/hyetograph chart too (same data, same gating, see above), the HAND/TWI/LC/rainfall factor breakdown is now real too (`public/data/fsi_factors.json`, `lib/fsiFactorData.ts` — an approximation, see its provenance/validation notes above), interactive Simulation Mode now exists too (admin-only, reached via the admin shell's "Rainfall & Scenarios" tab — see "Full admin dashboard redesign" above, and `UserDashboardModal.tsx`/`SimulationModePanel.tsx`/`lib/simulationMode.ts` and their provenance notes above), and the map's weather icon now shows real, live conditions (Open-Meteo, verified against a real deployment — see above) instead of proxying modeled flood risk. **The real (non-admin) dashboard's FSI/countdown numbers are also live-forecast-driven by default now** (`lib/liveIslandState.ts`, see its own extensive section above) — a live, ratio-based FSI approximation, not the canonical raster-based recompute, which is still not built (see "Deliberately still not built" above for the distinction). The admin experience got a full multi-tab redesign too (Dashboard/Barangays/GIS & FSI Data/Rainfall & Scenarios/Invitations/Users — see "Full admin dashboard redesign" above), including a real, growing FSI-trend history — its own `supabase/fsi-daily-snapshots-setup.sql` has **not yet been run** against the real project, so that chart is empty until someone with dashboard access does. A Supabase-verification pass against the real project (item 3 of the open-items sequencing) is queued next, pending the abylonmonsales@gmail.com invitation being redeemed and its credentials shared (this has since happened this session — see the account-fix note elsewhere, but the actual real-browser sign-in/CRUD verification pass itself hasn't been separately re-run); the geojson regeneration script, the missing Naval barangays, and a real audit/Activity Log (deferred again during the admin redesign above) are still open.
