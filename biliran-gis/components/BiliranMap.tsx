@@ -28,6 +28,7 @@ import {
   type GeoFeature,
   type GeoFeatureCollection,
   type LineFeatureCollection,
+  type Position,
 } from '@/lib/geo'
 import {
   fsiScoreColor,
@@ -288,6 +289,24 @@ export default function BiliranMap({
   const municipalityPaths = useMemo(
     () => new Map(municipalities?.features.map((f) => [f.properties.pgc_prefix, geometryToPath(f.geometry, project)]) ?? []),
     [municipalities, project]
+  )
+
+  // Same reasoning as municipalityPaths above, for two more per-municipality
+  // values MunicipalityLayer used to recompute inline on every render: its
+  // worst-FSI fill color and its label/weather-icon anchor point. Neither
+  // depends on barangayOpacity (the one prop that keeps changing throughout
+  // a zoom gesture and defeats MunicipalityLayer's own React.memo), so both
+  // were being redone for all 7 municipalities on every single zoom frame —
+  // a real, measurable cost (geometryCentroid walks a whole boundary ring;
+  // municipalityWorstScore scans all 115 barangays) for no actual change in
+  // result. Keyed only on the data these values actually depend on.
+  const municipalityScores = useMemo(
+    () => new Map(municipalities?.features.map((f) => [f.properties.pgc_prefix, municipalityWorstScore(barangays, f.properties.municipality)]) ?? []),
+    [municipalities, barangays]
+  )
+  const municipalityCentroids = useMemo(
+    () => new Map(municipalities?.features.map((f) => [f.properties.pgc_prefix, geometryCentroid(f.geometry)]) ?? []),
+    [municipalities]
   )
 
   // Native (non-React-synthetic) wheel listener, added with { passive: false }
@@ -727,6 +746,16 @@ export default function BiliranMap({
           .bfw-shadow-group { filter: none !important; }
         }
       `}</style>
+      {/*
+        Rendered once here instead of from inside MunicipalityLayer's own
+        labels-pass (its previous location) — that instance re-renders on
+        every zoom-gesture frame (barangayOpacity keeps changing throughout
+        one), so re-invoking this static, prop-less <style> block that many
+        times was pure waste. Its own @keyframes are referenced by class
+        name from WeatherIconSVG instances anywhere on the page, so one
+        copy here covers all of them regardless of which pass renders them.
+      */}
+      <WeatherIconStyles />
       <svg
         ref={svgRef}
         viewBox={viewBoxOf(islandBounds)}
@@ -876,7 +905,8 @@ export default function BiliranMap({
           <MunicipalityLayer
             municipalities={municipalities}
             municipalityPaths={municipalityPaths}
-            barangays={barangays}
+            municipalityScores={municipalityScores}
+            municipalityCentroids={municipalityCentroids}
             onSelect={focusMuni}
             nearestPrefix={nearestPrefix}
             barangayOpacity={barangayOpacity}
@@ -957,7 +987,8 @@ export default function BiliranMap({
           <MunicipalityLayer
             municipalities={municipalities}
             municipalityPaths={municipalityPaths}
-            barangays={barangays}
+            municipalityScores={municipalityScores}
+            municipalityCentroids={municipalityCentroids}
             onSelect={focusMuni}
             nearestPrefix={nearestPrefix}
             barangayOpacity={barangayOpacity}
@@ -1016,7 +1047,8 @@ export default function BiliranMap({
 const MunicipalityLayer = memo(function MunicipalityLayer({
   municipalities,
   municipalityPaths,
-  barangays,
+  municipalityScores,
+  municipalityCentroids,
   onSelect,
   nearestPrefix,
   barangayOpacity,
@@ -1033,7 +1065,13 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
   // frame changed nearestPrefix/barangayOpacity (neither of which the
   // path geometry itself depends on).
   municipalityPaths: Map<string, string>
-  barangays: Barangay[]
+  // Same reasoning as municipalityPaths — each municipality's worst-FSI
+  // fill color and label/icon anchor point, precomputed once by the parent
+  // instead of being recomputed inline here on every zoom frame (this
+  // component's own React.memo doesn't help during a zoom gesture, since
+  // barangayOpacity below changes continuously throughout one).
+  municipalityScores: Map<string, number>
+  municipalityCentroids: Map<string, Position>
   onSelect: (prefix: string) => void
   // Only the municipality the current view is nearest to fades out (as
   // barangayOpacity rises toward its own barangay-level detail taking
@@ -1087,7 +1125,7 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
       {showShapes && (
         <g className="bfw-shadow-group" filter="url(#bfw-land-shadow)" shapeRendering="optimizeSpeed">
           {municipalities.features.map((f) => {
-            const score = municipalityWorstScore(barangays, f.properties.municipality)
+            const score = municipalityScores.get(f.properties.pgc_prefix) ?? 0
             const d = municipalityPaths.get(f.properties.pgc_prefix)
             return (
               <g key={f.properties.pgc_prefix} style={{ opacity: fadeFor(f.properties.pgc_prefix), transition: 'opacity 0.4s ease' }}>
@@ -1129,11 +1167,10 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
       */}
       {showLabels && showWeatherIcons && (
         <>
-          <WeatherIconStyles />
           {municipalities.features.map((f) => {
             const condition = weatherByMunicipality[f.properties.municipality]
             if (!condition) return null
-            const [lon, lat] = geometryCentroid(f.geometry)
+            const [lon, lat] = municipalityCentroids.get(f.properties.pgc_prefix) ?? [0, 0]
             const [cx, cy] = project(lon, lat)
             return (
               <g
@@ -1150,7 +1187,7 @@ const MunicipalityLayer = memo(function MunicipalityLayer({
         </>
       )}
       {showLabels && municipalities.features.map((f) => {
-        const [lon, lat] = geometryCentroid(f.geometry)
+        const [lon, lat] = municipalityCentroids.get(f.properties.pgc_prefix) ?? [0, 0]
         const projected = project(lon, lat)
         // Hard cutoff, not the same continuous fadeFor curve the shape/icon
         // above use — a municipality's own name label sitting at/near its
@@ -1453,7 +1490,7 @@ const NextForecastBadge = memo(function NextForecastBadge({ updateAt }: { update
   )
 })
 
-export function Legend({
+export const Legend = memo(function Legend({
   compact = false,
   size = 'lg',
 }: {
@@ -1558,7 +1595,7 @@ export function Legend({
       </div>
     </div>
   )
-}
+})
 
 type Crossing = { barangay: Barangay; tier: 'Alert' | 'Danger'; hours: number } | null
 
