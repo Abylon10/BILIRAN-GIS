@@ -375,7 +375,7 @@ export default function UserDashboardModal({
                 <BarangayDetailPanel
                   barangay={selected}
                   simulationResult={simulationResult}
-                  onPrecipitationTap={(rate) => setTapTrigger({ rateMmHr: rate, token: Date.now() })}
+                  onPrecipitationTap={(_timeHours, rate) => setTapTrigger({ rateMmHr: rate, token: Date.now() })}
                 />
               </>
             )}

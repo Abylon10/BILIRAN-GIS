@@ -33,7 +33,7 @@ import { loadBasinHydrographs, type RawHydrographData } from '@/lib/hydrographDa
 import { loadFsiFactors, recomputeFsiStatic, WEIGHT_SCHEME_WEIGHTS, type RawFactorData, type WeightScheme } from '@/lib/fsiFactorData'
 import { loadWeather, type WeatherData } from '@/lib/liveWeather'
 import { MONITORED_MUNICIPALITIES } from '@/lib/municipalities'
-import { computeLiveIslandState } from '@/lib/liveIslandState'
+import { computeLiveIslandState, computeLiveStateForBarangayAtOffset } from '@/lib/liveIslandState'
 import DashboardShell from '@/components/DashboardShell'
 import BiliranMap from '@/components/BiliranMap'
 import ProfilePanel from '@/components/ProfilePanel'
@@ -126,6 +126,14 @@ export default function HomePage() {
   // below and CLAUDE.md.
   const [weightScheme, setWeightScheme] = useState<WeightScheme>('rainfall')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // "Tap the real Precipitation chart to preview the forecast at a later
+  // hour" (DashboardShell.tsx -> BarangayDetailPanel.tsx) — the tapped
+  // hour, for the currently-selected barangay only. Reset to null
+  // everywhere selectedKey itself is reset/changed (selectBarangay above,
+  // handleSignOut, and BiliranMap's own "All municipalities" reset below)
+  // so a stale preview from a previous barangay never carries over to the
+  // next one.
+  const [previewOffsetHours, setPreviewOffsetHours] = useState<number | null>(null)
   // Two-way synced with the map: tapping a municipality on the map sets
   // this (via BiliranMap's onFocusMunicipality), and it also drives
   // DashboardShell's municipality filter dropdown — picking one there
@@ -161,6 +169,7 @@ export default function HomePage() {
   // needed now that those live in the sidebar instead.)
   const selectBarangay = useCallback((key: string) => {
     setSelectedKey(key)
+    setPreviewOffsetHours(null)
   }, [])
 
   // Stabilized wrapper for BiliranMap's onSelect prop — BiliranMap's own
@@ -414,6 +423,35 @@ export default function HomePage() {
   // built from, not the pre-scaling static value.
   const liveRainfallFactor = selectedKey ? liveIslandState?.get(selectedKey)?.liveRainfallFactor ?? null : null
 
+  // "Tap the Precipitation chart to preview a later hour" — recomputed for
+  // the selected barangay only (never all 115, never touches
+  // displayBarangays/the map/the list) directly from data already loaded
+  // for liveIslandState above, so a tap is a cheap single-barangay
+  // recompute, not a new fetch or an island-wide one. Real forecast data
+  // at a different point in time, not a hypothetical — see
+  // lib/liveIslandState.ts's own comment on this.
+  const livePreview = useMemo(() => {
+    if (previewOffsetHours == null || !selectedKey || !hydrographData || !factorData) return null
+    return computeLiveStateForBarangayAtOffset(
+      selectedKey,
+      previewOffsetHours,
+      hydrographData,
+      factorData,
+      weatherByMunicipality,
+      municipalityByBarangayKey
+    )
+  }, [previewOffsetHours, selectedKey, hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey])
+
+  // DischargeChart hands back (timeHours, rateMmHr) — only timeHours
+  // matters here (which hour of the forecast was tapped); Math.round keeps
+  // it an integer index into the hourly forecast array, matching how
+  // timeHours itself is always built as integer hour offsets
+  // (lib/liveIslandState.ts).
+  const handlePrecipitationTap = useCallback((timeHours: number) => {
+    setPreviewOffsetHours(Math.round(timeHours))
+  }, [])
+  const handleClearPreview = useCallback(() => setPreviewOffsetHours(null), [])
+
   // The selected barangay object itself — for SelectedBarangayCorner below
   // (the compact quick-glance card shown while the sidebar is closed).
   // DashboardShell does its own equivalent lookup internally for its own
@@ -507,6 +545,7 @@ export default function HomePage() {
     setLoginMode('user')
     setSidebarOpen(false)
     setSelectedKey(null)
+    setPreviewOffsetHours(null)
     setFocusedMunicipality(null)
     setMapResetToken((t) => t + 1)
     setAuthMode('signin')
@@ -773,7 +812,10 @@ export default function HomePage() {
               // municipality-filter dropdown clearing to "all" — clearing
               // the selection from THAT action wasn't asked for and would
               // be a different, unrelated behavior change.
-              onResetToOverview={() => setSelectedKey(null)}
+              onResetToOverview={() => {
+                setSelectedKey(null)
+                setPreviewOffsetHours(null)
+              }}
               resetToken={mapResetToken}
               nextForecastUpdateAt={nextForecastUpdateAt}
               pauseAnimations={sidebarOpen}
@@ -1097,6 +1139,10 @@ export default function HomePage() {
                 liveRainfallFactor={liveRainfallFactor}
                 weightScheme={weightScheme}
                 onWeightSchemeChange={setWeightScheme}
+                livePreview={livePreview}
+                previewOffsetHours={previewOffsetHours}
+                onPrecipitationTap={handlePrecipitationTap}
+                onClearPreview={handleClearPreview}
               />
             </div>
           </aside>

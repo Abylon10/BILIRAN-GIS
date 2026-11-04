@@ -34,7 +34,7 @@
 import { useCallback, useMemo } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
 import { WEIGHT_SCHEME_LABEL, type WeightScheme } from '@/lib/fsiFactorData'
-import type { LiveHydrograph } from '@/lib/liveIslandState'
+import type { LiveHydrograph, LiveComputedState } from '@/lib/liveIslandState'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
@@ -52,6 +52,10 @@ export default function DashboardShell({
   liveRainfallFactor,
   weightScheme,
   onWeightSchemeChange,
+  livePreview,
+  previewOffsetHours,
+  onPrecipitationTap,
+  onClearPreview,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
@@ -88,6 +92,20 @@ export default function DashboardShell({
   // local to this component's own rendering.
   weightScheme: WeightScheme
   onWeightSchemeChange: (scheme: WeightScheme) => void
+  // "Tap the Precipitation chart to preview the forecast at a later hour"
+  // — all three computed/owned by app/page.tsx (same reason liveHydrograph
+  // above is), just forwarded straight through to BarangayDetailPanel.
+  // Real forecast data at a different point in time, not a hypothetical —
+  // see lib/liveIslandState.ts's own comment on why this is a genuinely
+  // different, non-admin-gated feature from Simulation Mode's typed-rain
+  // "what-if." Deliberately single-barangay and recomputed from data
+  // already in memory (no new fetch, no re-sorting/re-coloring the
+  // island-wide list or map) — a chart tap here never touches anything
+  // this component or BiliranMap.tsx would need to re-render for.
+  livePreview?: LiveComputedState | null
+  previewOffsetHours?: number | null
+  onPrecipitationTap?: (timeHours: number, rateMmHr: number) => void
+  onClearPreview?: () => void
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -169,7 +187,15 @@ export default function DashboardShell({
               right, alongside the list instead of above it.
             */}
             <div className="bfw-sidebar-detail-col order-1 min-h-0 overflow-y-auto lg:order-2">
-              <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
+              <BarangayDetailPanel
+                barangay={selected}
+                liveHydrograph={liveHydrograph}
+                liveRainfallFactor={liveRainfallFactor}
+                livePreview={livePreview}
+                previewOffsetHours={previewOffsetHours}
+                onPrecipitationTap={onPrecipitationTap}
+                onClearPreview={onClearPreview}
+              />
             </div>
 
             <div className="bfw-sidebar-list-col order-2 min-h-0 overflow-y-auto lg:order-1">
