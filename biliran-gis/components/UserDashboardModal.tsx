@@ -102,6 +102,15 @@ export default function UserDashboardModal({
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [islandSim, setIslandSim] = useState<IslandSim | null>(null)
+  // Set when an admin taps a point on the real Precipitation chart in the
+  // embedded Rainfall & Scenarios tab (BarangayDetailPanel's onPrecipitationTap,
+  // wired only in the `embedded` branch below) — feeds that rain rate into
+  // SimulationModePanel's externalTrigger prop as an island-wide what-if,
+  // per the user's own explicit choice (full island-wide, persists until
+  // Reset, same as a manually-run Simulation Mode scenario). `token` uses
+  // Date.now() rather than a simple increment so it's trivially unique per
+  // tap with no extra state to track.
+  const [tapTrigger, setTapTrigger] = useState<{ rateMmHr: number; token: number } | null>(null)
 
   // Same two-phase open/close technique as the shared Modal
   // (components/ProfilePanel.tsx) — `open` starts false and flips true
@@ -347,6 +356,7 @@ export default function UserDashboardModal({
               selectedBarangay={selected}
               onReset={() => setIslandSim(null)}
               onSimulate={(results, params) => setIslandSim({ results, params })}
+              externalTrigger={tapTrigger}
             />
 
             {selected && (
@@ -362,7 +372,11 @@ export default function UserDashboardModal({
                   rounded-xl/border/p-5 card, so no new styling is needed
                   here for it to look separate.
                 */}
-                <BarangayDetailPanel barangay={selected} simulationResult={simulationResult} />
+                <BarangayDetailPanel
+                  barangay={selected}
+                  simulationResult={simulationResult}
+                  onPrecipitationTap={(rate) => setTapTrigger({ rateMmHr: rate, token: Date.now() })}
+                />
               </>
             )}
           </div>

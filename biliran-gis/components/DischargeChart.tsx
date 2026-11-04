@@ -17,6 +17,7 @@ export default function DischargeChart({
   color = '#3B82C4',
   ariaLabel = 'Basin discharge over time',
   infoText,
+  onPointTap,
 }: {
   timeHours: number[]
   q: number[]
@@ -25,6 +26,14 @@ export default function DischargeChart({
   captionText: string
   color?: string
   ariaLabel?: string
+  // Fires with the nearest sample's own (timeHours[i], q[i]) when the
+  // chart is clicked/tapped — same nearest-sample snapping the existing
+  // hover readout already does, just also reported to the caller instead
+  // of only drawn on screen. Omit it (every caller but the Rainfall &
+  // Scenarios tab's real Precipitation chart) to render a plain,
+  // non-interactive-beyond-hover chart exactly as before this prop
+  // existed — this only adds a click handler, no visual change.
+  onPointTap?: (timeHours: number, value: number) => void
   // Optional plain-language explainer shown via a small "?" button next to
   // the title — omit it (the real hydrograph/precipitation charts are the
   // only callers that pass it, by direct request) to render no button at
@@ -136,7 +145,12 @@ export default function DischargeChart({
         aria-label={ariaLabel}
         onPointerMove={(e) => setHoverIndex(nearestIndexForClientX(e.clientX))}
         onPointerLeave={() => setHoverIndex(null)}
-        style={{ touchAction: 'none' }}
+        onClick={(e) => {
+          if (!onPointTap) return
+          const i = nearestIndexForClientX(e.clientX)
+          onPointTap(timeHours[i], q[i])
+        }}
+        style={{ touchAction: 'none', cursor: onPointTap ? 'pointer' : undefined }}
       >
         {/* Recessive gridlines + y-axis tick labels (0, mid, max) */}
         {yTicks.map((v) => (
@@ -213,6 +227,11 @@ export default function DischargeChart({
       <div className="text-[10px]" style={{ color: 'var(--text-soft)' }}>
         {captionText}
       </div>
+      {onPointTap && (
+        <div className="text-[10px] italic" style={{ color: 'var(--text-soft)' }}>
+          Tap a point on the curve to preview that rain rate as an island-wide what-if scenario.
+        </div>
+      )}
     </div>
   )
 }
