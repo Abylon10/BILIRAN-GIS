@@ -31,7 +31,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Barangay, FsiLabel } from '@/lib/dashboardData'
 import { urgencyTierColor } from '@/lib/dashboardData'
 import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographData'
-import { loadFsiFactors, WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_WEIGHTS, type WeightScheme } from '@/lib/fsiFactorData'
+import { loadFsiFactors, WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_WEIGHTS, type WeightScheme, type FactorWeights } from '@/lib/fsiFactorData'
 import { type SimulationParams } from '@/lib/simulationMode'
 import { simulateIsland, type IslandSimResult } from '@/lib/islandSimulation'
 
@@ -55,6 +55,7 @@ export default function SimulationModePanel({
   onExit,
   onReset,
   onSimulate,
+  externalTrigger,
 }: {
   // Purely informational here now (the "does the currently selected
   // barangay have its own river data" preview line) — the simulation
@@ -68,6 +69,13 @@ export default function SimulationModePanel({
   // use different actions.
   onReset?: () => void
   onSimulate: (results: Map<string, IslandSimResult>, params: SimulationParams) => void
+  // Set by the Rainfall & Scenarios tab when an admin taps a point on the
+  // real Precipitation chart (BarangayDetailPanel.tsx's own
+  // onPrecipitationTap, routed through UserDashboardModal.tsx) — an
+  // alternative to typing min/max rain by hand. `token` increments on
+  // every tap, including a second tap at the same rate, so the effect
+  // below always re-fires (an unchanged `rateMmHr` alone wouldn't).
+  externalTrigger?: { rateMmHr: number; token: number } | null
 }) {
   const [minRate, setMinRate] = useState(DEFAULT_MIN_RATE)
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
@@ -115,17 +123,49 @@ export default function SimulationModePanel({
   // real guard rather than just letting NaN/negative values flow through.
   const inputsValid = minRate >= 0 && maxRate >= minRate && durationHours > 0
 
-  function runSimulation() {
-    if (!inputsValid) return
+  // Takes an optional explicit `params`/`weightsOverride` instead of always
+  // reading minRate/maxRate/durationHours/scheme off state — the tap-to-
+  // simulate effect below needs to run with the exact rate just tapped,
+  // and setMinRate/setMaxRate wouldn't be reflected in state until the
+  // next render (stale-closure trap), so it passes the values through
+  // directly rather than set-state-then-call.
+  function runSimulation(overrideParams?: SimulationParams, weightsOverride?: FactorWeights) {
+    const params = overrideParams ?? { minRate, maxRate, durationHours }
+    if (!(params.minRate >= 0 && params.maxRate >= params.minRate && params.durationHours > 0)) return
     setRunning(true)
-    const params: SimulationParams = { minRate, maxRate, durationHours }
-    const weights = scheme === 'rainfall' ? undefined : WEIGHT_SCHEME_WEIGHTS[scheme]
+    const weights = weightsOverride ?? (scheme === 'rainfall' ? undefined : WEIGHT_SCHEME_WEIGHTS[scheme])
     Promise.all([loadBasinHydrographs(), loadFsiFactors()]).then(([hydrographData, factorData]) => {
       const results = simulateIsland(hydrographData, factorData, params, DT_HOURS, TOTAL_WINDOW_HOURS, weights)
       setRunning(false)
       setLastResults(results)
       onSimulate(results, params)
     })
+  }
+
+  // Tap-to-simulate: a flat (minRate === maxRate) scenario at the tapped
+  // rate, held for the same TOTAL_WINDOW_HOURS every chart in this app
+  // already uses — reusing simulateIsland()'s own documented behavior
+  // that minRate === maxRate collapses buildRaisedTriangularHyetograph's
+  // ramp to a constant rate for the whole window, rather than inventing a
+  // new shape for a single tapped point. Also updates the visible
+  // min/max/duration fields so the admin can see (and tweak) what ran.
+  //
+  // Adjust state during render off a previous-value comparison, rather
+  // than in an effect — same pattern BiliranMap.tsx already uses for
+  // syncing selectedKey/focusedMunicipality (see its own comment there),
+  // and required here regardless: an effect calling setState synchronously
+  // in its body trips this project's react-hooks/set-state-in-effect lint
+  // rule (cascading-renders warning), which the render-phase version does
+  // not.
+  const [prevTriggerToken, setPrevTriggerToken] = useState<number | undefined>(undefined)
+  if (externalTrigger && externalTrigger.token !== prevTriggerToken) {
+    setPrevTriggerToken(externalTrigger.token)
+    const rate = Math.max(0, externalTrigger.rateMmHr)
+    setMinRate(rate)
+    setMaxRate(rate)
+    setDurationHours(TOTAL_WINDOW_HOURS)
+    setScenarioName(`Tapped @ ${rate.toFixed(1)} mm/hr`)
+    runSimulation({ minRate: rate, maxRate: rate, durationHours: TOTAL_WINDOW_HOURS })
   }
 
   function reset() {
@@ -265,7 +305,7 @@ export default function SimulationModePanel({
         <button
           type="button"
           className="bfw-btn flex-1 rounded-md py-2 text-sm font-semibold"
-          onClick={runSimulation}
+          onClick={() => runSimulation()}
           disabled={!inputsValid || running}
         >
           {running ? 'Simulating…' : 'Start simulation'}

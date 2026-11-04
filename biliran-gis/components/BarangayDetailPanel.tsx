@@ -44,6 +44,7 @@ export default function BarangayDetailPanel({
   liveHydrograph,
   liveRainfallFactor,
   simulationResult,
+  onPrecipitationTap,
 }: {
   barangay: Barangay | null
   // The real (non-admin) dashboard's live-forecast-driven discharge curve
@@ -66,6 +67,15 @@ export default function BarangayDetailPanel({
   // this component: cleared whenever the caller's own selection changes,
   // so a stale result from a different barangay never shows here.
   simulationResult?: SimulationRunResult | null
+  // Admin-only, same as simulationResult — wired only from the Rainfall &
+  // Scenarios tab (UserDashboardModal.tsx), which sits right next to
+  // Simulation Mode's own controls. Lets an admin tap a point on the real
+  // Precipitation chart to feed that rain rate into an island-wide
+  // Simulation Mode run, instead of typing min/max by hand. Omitted
+  // everywhere else (the real dashboard's DashboardShell.tsx never passes
+  // it), which renders the Precipitation chart exactly as before — plain
+  // hover-only, no tap handler, no "Tap to preview" hint.
+  onPrecipitationTap?: (rateMmHr: number) => void
 }) {
   // Keyed by barangay.key rather than reset-on-effect-entry, so switching
   // barangays never needs a synchronous setState at the top of the effect
@@ -189,6 +199,7 @@ export default function BarangayDetailPanel({
               color="#0891B2"
               ariaLabel="Rainfall over time"
               infoText="Expected rainfall intensity over time, in millimeters per hour (mm/hr). This rainfall is what drives the Hydrograph above — more/heavier rain means more water flowing through the basin."
+              onPointTap={onPrecipitationTap}
             />
           </>
         )
