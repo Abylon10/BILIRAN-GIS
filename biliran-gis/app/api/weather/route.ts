@@ -24,6 +24,23 @@ import { MUNICIPALITY_COORDS } from '@/lib/municipalityCoords'
 // in app/page.tsx and BiliranMap.tsx (both also 30 min).
 const REVALIDATE_SECONDS = 1800
 
+// Formats `date` as "yyyy-MM-ddTHH:00" in Asia/Manila local time, the same
+// shape as `hourly.time`'s own entries — used to find "now"'s index
+// WITHOUT depending on current_weather.time's own format (see below).
+function manilaHourKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  const hour = get('hour') === '24' ? '00' : get('hour') // some engines return '24' for midnight
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:00`
+}
+
 export async function GET(req: NextRequest) {
   const municipality = req.nextUrl.searchParams.get('municipality')
   if (!municipality) {
@@ -62,9 +79,22 @@ export async function GET(req: NextRequest) {
   // Open-Meteo's `current_weather` block doesn't carry a precipitation
   // chance itself (only temperature/windspeed/weathercode) — that only
   // exists in the hourly series, so the "current" chance shown on the map
-  // is the hourly value for whichever hour current_weather.time falls in.
+  // is the hourly value for whichever hour "now" falls in.
+  //
+  // Finding that hour used to search for `current_weather.time` inside
+  // `hourly.time` directly — but a real production check (not just the
+  // mocked responses this sandbox was limited to earlier) showed that
+  // lookup permanently failing (currentHourIndex always -1), silently
+  // collapsing every barangay's live rainfall factor and countdown back
+  // to the static design storm, island-wide, regardless of actual
+  // weather — `current_weather.time` isn't guaranteed to share
+  // `hourly.time`'s own Asia/Manila-localized "yyyy-MM-ddTHH:00" shape
+  // (e.g. a UTC vs. local-time mismatch), and nothing here should depend
+  // on that other field's exact format. Computing "now" independently,
+  // in the same timezone and shape `hourly.time` already uses, removes
+  // that dependency entirely.
   const hourlyTimes: string[] = data.hourly?.time ?? []
-  const currentHourIndex = hourlyTimes.indexOf(data.current_weather?.time ?? '')
+  const currentHourIndex = hourlyTimes.indexOf(manilaHourKey(new Date()))
   const currentPrecipitationProbability =
     currentHourIndex >= 0 ? data.hourly?.precipitation_probability?.[currentHourIndex] ?? null : null
   // Same currentHourIndex lookup as the probability above, just against the
@@ -76,10 +106,13 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     municipality,
     // Index into the `hourly` arrays below where "now" actually falls —
-    // -1 if current_weather.time genuinely isn't in hourly.time (should be
-    // rare; consumers should treat that as "no live data," not silently
-    // read from the wrong offset). Exposed so lib/liveIslandState.ts can
-    // slice forward from here instead of assuming hourly starts at "now".
+    // computed from the real current time (manilaHourKey above), not from
+    // current_weather.time (see that function's own comment for why). -1
+    // only if the 2-day hourly window genuinely doesn't cover the current
+    // hour (should be rare); consumers should treat that as "no live
+    // data," not silently read from the wrong offset. Exposed so
+    // lib/liveIslandState.ts can slice forward from here instead of
+    // assuming hourly starts at "now".
     currentHourIndex,
     current: {
       weatherCode: data.current_weather?.weathercode ?? null,
