@@ -1177,6 +1177,7 @@ export default function HomePage() {
           onOpenProfile={() => setShowProfile(true)}
           barangays={displayBarangays}
           liveActive={liveIslandState != null}
+          liveIslandState={liveIslandState}
         />
       )}
 
