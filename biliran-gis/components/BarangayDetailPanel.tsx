@@ -45,6 +45,7 @@ export default function BarangayDetailPanel({
   liveRainfallFactor,
   simulationResult,
   onPrecipitationTap,
+  precipitationTapHint,
   livePreview,
   previewOffsetHours,
   onClearPreview,
@@ -83,6 +84,16 @@ export default function BarangayDetailPanel({
   //    different already-fetched point along today's real Open-Meteo
   //    forecast (see lib/liveIslandState.ts's own comment on this).
   onPrecipitationTap?: (timeHours: number, rateMmHr: number) => void
+  // The italic hint shown under the Precipitation chart when
+  // onPrecipitationTap is set — passed straight through to DischargeChart
+  // as its own tapHintText. What tapping actually does differs by caller
+  // (see onPrecipitationTap's own comment above), so this needs to be
+  // caller-supplied rather than hardcoded in DischargeChart the way it
+  // used to be when there was only one behavior. Omitted (UserDashboardModal.tsx,
+  // the admin caller) falls back to DischargeChart's own default, the
+  // original admin-oriented wording — only DashboardShell.tsx (the public
+  // dashboard) needs to override it.
+  precipitationTapHint?: string
   // The real (non-admin) dashboard's "preview the forecast at hour N"
   // result for THIS barangay only (lib/liveIslandState.ts's
   // computeLiveStateForBarangayAtOffset), set by app/page.tsx when
@@ -254,6 +265,7 @@ export default function BarangayDetailPanel({
               ariaLabel="Rainfall over time"
               infoText="Expected rainfall intensity over time, in millimeters per hour (mm/hr). This rainfall is what drives the Hydrograph above — more/heavier rain means more water flowing through the basin."
               onPointTap={onPrecipitationTap}
+              tapHintText={precipitationTapHint}
             />
           </>
         )

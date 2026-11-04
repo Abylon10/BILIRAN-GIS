@@ -194,6 +194,7 @@ export default function DashboardShell({
                 livePreview={livePreview}
                 previewOffsetHours={previewOffsetHours}
                 onPrecipitationTap={onPrecipitationTap}
+                precipitationTapHint="Tap a point on the curve to preview this barangay's forecasted risk at that hour."
                 onClearPreview={onClearPreview}
               />
             </div>
