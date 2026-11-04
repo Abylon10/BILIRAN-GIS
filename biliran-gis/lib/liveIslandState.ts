@@ -28,10 +28,33 @@
 // are now available (more spatially faithful, not less faithful).
 // hand/twi/lclu (static terrain) are untouched — they don't change with
 // weather.
+//
+// computeLiveIslandStateAtOffset() below reuses the exact same per-barangay
+// formula (factored out into computeOneBarangay(), called by every entry
+// point in this file) to answer a different, real-user-facing question:
+// not "what's my risk right now," but "what does the forecast say the
+// WHOLE island's risk will look like at hour N from now" — tapping a point
+// on a barangay's real (already-live, already-fetched) Precipitation
+// chart. This is NOT a hypothetical/simulated scenario the way admin
+// Simulation Mode's typed min/max rain is — it's a different real point
+// already sitting in the Open-Meteo forecast arrays this app already has
+// in memory for all 7 monitored municipalities, just evaluated with the
+// same 6-hour-window-starting-here logic "now" already uses, for every
+// barangay at once (re-ranks the list, recolors the map — direct
+// request, matching admin Simulation Mode's own island-wide scope, just
+// fed from real forecast data instead of a hypothetical).
+//
+// `weights` (both entry points below) lets ANY of the FSI weighting
+// schemes (Rainfall base / Terrain base / Equal weights —
+// components/DashboardShell.tsx's own picker) use live/previewed rainfall
+// as their rainfall term, not just Rainfall base — by direct request, a
+// weighting scheme is now purely "which 4 numbers," independent of
+// whether the rainfall term itself is live, previewed, or (while weather
+// hasn't loaded yet) static.
 
 import { fsiLabelForScore, type FsiLabel } from './dashboardData'
 import { hydrographForBarangay, type RawHydrographData } from './hydrographData'
-import type { RawFactorData } from './fsiFactorData'
+import type { RawFactorData, FactorWeights } from './fsiFactorData'
 import { recomputeHydrograph } from './simulationMode'
 import { crossingTimeHours } from './islandSimulation'
 import type { WeatherData } from './liveWeather'
@@ -80,72 +103,122 @@ function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x))
 }
 
+// The one real per-barangay formula, shared by computeLiveIslandState()
+// (offsetHours=0, all 115 barangays, "right now") and
+// computeLiveStateForBarangayAtOffset() (one barangay, an admin/user-
+// chosen offset) below — factored out so the two entry points can never
+// silently drift apart. `offsetHours` shifts BOTH the FSI rainfall-ratio
+// window and the hydrograph's own start point forward into the same
+// already-fetched hourly forecast array; at offsetHours=0 this is byte-
+// identical to the original inline loop body it replaced.
+function computeOneBarangay(
+  key: string,
+  factors: RawFactorData['barangays'][string],
+  weather: WeatherData | null,
+  hydrographData: RawHydrographData,
+  designTotalMm: number,
+  w: RawFactorData['factor_weights'],
+  offsetHours: number
+): LiveComputedState {
+  // currentHourIndex < 0 means the API couldn't place "now" in its own
+  // hourly array (rare) — treated the same as weather being entirely
+  // unavailable (ratio stays 1, i.e. unscaled static factor) rather than
+  // silently reading from the wrong offset.
+  const hasWeather = weather != null && weather.currentHourIndex >= 0 && weather.hourlyPrecipitationMm.length > 0
+  const baseIndex = weather ? weather.currentHourIndex + offsetHours : -1
+
+  let ratio = 1
+  if (hasWeather) {
+    const liveTotalMm = weather!.hourlyPrecipitationMm
+      .slice(baseIndex, baseIndex + FSI_WINDOW_HOURS)
+      .reduce((a, b) => a + b, 0)
+    ratio = designTotalMm > 0 ? liveTotalMm / designTotalMm : 0
+  }
+  const simulatedRainfallFactor = clamp01(factors.rainfall * ratio)
+  const liveFsi =
+    w.hand * factors.hand + w.twi * factors.twi + w.lclu * factors.lclu + w.rainfall * simulatedRainfallFactor
+  const liveLabel = fsiLabelForScore(liveFsi)
+
+  let hydrograph: LiveHydrograph | null = null
+  let warningTimeHours: number | null = null
+  let alertTimeHours: number | null = null
+  let dangerTimeHours: number | null = null
+
+  const primary = hydrographForBarangay(hydrographData, key)
+  if (primary && hasWeather) {
+    // Sliced from baseIndex, not the array's own start — so index 0 here
+    // (and therefore timeHours[0]) genuinely means "right now" (offsetHours
+    // === 0) or "the previewed hour" (offsetHours > 0), not "midnight."
+    // This is what makes the Warning/Alert/Danger countdown read as
+    // hours-from-that-point instead of hours-since-midnight.
+    const rainfallMmHr = weather!.hourlyPrecipitationMm.slice(baseIndex)
+    const q = recomputeHydrograph(primary.A, 1, rainfallMmHr)
+    const timeHours = rainfallMmHr.map((_, i) => i)
+    warningTimeHours = crossingTimeHours(timeHours, q, 0.5)
+    alertTimeHours = crossingTimeHours(timeHours, q, 0.75)
+    dangerTimeHours = crossingTimeHours(timeHours, q, 0.95)
+    hydrograph = { basinId: primary.basinId, timeHours, q, rainfallMmHr }
+  }
+
+  return {
+    warningTimeHours,
+    alertTimeHours,
+    dangerTimeHours,
+    liveFsi,
+    liveLabel,
+    liveRainfallFactor: simulatedRainfallFactor,
+    hydrograph,
+  }
+}
+
 /**
  * Runs the live-forecast recompute for every barangay in fsi_factors.json
  * (all 115). `municipalityByBarangayKey` supplies each barangay's own
  * municipality (already on the Barangay object everywhere else in this
- * app) so its live rainfall input can be looked up.
+ * app) so its live rainfall input can be looked up. `weights` optionally
+ * overrides which FSI weighting scheme is used (components/DashboardShell.tsx's
+ * picker) — omitted, it falls back to `factorData.factor_weights` (the
+ * "Rainfall base" scheme) exactly as before this parameter existed.
  */
 export function computeLiveIslandState(
   hydrographData: RawHydrographData,
   factorData: RawFactorData,
   weatherByMunicipality: Record<string, WeatherData | null>,
-  municipalityByBarangayKey: Map<string, string>
+  municipalityByBarangayKey: Map<string, string>,
+  weights?: FactorWeights
+): Map<string, LiveComputedState> {
+  return computeLiveIslandStateAtOffset(0, hydrographData, factorData, weatherByMunicipality, municipalityByBarangayKey, weights)
+}
+
+/**
+ * Same real formula as computeLiveIslandState() above, for every barangay
+ * at once, shifted `offsetHours` into that same already-loaded forecast —
+ * "what does today's live forecast say the WHOLE island's risk will look
+ * like at hour N from now," not a hypothetical. Island-wide (not just the
+ * tapped barangay) by direct request, matching admin Simulation Mode's
+ * own scope — re-ranking the list and recoloring the map the same way a
+ * typed scenario does, just from real forecast data. Still cheap enough
+ * to run on every tap: it's the same O(115) per-barangay formula
+ * computeLiveIslandState() already runs for "now," just evaluated at a
+ * different offset — no new fetch, no heavier computation class.
+ */
+export function computeLiveIslandStateAtOffset(
+  offsetHours: number,
+  hydrographData: RawHydrographData,
+  factorData: RawFactorData,
+  weatherByMunicipality: Record<string, WeatherData | null>,
+  municipalityByBarangayKey: Map<string, string>,
+  weights?: FactorWeights
 ): Map<string, LiveComputedState> {
   const results = new Map<string, LiveComputedState>()
-  const w = factorData.factor_weights
+  const w = weights ?? factorData.factor_weights
   const designTotalMm = designStormTotalMm(hydrographData)
 
   for (const key of Object.keys(factorData.barangays)) {
     const factors = factorData.barangays[key]
     const municipality = municipalityByBarangayKey.get(key)
     const weather = municipality ? weatherByMunicipality[municipality] ?? null : null
-
-    // currentHourIndex < 0 means the API couldn't place "now" in its own
-    // hourly array (rare) — treated the same as weather being entirely
-    // unavailable (ratio stays 1, i.e. unscaled static factor) rather than
-    // silently reading from the wrong offset.
-    let ratio = 1
-    if (weather && weather.currentHourIndex >= 0 && weather.hourlyPrecipitationMm.length > 0) {
-      const liveTotalMm = weather.hourlyPrecipitationMm
-        .slice(weather.currentHourIndex, weather.currentHourIndex + FSI_WINDOW_HOURS)
-        .reduce((a, b) => a + b, 0)
-      ratio = designTotalMm > 0 ? liveTotalMm / designTotalMm : 0
-    }
-    const simulatedRainfallFactor = clamp01(factors.rainfall * ratio)
-    const liveFsi =
-      w.hand * factors.hand + w.twi * factors.twi + w.lclu * factors.lclu + w.rainfall * simulatedRainfallFactor
-    const liveLabel = fsiLabelForScore(liveFsi)
-
-    let hydrograph: LiveHydrograph | null = null
-    let warningTimeHours: number | null = null
-    let alertTimeHours: number | null = null
-    let dangerTimeHours: number | null = null
-
-    const primary = hydrographForBarangay(hydrographData, key)
-    if (primary && weather && weather.currentHourIndex >= 0 && weather.hourlyPrecipitationMm.length > 0) {
-      // Sliced from currentHourIndex, not the array's own start — so index
-      // 0 here (and therefore timeHours[0]) genuinely means "right now,"
-      // not "midnight." This is what makes the Warning/Alert/Danger
-      // countdown read as hours-from-now instead of hours-since-midnight.
-      const rainfallMmHr = weather.hourlyPrecipitationMm.slice(weather.currentHourIndex)
-      const q = recomputeHydrograph(primary.A, 1, rainfallMmHr)
-      const timeHours = rainfallMmHr.map((_, i) => i)
-      warningTimeHours = crossingTimeHours(timeHours, q, 0.5)
-      alertTimeHours = crossingTimeHours(timeHours, q, 0.75)
-      dangerTimeHours = crossingTimeHours(timeHours, q, 0.95)
-      hydrograph = { basinId: primary.basinId, timeHours, q, rainfallMmHr }
-    }
-
-    results.set(key, {
-      warningTimeHours,
-      alertTimeHours,
-      dangerTimeHours,
-      liveFsi,
-      liveLabel,
-      liveRainfallFactor: simulatedRainfallFactor,
-      hydrograph,
-    })
+    results.set(key, computeOneBarangay(key, factors, weather, hydrographData, designTotalMm, w, offsetHours))
   }
 
   return results

@@ -18,6 +18,7 @@ export default function DischargeChart({
   ariaLabel = 'Basin discharge over time',
   infoText,
   onPointTap,
+  tapHintText = 'Tap a point on the curve to preview that rain rate as an island-wide what-if scenario.',
 }: {
   timeHours: number[]
   q: number[]
@@ -29,11 +30,21 @@ export default function DischargeChart({
   // Fires with the nearest sample's own (timeHours[i], q[i]) when the
   // chart is clicked/tapped — same nearest-sample snapping the existing
   // hover readout already does, just also reported to the caller instead
-  // of only drawn on screen. Omit it (every caller but the Rainfall &
-  // Scenarios tab's real Precipitation chart) to render a plain,
-  // non-interactive-beyond-hover chart exactly as before this prop
+  // of only drawn on screen. Omit it (every caller but the real
+  // Precipitation chart, admin and public dashboard alike) to render a
+  // plain, non-interactive-beyond-hover chart exactly as before this prop
   // existed — this only adds a click handler, no visual change.
   onPointTap?: (timeHours: number, value: number) => void
+  // The italic hint shown below the chart when onPointTap is set — what
+  // tapping actually DOES differs by caller (admin Rainfall & Scenarios:
+  // an island-wide what-if; the public dashboard: a same-barangay real-
+  // forecast preview), so this isn't safe to hardcode in one place the
+  // way it used to be. Defaults to the original admin-oriented wording,
+  // so UserDashboardModal.tsx (the only caller before this prop existed)
+  // needs no change; BarangayDetailPanel.tsx's own precipitationTapHint
+  // prop overrides it for the public dashboard's genuinely different
+  // behavior.
+  tapHintText?: string
   // Optional plain-language explainer shown via a small "?" button next to
   // the title — omit it (the real hydrograph/precipitation charts are the
   // only callers that pass it, by direct request) to render no button at
@@ -99,7 +110,16 @@ export default function DischargeChart({
     return nearest
   }
 
-  const hovered = hoverIndex != null ? { t: timeHours[hoverIndex], v: q[hoverIndex] } : null
+  // Bounds-checked against the CURRENT timeHours/q, not just non-null —
+  // hoverIndex is local state that outlives a props change, and this
+  // chart's own data can genuinely shrink between renders (e.g. the real
+  // dashboard's tap-to-preview recomputes a later hour's hydrograph from
+  // a shorter remaining-forecast window than "now"'s). An out-of-range
+  // index previously produced {t: undefined, v: undefined} here — not
+  // caught by the `!= null` check above — which crashed the whole chart
+  // on hovered.t.toFixed() below. A real crash hit via exactly that path:
+  // hover right before a tap that swaps in a shorter array.
+  const hovered = hoverIndex != null && hoverIndex < timeHours.length ? { t: timeHours[hoverIndex], v: q[hoverIndex] } : null
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)' }}>
@@ -229,7 +249,7 @@ export default function DischargeChart({
       </div>
       {onPointTap && (
         <div className="text-[10px] italic" style={{ color: 'var(--text-soft)' }}>
-          Tap a point on the curve to preview that rain rate as an island-wide what-if scenario.
+          {tapHintText}
         </div>
       )}
     </div>

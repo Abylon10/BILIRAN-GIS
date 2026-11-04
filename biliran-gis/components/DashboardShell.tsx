@@ -33,8 +33,8 @@
 
 import { useCallback, useMemo } from 'react'
 import { filterBarangays, sortBySeverity, type Barangay } from '@/lib/dashboardData'
-import { WEIGHT_SCHEME_LABEL, type WeightScheme } from '@/lib/fsiFactorData'
-import type { LiveHydrograph } from '@/lib/liveIslandState'
+import { WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_FORMULA, type WeightScheme } from '@/lib/fsiFactorData'
+import type { LiveHydrograph, LiveComputedState } from '@/lib/liveIslandState'
 import BarangayList from '@/components/BarangayList'
 import BarangayDetailPanel from '@/components/BarangayDetailPanel'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
@@ -52,6 +52,10 @@ export default function DashboardShell({
   liveRainfallFactor,
   weightScheme,
   onWeightSchemeChange,
+  livePreview,
+  previewOffsetHours,
+  onPrecipitationTap,
+  onClearPreview,
 }: {
   barangays: Barangay[] | null
   loadError: string | null
@@ -82,12 +86,34 @@ export default function DashboardShell({
   liveHydrograph?: LiveHydrograph | null
   liveRainfallFactor?: number | null
   // "Terrain base" / "Rainfall base" / "Equal weights" FSI weighting-scheme
-  // comparison toggle — lifted to app/page.tsx (same reason as selectedKey/
+  // picker — lifted to app/page.tsx (same reason as selectedKey/
   // municipality above) since it changes what displayBarangays'
   // mean_fsi_score/dominant_fsi_label actually are, not just something
-  // local to this component's own rendering.
+  // local to this component's own rendering. All three schemes are
+  // equally live-reactive now (just "which 4 weights," independent of
+  // whether the rainfall term is live/previewed/static) — see
+  // lib/liveIslandState.ts's own header comment for why Terrain
+  // base/Equal weights are no longer a separate, permanently-static path.
   weightScheme: WeightScheme
   onWeightSchemeChange: (scheme: WeightScheme) => void
+  // "Tap the Precipitation chart to preview the forecast at a later hour"
+  // — all computed/owned by app/page.tsx (same reason liveHydrograph
+  // above is), just forwarded straight through to BarangayDetailPanel
+  // (livePreview/previewOffsetHours/onClearPreview) and used directly
+  // below for this component's own island-wide banner. Real forecast
+  // data at a different point in time, not a hypothetical — see
+  // lib/liveIslandState.ts's own comment on why this is a genuinely
+  // different, non-admin-gated feature from Simulation Mode's typed-rain
+  // "what-if." Island-wide (re-sorts this list, recolors the map) by
+  // direct request — app/page.tsx's displayBarangays already carries the
+  // previewed values by the time they reach `barangays` above, so the
+  // list/map need no changes of their own; previewOffsetHours here is only
+  // for this component's own banner wording and BarangayDetailPanel's own
+  // "PREVIEW · Xh" badge.
+  livePreview?: LiveComputedState | null
+  previewOffsetHours?: number | null
+  onPrecipitationTap?: (timeHours: number, rateMmHr: number) => void
+  onClearPreview?: () => void
 }) {
   const sorted = useMemo(() => (barangays ? sortBySeverity(barangays) : []), [barangays])
   const filtered = useMemo(
@@ -130,23 +156,43 @@ export default function DashboardShell({
         </div>
       </div>
 
+      {/*
+        One banner, three mutually-exclusive states (previewing > live >
+        loading), applied the same way regardless of which weighting
+        scheme is active — all three schemes are equally live/preview-
+        reactive now (see this file's own weightScheme prop comment).
+      */}
       <div
-        className="rounded-lg border px-3 py-2 text-xs"
+        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs"
         style={
-          weightScheme !== 'rainfall'
-            ? { background: '#B8860B', borderColor: '#B8860B', color: '#3D2B00' }
+          previewOffsetHours != null
+            ? { background: 'rgba(12, 150, 156, 0.15)', borderColor: '#0C969C', color: 'var(--text-strong)' }
             : liveActive
               ? { background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }
               : { background: 'rgba(192, 57, 43, 0.15)', borderColor: '#C0392B', color: 'var(--text-strong)' }
         }
       >
-        {weightScheme === 'terrain'
-          ? 'Showing a static Terrain base comparison — FSI = 0.30·HAND + 0.30·TWI + 0.20·LCLU + 0.20·rainfall, recombined from each barangay’s own real factor values at today’s conditions (not scaled by live weather or a simulated storm). Switch back to Rainfall base for the real live-forecast numbers.'
-          : weightScheme === 'equal'
-            ? 'Showing a static Equal weights comparison — FSI = 0.25·HAND + 0.25·TWI + 0.25·LCLU + 0.25·rainfall, recombined from each barangay’s own real factor values at today’s conditions (not scaled by live weather or a simulated storm). Switch back to Rainfall base for the real live-forecast numbers.'
+        <span>
+          {previewOffsetHours != null
+            ? `Previewing today's live Open-Meteo forecast ${previewOffsetHours}h from now — FSI = ${
+                weightScheme === 'rainfall' ? '0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·rainfall' : WEIGHT_SCHEME_FORMULA[weightScheme]
+              }, under ${WEIGHT_SCHEME_LABEL[weightScheme]}. Real forecast data at a later hour, not a hypothetical scenario — the list and map below are re-ranked/recolored for this hour too.`
             : liveActive
-              ? "Computed from today's live Open-Meteo forecast — FSI = 0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge."
-              : 'Loading the live forecast — showing the static synthetic design-storm baseline until it arrives.'}
+              ? `Computed from today's live Open-Meteo forecast — FSI = ${
+                  weightScheme === 'rainfall' ? '0.25·HAND + 0.15·TWI + 0.15·LCLU + 0.45·live rainfall' : WEIGHT_SCHEME_FORMULA[weightScheme]
+                }, under ${WEIGHT_SCHEME_LABEL[weightScheme]}; Warning/Alert/Danger = 50%/75%/95% of each basin's live-forecast peak discharge.`
+              : `Loading the live forecast — showing the static synthetic design-storm baseline (under ${WEIGHT_SCHEME_LABEL[weightScheme]}) until it arrives.`}
+        </span>
+        {previewOffsetHours != null && onClearPreview && (
+          <button
+            type="button"
+            onClick={onClearPreview}
+            className="shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold"
+            style={{ borderColor: '#0C969C', color: '#0C969C', background: 'transparent' }}
+          >
+            Back to now
+          </button>
+        )}
       </div>
 
       {loadError && (
@@ -169,7 +215,16 @@ export default function DashboardShell({
               right, alongside the list instead of above it.
             */}
             <div className="bfw-sidebar-detail-col order-1 min-h-0 overflow-y-auto lg:order-2">
-              <BarangayDetailPanel barangay={selected} liveHydrograph={liveHydrograph} liveRainfallFactor={liveRainfallFactor} />
+              <BarangayDetailPanel
+                barangay={selected}
+                liveHydrograph={liveHydrograph}
+                liveRainfallFactor={liveRainfallFactor}
+                livePreview={livePreview}
+                previewOffsetHours={previewOffsetHours}
+                onPrecipitationTap={onPrecipitationTap}
+                precipitationTapHint="Tap a point on the curve to preview this barangay's forecasted risk at that hour."
+                onClearPreview={onClearPreview}
+              />
             </div>
 
             <div className="bfw-sidebar-list-col order-2 min-h-0 overflow-y-auto lg:order-1">

@@ -23,7 +23,7 @@ import { formatHoursAsCountdown, urgencyTierColor, type Barangay } from '@/lib/d
 import { loadBasinHydrographs, hydrographForBarangay, type PrimaryHydrograph, type StormParams } from '@/lib/hydrographData'
 import { loadFsiFactors, factorsForBarangay, getFactorTertiles, type BarangayFactors, type FactorWeights, type FactorTertiles } from '@/lib/fsiFactorData'
 import type { SimulationRunResult } from '@/lib/simulationMode'
-import type { LiveHydrograph } from '@/lib/liveIslandState'
+import type { LiveHydrograph, LiveComputedState } from '@/lib/liveIslandState'
 import DischargeChart from '@/components/DischargeChart'
 
 interface HydrographEntry {
@@ -45,6 +45,10 @@ export default function BarangayDetailPanel({
   liveRainfallFactor,
   simulationResult,
   onPrecipitationTap,
+  precipitationTapHint,
+  livePreview,
+  previewOffsetHours,
+  onClearPreview,
 }: {
   barangay: Barangay | null
   // The real (non-admin) dashboard's live-forecast-driven discharge curve
@@ -67,15 +71,46 @@ export default function BarangayDetailPanel({
   // this component: cleared whenever the caller's own selection changes,
   // so a stale result from a different barangay never shows here.
   simulationResult?: SimulationRunResult | null
-  // Admin-only, same as simulationResult — wired only from the Rainfall &
-  // Scenarios tab (UserDashboardModal.tsx), which sits right next to
-  // Simulation Mode's own controls. Lets an admin tap a point on the real
-  // Precipitation chart to feed that rain rate into an island-wide
-  // Simulation Mode run, instead of typing min/max by hand. Omitted
-  // everywhere else (the real dashboard's DashboardShell.tsx never passes
-  // it), which renders the Precipitation chart exactly as before — plain
-  // hover-only, no tap handler, no "Tap to preview" hint.
-  onPrecipitationTap?: (rateMmHr: number) => void
+  // Fires with the tapped point's own (timeHours, rateMmHr) when the real
+  // Precipitation chart is tapped — wired to two genuinely different
+  // behaviors depending on the caller, both optional and both omitted
+  // (rendering the chart exactly as before, plain hover-only) everywhere
+  // else:
+  //  - UserDashboardModal.tsx (admin Rainfall & Scenarios tab) uses the
+  //    rateMmHr arg to feed an island-wide Simulation Mode "what-if" run.
+  //  - DashboardShell.tsx (the real, non-admin dashboard) uses the
+  //    timeHours arg to request a same-barangay forecast preview via
+  //    livePreview/previewOffsetHours below — NOT a hypothetical, just a
+  //    different already-fetched point along today's real Open-Meteo
+  //    forecast (see lib/liveIslandState.ts's own comment on this).
+  onPrecipitationTap?: (timeHours: number, rateMmHr: number) => void
+  // The italic hint shown under the Precipitation chart when
+  // onPrecipitationTap is set — passed straight through to DischargeChart
+  // as its own tapHintText. What tapping actually does differs by caller
+  // (see onPrecipitationTap's own comment above), so this needs to be
+  // caller-supplied rather than hardcoded in DischargeChart the way it
+  // used to be when there was only one behavior. Omitted (UserDashboardModal.tsx,
+  // the admin caller) falls back to DischargeChart's own default, the
+  // original admin-oriented wording — only DashboardShell.tsx (the public
+  // dashboard) needs to override it.
+  precipitationTapHint?: string
+  // The real (non-admin) dashboard's "preview the forecast at hour N"
+  // result for THIS barangay only (lib/liveIslandState.ts's
+  // computeLiveStateForBarangayAtOffset), set by app/page.tsx when
+  // onPrecipitationTap above fires there. Deliberately single-barangay and
+  // computed from data already in memory (no new fetch, no re-ranking the
+  // island-wide list/map) — cheap enough to recompute on every tap. null/
+  // omitted (every caller but DashboardShell.tsx) renders this panel
+  // exactly as before — no preview badge, no "Back to now" row.
+  livePreview?: LiveComputedState | null
+  // The raw tapped hour backing livePreview above, for the "Xh from now"
+  // caption — kept separate from livePreview itself since livePreview's
+  // own fields don't carry the offset that produced them.
+  previewOffsetHours?: number | null
+  // Clears livePreview/previewOffsetHours back to "now" — the "Back to
+  // now" button's handler, owned by the caller (app/page.tsx) since that's
+  // where the underlying state actually lives.
+  onClearPreview?: () => void
 }) {
   // Keyed by barangay.key rather than reset-on-effect-entry, so switching
   // barangays never needs a synchronous setState at the top of the effect
@@ -152,34 +187,64 @@ export default function BarangayDetailPanel({
         <p className="text-sm" style={{ color: 'var(--text-soft)' }}>{barangay.municipality}</p>
       </div>
 
-      <div className="flex items-center gap-3">
-        <span
-          className="h-3 w-3 shrink-0 rounded-full"
-          style={{ background: urgencyTierColor(barangay.dominant_fsi_label) }}
-          aria-hidden
-        />
-        <div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--text-strong)' }}>
-            {barangay.dominant_fsi_label}
-          </div>
-          <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
-            flood susceptibility · score {barangay.mean_fsi_score.toFixed(3)}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className="h-3 w-3 shrink-0 rounded-full"
+            style={{ background: urgencyTierColor(livePreview ? livePreview.liveLabel : barangay.dominant_fsi_label) }}
+            aria-hidden
+          />
+          <div>
+            <div className="text-3xl font-bold" style={{ color: 'var(--text-strong)' }}>
+              {livePreview ? livePreview.liveLabel : barangay.dominant_fsi_label}
+            </div>
+            <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
+              flood susceptibility · score {(livePreview ? livePreview.liveFsi : barangay.mean_fsi_score).toFixed(3)}
+            </div>
           </div>
         </div>
+        {/*
+          Real data at a different hour, not a hypothetical — deliberately
+          a calm teal chip, not the admin Simulation Mode's alarming amber
+          "SIMULATED" one, so this doesn't read as "this isn't real."
+        */}
+        {livePreview && (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+              style={{ background: 'rgba(12, 150, 156, 0.15)', color: '#0C969C' }}
+            >
+              PREVIEW · {previewOffsetHours}h from now
+            </span>
+            {onClearPreview && (
+              <button
+                type="button"
+                onClick={onClearPreview}
+                className="text-[10px] underline"
+                style={{ color: 'var(--text-soft)' }}
+              >
+                Back to now
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {(() => {
-        // Prefer the live-forecast curve (real, non-admin dashboard's
-        // default now) over the static design-storm one — falls back to
-        // the static chart only while live data hasn't loaded yet, same
-        // graceful-degradation pattern used everywhere else in this app.
-        const hydro = liveHydrograph ?? (isCurrent ? entry?.hydrograph ?? null : null)
+        // Preview (tapped-hour forecast, same barangay) wins over the
+        // "now" live curve, which wins over the static design-storm one —
+        // falls back to the static chart only while live data hasn't
+        // loaded yet, same graceful-degradation pattern used everywhere
+        // else in this app.
+        const hydro = livePreview?.hydrograph ?? liveHydrograph ?? (isCurrent ? entry?.hydrograph ?? null : null)
         if (!hydro) return null
-        const captionText = liveHydrograph
-          ? `Computed from today's live Open-Meteo forecast${barangay ? ` for ${barangay.municipality}` : ''}.`
-          : entry?.stormParams
-            ? `Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`
-            : ''
+        const captionText = livePreview
+          ? `Forecast preview — ${previewOffsetHours}h from now, from today's live Open-Meteo forecast (not a hypothetical scenario).`
+          : liveHydrograph
+            ? `Computed from today's live Open-Meteo forecast${barangay ? ` for ${barangay.municipality}` : ''}.`
+            : entry?.stormParams
+              ? `Modeled from a single synthetic ${entry.stormParams.duration_hours}-hour design storm, ${entry.stormParams.peak_mm_hr}mm/hr peak.`
+              : ''
         return (
           <>
             <DischargeChart
@@ -200,6 +265,7 @@ export default function BarangayDetailPanel({
               ariaLabel="Rainfall over time"
               infoText="Expected rainfall intensity over time, in millimeters per hour (mm/hr). This rainfall is what drives the Hydrograph above — more/heavier rain means more water flowing through the basin."
               onPointTap={onPrecipitationTap}
+              tapHintText={precipitationTapHint}
             />
           </>
         )
@@ -269,7 +335,7 @@ export default function BarangayDetailPanel({
           // liveHydrograph doubles as "live data is active for this
           // barangay" here (same condition the hydrograph charts above
           // already key off), so this stays in sync with them for free.
-          liveRainfallFactor={liveHydrograph ? liveRainfallFactor : null}
+          liveRainfallFactor={livePreview ? livePreview.liveRainfallFactor : liveHydrograph ? liveRainfallFactor : null}
         />
       )}
 
@@ -285,7 +351,7 @@ export default function BarangayDetailPanel({
         <Stat
           statKey="danger"
           label="Danger at"
-          value={formatHoursAsCountdown(barangay.danger_time_hours)}
+          value={formatHoursAsCountdown(livePreview?.dangerTimeHours ?? barangay.danger_time_hours)}
           explanation="Hours into the forecast/storm when modeled flow is projected to reach 95% of this basin's peak discharge — the highest and most urgent of the three thresholds."
           openStat={openStat}
           onToggle={setOpenStat}
@@ -293,7 +359,7 @@ export default function BarangayDetailPanel({
         <Stat
           statKey="warning"
           label="Warning at"
-          value={formatHoursAsCountdown(barangay.warning_time_hours)}
+          value={formatHoursAsCountdown(livePreview?.warningTimeHours ?? barangay.warning_time_hours)}
           explanation="Hours into the forecast/storm when modeled flow is projected to reach 50% of this basin's peak discharge — the earliest of the three thresholds."
           openStat={openStat}
           onToggle={setOpenStat}
@@ -301,7 +367,7 @@ export default function BarangayDetailPanel({
         <Stat
           statKey="alert"
           label="Alert at"
-          value={formatHoursAsCountdown(barangay.alert_time_hours)}
+          value={formatHoursAsCountdown(livePreview?.alertTimeHours ?? barangay.alert_time_hours)}
           explanation="Hours into the forecast/storm when modeled flow is projected to reach 75% of this basin's peak discharge — the middle threshold, between Warning and Danger."
           openStat={openStat}
           onToggle={setOpenStat}
@@ -309,9 +375,11 @@ export default function BarangayDetailPanel({
       </dl>
 
       <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-        {liveHydrograph
-          ? "Times are hours into today's live Open-Meteo forecast — see the banner above for the computation basis."
-          : 'Times are hours into a modeled design storm, not a live countdown — see the banner above for the honesty note on this.'}
+        {livePreview
+          ? `Times are hours from the previewed moment (${previewOffsetHours}h from now) — still today's real live Open-Meteo forecast, just evaluated at a later point in it.`
+          : liveHydrograph
+            ? "Times are hours into today's live Open-Meteo forecast — see the banner above for the computation basis."
+            : 'Times are hours into a modeled design storm, not a live countdown — see the banner above for the honesty note on this.'}
       </p>
     </div>
   )

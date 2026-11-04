@@ -53,6 +53,7 @@ import AdminInvitePanel from '@/components/AdminInvitePanel'
 import AdminComingSoonTab from '@/components/AdminComingSoonTab'
 import UserDashboardModal from '@/components/UserDashboardModal'
 import type { Barangay } from '@/lib/dashboardData'
+import type { LiveComputedState } from '@/lib/liveIslandState'
 
 type TabId = 'dashboard' | 'barangays' | 'gis' | 'rainfall' | 'invitations' | 'users' | 'reports' | 'activity' | 'settings'
 
@@ -170,6 +171,7 @@ export default function AdminShell({
   onOpenProfile,
   barangays,
   liveActive,
+  liveIslandState,
 }: {
   theme: 'light' | 'dark'
   onToggleTheme: () => void
@@ -183,6 +185,17 @@ export default function AdminShell({
   // view's numbers can never drift from what the public dashboard shows.
   barangays: Barangay[] | null
   liveActive: boolean
+  // The underlying per-barangay live state (not just the already-overlaid
+  // `barangays` above) — the Rainfall & Scenarios tab (UserDashboardModal,
+  // below) needs this directly: it fetches its OWN static barangay list
+  // locally (its own selectedKey/municipality/search state is independent
+  // of app/page.tsx's), so it can't just reuse the already-overlaid
+  // `barangays` array the way AdminDashboardTab/AdminBarangaysTab/
+  // AdminGisDataTab do — it needs the raw per-barangay live hydrograph/FSI
+  // entries to overlay onto its own fetch, and to feed the selected
+  // barangay's own live chart the same way app/page.tsx feeds the public
+  // dashboard's BarangayDetailPanel.
+  liveIslandState?: Map<string, LiveComputedState> | null
 }) {
   const [tab, setTab] = useState<TabId>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -215,7 +228,7 @@ export default function AdminShell({
       content = <AdminGisDataTab barangays={barangays} />
       break
     case 'rainfall':
-      content = <UserDashboardModal embedded theme={theme} />
+      content = <UserDashboardModal embedded theme={theme} liveIslandState={liveIslandState} />
       break
     case 'invitations':
       content = <AdminInvitePanel />

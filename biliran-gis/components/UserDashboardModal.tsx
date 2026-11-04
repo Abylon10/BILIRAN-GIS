@@ -72,6 +72,7 @@ import {
 import { opaqueBg } from '@/lib/opaqueTheme'
 import type { SimulationParams, SimulationRunResult } from '@/lib/simulationMode'
 import type { IslandSimResult } from '@/lib/islandSimulation'
+import type { LiveComputedState } from '@/lib/liveIslandState'
 import StaticIslandMap from '@/components/StaticIslandMap'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
 import BarangayList from '@/components/BarangayList'
@@ -91,10 +92,22 @@ export default function UserDashboardModal({
   onClose,
   theme,
   embedded = false,
+  liveIslandState,
 }: {
   onClose?: () => void
   theme: 'light' | 'dark'
   embedded?: boolean
+  // Same live-forecast recompute the public dashboard's default view
+  // already uses (app/page.tsx, lib/liveIslandState.ts) — this tab fetches
+  // its own static barangay list independently (own selectedKey/
+  // municipality/search state, see this file's own header comment), so it
+  // can't just inherit an already-overlaid array; it layers this directly
+  // onto that static fetch in displayBarangays below, UNDER the
+  // simulation overlay (a simulation, when active, is still the more
+  // specific/intentional thing the admin asked to see). Omitted (every
+  // non-AdminShell caller) falls back to the pre-existing static-only
+  // baseline exactly as before this prop existed.
+  liveIslandState?: Map<string, LiveComputedState> | null
 }) {
   const [barangays, setBarangays] = useState<Barangay[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -138,29 +151,52 @@ export default function UserDashboardModal({
       })
   }, [])
 
-  // Overlays each barangay's real FSI/countdown fields with its simulated
-  // ones when a simulation is active — everything downstream (sort,
-  // filter, list rows, map color, detail panel) just reads these fields
-  // off whatever Barangay object it's given, so nothing else needs to
-  // know a simulation is even happening. Falls back to the real
-  // warning/alert/danger times for the 2 basin-less barangays (no
-  // discharge curve to derive a countdown from), same honest-absence
-  // pattern as their missing hydrograph chart elsewhere in this app.
+  // Two layers over the static fetch, applied in order: live Open-Meteo
+  // forecast first (same override app/page.tsx's own displayBarangays
+  // already applies for the public dashboard — this tab's "real" baseline
+  // should never silently lag behind that), then a simulated scenario on
+  // top of THAT when one's active (not instead of it) — a simulation is
+  // the more specific, intentionally-chosen thing the admin asked to see,
+  // so it wins where both would otherwise apply to the same barangay.
+  // Everything downstream (sort, filter, list rows, map color, detail
+  // panel) just reads these fields off whatever Barangay object it's
+  // given, so nothing else needs to know which layer is in effect. Falls
+  // back to each barangay's own real static warning/alert/danger times
+  // when neither layer has a discharge curve for it (the 2 basin-less
+  // barangays), same honest-absence pattern used everywhere else.
   const displayBarangays = useMemo(() => {
-    if (!barangays || !islandSim) return barangays
-    return barangays.map((b) => {
-      const r = islandSim.results.get(b.key)
-      if (!r) return b
-      return {
-        ...b,
-        mean_fsi_score: r.simulatedFsi,
-        dominant_fsi_label: r.simulatedLabel,
-        warning_time_hours: r.warningTimeHours ?? b.warning_time_hours,
-        alert_time_hours: r.alertTimeHours ?? b.alert_time_hours,
-        danger_time_hours: r.dangerTimeHours ?? b.danger_time_hours,
-      }
-    })
-  }, [barangays, islandSim])
+    if (!barangays) return barangays
+    let out = barangays
+    if (liveIslandState) {
+      out = out.map((b) => {
+        const live = liveIslandState.get(b.key)
+        if (!live) return b
+        return {
+          ...b,
+          mean_fsi_score: live.liveFsi,
+          dominant_fsi_label: live.liveLabel,
+          warning_time_hours: live.warningTimeHours ?? b.warning_time_hours,
+          alert_time_hours: live.alertTimeHours ?? b.alert_time_hours,
+          danger_time_hours: live.dangerTimeHours ?? b.danger_time_hours,
+        }
+      })
+    }
+    if (islandSim) {
+      out = out.map((b) => {
+        const r = islandSim.results.get(b.key)
+        if (!r) return b
+        return {
+          ...b,
+          mean_fsi_score: r.simulatedFsi,
+          dominant_fsi_label: r.simulatedLabel,
+          warning_time_hours: r.warningTimeHours ?? b.warning_time_hours,
+          alert_time_hours: r.alertTimeHours ?? b.alert_time_hours,
+          danger_time_hours: r.dangerTimeHours ?? b.danger_time_hours,
+        }
+      })
+    }
+    return out
+  }, [barangays, liveIslandState, islandSim])
 
   const sorted = useMemo(() => (displayBarangays ? sortBySeverity(displayBarangays) : []), [displayBarangays])
   const filtered = useMemo(
@@ -181,6 +217,17 @@ export default function UserDashboardModal({
     }
   }, [islandSim, selected])
 
+  // The selected barangay's own live-forecast discharge curve/rainfall
+  // factor — same pair app/page.tsx forwards to the public dashboard's
+  // BarangayDetailPanel, so the "real" Hydrograph/Precipitation charts
+  // here track today's actual Open-Meteo forecast instead of staying
+  // pinned to the static synthetic design storm, exactly like the public
+  // dashboard already does. null while liveIslandState hasn't loaded yet,
+  // nothing's selected, or for the 2 basin-less barangays — the real
+  // static chart is still the correct fallback in all of those cases.
+  const liveHydrograph = selected ? liveIslandState?.get(selected.key)?.hydrograph ?? null : null
+  const liveRainfallFactor = selected ? liveIslandState?.get(selected.key)?.liveRainfallFactor ?? null : null
+
   const bg = opaqueBg(theme)
 
   const disclosureBanner = islandSim ? (
@@ -193,6 +240,14 @@ export default function UserDashboardModal({
       recomputed for this storm, not real conditions. FSI is an approximate recombination of each
       barangay&apos;s real terrain factors with a scenario-scaled rainfall input, not the authoritative
       score.
+    </div>
+  ) : liveIslandState ? (
+    <div
+      className="rounded-lg border px-3 py-2 text-xs"
+      style={{ background: 'rgba(10, 112, 117, 0.15)', borderColor: '#0A7075', color: 'var(--text-strong)' }}
+    >
+      Computed from today&apos;s live Open-Meteo forecast — FSI, ranking, and countdown times below reflect
+      actual conditions. Start a simulation above to preview a hypothetical scenario instead.
     </div>
   ) : (
     <div
@@ -298,7 +353,12 @@ export default function UserDashboardModal({
                   />
                 </div>
                 <div className="min-h-0 overflow-y-auto">
-                  <BarangayDetailPanel barangay={selected} simulationResult={simulationResult} />
+                  <BarangayDetailPanel
+                    barangay={selected}
+                    liveHydrograph={liveHydrograph}
+                    liveRainfallFactor={liveRainfallFactor}
+                    simulationResult={simulationResult}
+                  />
                 </div>
               </div>
             </>
@@ -361,7 +421,7 @@ export default function UserDashboardModal({
 
             {selected && (
               <>
-                <SelectedBarangayCard barangay={selected} islandSim={islandSim} />
+                <SelectedBarangayCard barangay={selected} islandSim={islandSim} isLive={liveIslandState != null} />
                 {/*
                   A separate sibling card, not nested inside
                   SelectedBarangayCard's own border — the FSI summary and
@@ -374,8 +434,10 @@ export default function UserDashboardModal({
                 */}
                 <BarangayDetailPanel
                   barangay={selected}
+                  liveHydrograph={liveHydrograph}
+                  liveRainfallFactor={liveRainfallFactor}
                   simulationResult={simulationResult}
-                  onPrecipitationTap={(rate) => setTapTrigger({ rateMmHr: rate, token: Date.now() })}
+                  onPrecipitationTap={(_timeHours, rate) => setTapTrigger({ rateMmHr: rate, token: Date.now() })}
                 />
               </>
             )}
@@ -414,9 +476,17 @@ export default function UserDashboardModal({
 function SelectedBarangayCard({
   barangay,
   islandSim,
+  isLive,
 }: {
   barangay: Barangay
   islandSim: IslandSim | null
+  // Whether `barangay`'s own fields are already the live-forecast-overlaid
+  // ones (UserDashboardModal's displayBarangays, when liveIslandState is
+  // present and no simulation is overriding it) — changes the bottom
+  // caption below from the old static-design-storm wording to reflect
+  // that these ARE today's real numbers now, same distinction the public
+  // dashboard's own banner already draws.
+  isLive: boolean
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3" style={{ borderColor: 'var(--card-border)' }}>
@@ -472,7 +542,9 @@ function SelectedBarangayCard({
       <p className="text-[10px]" style={{ color: 'var(--text-soft)' }}>
         {islandSim
           ? 'This is a simulated result based on the selected scenario. Actual conditions may vary.'
-          : 'Real modeled values from the static design storm — not a live forecast.'}
+          : isLive
+            ? "Computed from today's live Open-Meteo forecast."
+            : 'Real modeled values from the static design storm — not a live forecast.'}
       </p>
     </div>
   )
