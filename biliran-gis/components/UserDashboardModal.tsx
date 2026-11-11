@@ -73,6 +73,7 @@ import { opaqueBg } from '@/lib/opaqueTheme'
 import type { SimulationParams, SimulationRunResult } from '@/lib/simulationMode'
 import type { IslandSimResult } from '@/lib/islandSimulation'
 import type { LiveComputedState } from '@/lib/liveIslandState'
+import type { WeightScheme } from '@/lib/fsiFactorData'
 import StaticIslandMap from '@/components/StaticIslandMap'
 import MunicipalityFilterDropdown from '@/components/MunicipalityFilterDropdown'
 import BarangayList from '@/components/BarangayList'
@@ -93,6 +94,7 @@ export default function UserDashboardModal({
   theme,
   embedded = false,
   liveIslandState,
+  prefillTrigger,
 }: {
   onClose?: () => void
   theme: 'light' | 'dark'
@@ -108,6 +110,13 @@ export default function UserDashboardModal({
   // non-AdminShell caller) falls back to the pre-existing static-only
   // baseline exactly as before this prop existed.
   liveIslandState?: Map<string, LiveComputedState> | null
+  // Set by AdminShell.tsx when a Reports/Activity Logs row is tapped —
+  // forwarded straight through to the embedded SimulationModePanel's own
+  // identically-shaped prop (see its own comment there for the full
+  // reasoning). Only wired in the embedded branch below: the non-embedded
+  // slide-out-sidebar path has no Reports/Activity Logs tabs that could
+  // ever set this.
+  prefillTrigger?: { minRate: number; maxRate: number; durationHours: number; scheme: WeightScheme; scenarioName: string; token: number } | null
 }) {
   const [barangays, setBarangays] = useState<Barangay[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -417,6 +426,7 @@ export default function UserDashboardModal({
               onReset={() => setIslandSim(null)}
               onSimulate={(results, params) => setIslandSim({ results, params })}
               externalTrigger={tapTrigger}
+              prefillTrigger={prefillTrigger}
             />
 
             {selected && (

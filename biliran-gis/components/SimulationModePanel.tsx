@@ -34,6 +34,7 @@ import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographDat
 import { loadFsiFactors, WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_WEIGHTS, type WeightScheme, type FactorWeights } from '@/lib/fsiFactorData'
 import { type SimulationParams } from '@/lib/simulationMode'
 import { simulateIsland, type IslandSimResult } from '@/lib/islandSimulation'
+import { logActivity } from '@/lib/activityLog'
 
 const ALERT_LABELS: FsiLabel[] = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
 const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
@@ -62,6 +63,7 @@ export default function SimulationModePanel({
   onReset,
   onSimulate,
   externalTrigger,
+  prefillTrigger,
 }: {
   // Purely informational here now (the "does the currently selected
   // barangay have its own river data" preview line) — the simulation
@@ -82,6 +84,17 @@ export default function SimulationModePanel({
   // every tap, including a second tap at the same rate, so the effect
   // below always re-fires (an unchanged `rateMmHr` alone wouldn't).
   externalTrigger?: { rateMmHr: number; token: number } | null
+  // Set by AdminReportsTab/AdminActivityLogTab (routed through
+  // AdminShell.tsx -> UserDashboardModal.tsx) when an admin taps a saved
+  // report/log row — loads that row's own saved scenario straight into
+  // this form so it can be reviewed/tweaked, WITHOUT auto-running it
+  // (direct, explicit choice: unlike externalTrigger's tap-to-simulate,
+  // which is a fast island-wide "what if this rate held," loading a past
+  // scenario back in is meant to be reviewed first, then started on
+  // purpose via the normal "Start simulation" button). `token` follows the
+  // same increment-per-tap convention as externalTrigger, for the same
+  // reason (re-fires even if the same row is tapped twice in a row).
+  prefillTrigger?: { minRate: number; maxRate: number; durationHours: number; scheme: WeightScheme; scenarioName: string; token: number } | null
 }) {
   const [minRate, setMinRate] = useState(DEFAULT_MIN_RATE)
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
@@ -129,15 +142,19 @@ export default function SimulationModePanel({
   // real guard rather than just letting NaN/negative values flow through.
   const inputsValid = minRate >= 0 && maxRate >= minRate && durationHours > 0
 
-  // Takes an optional explicit `params`/`weightsOverride` instead of always
-  // reading minRate/maxRate/durationHours/scheme off state — the tap-to-
-  // simulate effect below needs to run with the exact rate just tapped,
-  // and setMinRate/setMaxRate wouldn't be reflected in state until the
-  // next render (stale-closure trap), so it passes the values through
-  // directly rather than set-state-then-call.
-  function runSimulation(overrideParams?: SimulationParams, weightsOverride?: FactorWeights) {
+  // Takes an optional explicit `params`/`weightsOverride`/`scenarioNameOverride`
+  // instead of always reading minRate/maxRate/durationHours/scenarioName off
+  // state — the tap-to-simulate effect below needs to run with the exact
+  // rate/name just set, and setMinRate/setMaxRate/setScenarioName wouldn't be
+  // reflected in state until the next render (stale-closure trap), so it
+  // passes the values through directly rather than set-state-then-call.
+  // `scheme` itself never needs this treatment — nothing sets it
+  // synchronously right before calling runSimulation the way tap-to-simulate
+  // does for scenarioName, so reading it fresh off state is always correct.
+  function runSimulation(overrideParams?: SimulationParams, weightsOverride?: FactorWeights, scenarioNameOverride?: string) {
     const params = overrideParams ?? { minRate, maxRate, durationHours }
     if (!(params.minRate >= 0 && params.maxRate >= params.minRate && params.durationHours > 0)) return
+    const effectiveScenarioName = scenarioNameOverride ?? scenarioName
     setRunning(true)
     const weights = weightsOverride ?? (scheme === 'rainfall' ? undefined : WEIGHT_SCHEME_WEIGHTS[scheme])
     Promise.all([loadBasinHydrographs(), loadFsiFactors()]).then(([hydrographData, factorData]) => {
@@ -145,6 +162,22 @@ export default function SimulationModePanel({
       setRunning(false)
       setLastResults(results)
       onSimulate(results, params)
+
+      // Real counts from this exact run's own results, not re-derived
+      // from state later (`lastResults` won't have committed yet at this
+      // point) — same reduce logic as the `alertCounts` useMemo below.
+      const counts: Record<FsiLabel, number> = { 'Very Low': 0, Low: 0, Moderate: 0, High: 0, 'Very High': 0 }
+      for (const r of results.values()) counts[r.simulatedLabel] = (counts[r.simulatedLabel] ?? 0) + 1
+
+      const summary = `${effectiveScenarioName ? `${effectiveScenarioName}: ` : ''}${params.minRate}-${params.maxRate}mm/hr rain, ${params.durationHours}h duration (${WEIGHT_SCHEME_LABEL[scheme]})`
+      logActivity('simulation_run', summary, {
+        minRate: params.minRate,
+        maxRate: params.maxRate,
+        durationHours: params.durationHours,
+        scheme,
+        scenarioName: effectiveScenarioName,
+        alertCounts: counts,
+      })
     })
   }
 
@@ -170,8 +203,23 @@ export default function SimulationModePanel({
     setMinRate(rate)
     setMaxRate(rate)
     setDurationHours(TOTAL_WINDOW_HOURS)
-    setScenarioName(`Tapped @ ${rate.toFixed(1)} mm/hr`)
-    runSimulation({ minRate: rate, maxRate: rate, durationHours: TOTAL_WINDOW_HOURS })
+    const tapScenarioName = `Tapped @ ${rate.toFixed(1)} mm/hr`
+    setScenarioName(tapScenarioName)
+    runSimulation({ minRate: rate, maxRate: rate, durationHours: TOTAL_WINDOW_HOURS }, undefined, tapScenarioName)
+  }
+
+  // Load a saved report/log row's scenario back into this form — see
+  // this component's own `prefillTrigger` prop comment for why this
+  // deliberately does NOT call runSimulation the way externalTrigger's
+  // block above does.
+  const [prevPrefillToken, setPrevPrefillToken] = useState<number | undefined>(undefined)
+  if (prefillTrigger && prefillTrigger.token !== prevPrefillToken) {
+    setPrevPrefillToken(prefillTrigger.token)
+    setMinRate(prefillTrigger.minRate)
+    setMaxRate(prefillTrigger.maxRate)
+    setDurationHours(prefillTrigger.durationHours)
+    setScheme(prefillTrigger.scheme)
+    setScenarioName(prefillTrigger.scenarioName)
   }
 
   function reset() {
