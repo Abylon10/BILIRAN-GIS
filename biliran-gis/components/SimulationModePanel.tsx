@@ -5,7 +5,7 @@
 // Scenarios tab) case now renders this as an always-visible right-column
 // panel instead (see UserDashboardModal.tsx's two-column layout) — this
 // component itself is unchanged either way, just laid out differently by
-// its caller. Pick a min/max rain rate + storm duration (capped at 12
+// its caller. Pick a min/max rain rate + storm duration (capped at 24
 // hours) and run it against the WHOLE island at once
 // (lib/islandSimulation.ts) — not just the currently selected barangay.
 // Purely client-side and ephemeral — nothing here is persisted.
@@ -41,8 +41,14 @@ const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
 const DEFAULT_MIN_RATE = 5
 const DEFAULT_MAX_RATE = 50
 const DEFAULT_DURATION_HOURS = 2
-const MAX_DURATION_HOURS = 12
-const TOTAL_WINDOW_HOURS = 6
+const MAX_DURATION_HOURS = 24
+// Matches MAX_DURATION_HOURS, not a separately-tuned number — the chart's
+// displayed window has to cover at least the longest storm an admin can
+// type, or a long duration's own ramp-down/hold phase would be cut off
+// before it ever becomes visible (confirmed: at the old 6h window with a
+// 12h duration cap, the ramp only ever reached its peak at the window's
+// own right edge, never showing the decline at all).
+const TOTAL_WINDOW_HOURS = MAX_DURATION_HOURS
 const DT_HOURS = 1 / 12 // 5 minutes — matches the real storm's step, so axes line up
 
 interface BasinCheckEntry {
