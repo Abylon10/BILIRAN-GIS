@@ -4,11 +4,12 @@
 // replaces the old AdminComingSoonTab placeholder. Shows EVERY row from
 // the same shared log AdminReportsTab.tsx filters down to
 // simulation-run scenario cards — here, as a compact, one-line-per-entry
-// audit trail instead (timestamp, actor, summary), matching this table's
-// own forward-compatible design (see supabase/activity-logs-setup.sql's
-// header comment: only `action_type = 'simulation_run'` exists today, but
-// the table/this list are both built to show other action types later
-// without changes here).
+// audit trail instead (timestamp, actor, summary). Two action types write
+// here today (simulation_run — an explicit "Save to Reports" in
+// Simulation Mode, not every run; and invitation_created — a new
+// invitation, AdminInvitePanel.tsx), with the table/this list both built
+// so a future action type can show up here too without changes here (see
+// supabase/activity-logs-setup.sql's own header comment).
 //
 // Tapping a row loads that scenario into Simulation Mode too — same
 // onLoadIntoSimulation callback AdminReportsTab.tsx uses, same
@@ -56,7 +57,7 @@ export default function AdminActivityLogTab({ onLoadIntoSimulation }: { onLoadIn
           No activity yet
         </h3>
         <p className="max-w-sm text-sm" style={{ color: 'var(--text-soft)' }}>
-          Admin actions (starting with island-wide simulation runs) are logged here automatically as they happen.
+          Saved simulation scenarios and new invitations are logged here automatically as they happen.
         </p>
       </div>
     )

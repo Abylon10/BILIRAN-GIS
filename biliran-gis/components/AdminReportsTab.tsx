@@ -2,12 +2,14 @@
 //
 // The admin shell's "Reports" tab (components/AdminShell.tsx) — replaces
 // the old AdminComingSoonTab placeholder. Shows every real, logged
-// island-wide simulation run (app/api/admin/activity-logs/route.ts,
-// written by SimulationModePanel.tsx on every "Start simulation"/
-// tap-to-simulate) as a reviewable scenario card: the exact rain/duration/
-// weighting-scheme inputs that were run, plus the real, already-computed
-// Predicted Alert Count breakdown from that run — never recomputed here,
-// just the same numbers SimulationModePanel itself showed at the time.
+// island-wide simulation run that an admin explicitly saved
+// (SimulationModePanel.tsx's own "Save to Reports" button, NOT every
+// "Start simulation"/tap-to-simulate run — see that component's own
+// header comment for why) as a reviewable scenario card: the exact
+// rain/duration/weighting-scheme inputs that were run, plus the real,
+// already-computed Predicted Alert Count breakdown from that run — never
+// recomputed here, just the same numbers SimulationModePanel itself
+// showed at the time.
 //
 // Filters to actionType === 'simulation_run' client-side rather than a
 // separate table/endpoint — see supabase/activity-logs-setup.sql's own
@@ -25,7 +27,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { loadActivityLogs, type ActivityLogEntry } from '@/lib/activityLog'
+import { loadActivityLogs, type ActivityLogEntry, type SimulationRunDetails } from '@/lib/activityLog'
 import { urgencyTierColor, type FsiLabel } from '@/lib/dashboardData'
 import { WEIGHT_SCHEME_LABEL } from '@/lib/fsiFactorData'
 
@@ -35,19 +37,29 @@ export interface SimulationPrefill {
   minRate: number
   maxRate: number
   durationHours: number
-  scheme: ActivityLogEntry['details']['scheme']
+  scheme: SimulationRunDetails['scheme']
   scenarioName: string
 }
 
+// Narrows ActivityLogEntry's discriminated union down to the
+// 'simulation_run' member — `.filter()` alone checks actionType at
+// runtime but doesn't narrow the array's own TS element type, so entry.details
+// would still type as the full union (SimulationRunDetails |
+// InvitationCreatedDetails) everywhere below without this.
+type SimulationRunEntry = Extract<ActivityLogEntry, { actionType: 'simulation_run' }>
+function isSimulationRun(e: ActivityLogEntry): e is SimulationRunEntry {
+  return e.actionType === 'simulation_run'
+}
+
 export default function AdminReportsTab({ onLoadIntoSimulation }: { onLoadIntoSimulation: (prefill: SimulationPrefill) => void }) {
-  const [logs, setLogs] = useState<ActivityLogEntry[] | null>(null)
+  const [logs, setLogs] = useState<SimulationRunEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     loadActivityLogs()
       .then((entries) => {
-        if (!cancelled) setLogs(entries.filter((e) => e.actionType === 'simulation_run'))
+        if (!cancelled) setLogs(entries.filter(isSimulationRun))
       })
       .catch(() => {
         if (!cancelled) setError('Could not load saved reports.')

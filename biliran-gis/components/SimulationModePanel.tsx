@@ -24,6 +24,20 @@
 // output shown here, easy to just close) and UserDashboardModal's
 // separate "⚠ SIMULATED · Clear" header chip (no longer needed once this
 // panel's own output is always visible) into one action.
+//
+// Saving to Reports/Activity Logs is now its own explicit "Save to
+// Reports" button, NOT an automatic side effect of every run (an earlier
+// version logged every "Start simulation"/tap-to-simulate run
+// automatically — reported directly as confusing, since there was no
+// visible confirmation a save had actually happened, and quick
+// exploratory taps were being saved just as permanently as a deliberately
+// named scenario). `lastRun` snapshots exactly what the last completed
+// run showed (params/scheme/scenarioName/alertCounts, at the moment it
+// finished) — Save always saves that snapshot, not whatever the form
+// fields currently hold if the admin has since changed them without
+// re-running. `saveState` tracks 'idle' | 'saving' | 'saved' | 'error' so
+// the button can show real confirmation (or a real failure) instead of
+// an optimistic "Saved" regardless of what the server actually did.
 
 'use client'
 
@@ -117,6 +131,11 @@ export default function SimulationModePanel({
   // already handed to the caller via onSimulate for the real dashboard
   // re-rank/re-color.
   const [lastResults, setLastResults] = useState<Map<string, IslandSimResult> | null>(null)
+  // Snapshot of exactly what the last completed run showed — what "Save
+  // to Reports" actually saves (see this file's own header comment for
+  // why this is a snapshot, not a re-read of the current form fields).
+  const [lastRun, setLastRun] = useState<{ params: SimulationParams; scheme: WeightScheme; scenarioName: string; alertCounts: Record<FsiLabel, number> } | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
     if (!selectedBarangay) return
@@ -169,16 +188,30 @@ export default function SimulationModePanel({
       const counts: Record<FsiLabel, number> = { 'Very Low': 0, Low: 0, Moderate: 0, High: 0, 'Very High': 0 }
       for (const r of results.values()) counts[r.simulatedLabel] = (counts[r.simulatedLabel] ?? 0) + 1
 
-      const summary = `${effectiveScenarioName ? `${effectiveScenarioName}: ` : ''}${params.minRate}-${params.maxRate}mm/hr rain, ${params.durationHours}h duration (${WEIGHT_SCHEME_LABEL[scheme]})`
-      logActivity('simulation_run', summary, {
-        minRate: params.minRate,
-        maxRate: params.maxRate,
-        durationHours: params.durationHours,
-        scheme,
-        scenarioName: effectiveScenarioName,
-        alertCounts: counts,
-      })
+      // Snapshot this run (not a log write) — see this file's own header
+      // comment for why saving is now a separate, explicit action.
+      setLastRun({ params, scheme, scenarioName: effectiveScenarioName, alertCounts: counts })
+      setSaveState('idle')
     })
+  }
+
+  // The only thing that writes to Reports/Activity Logs now — see this
+  // file's own header comment. Awaits the real result instead of firing
+  // and forgetting, so 'saved'/'error' reflects what actually happened.
+  async function saveToReports() {
+    if (!lastRun) return
+    setSaveState('saving')
+    const { params, scheme: runScheme, scenarioName: runScenarioName, alertCounts: runAlertCounts } = lastRun
+    const summary = `${runScenarioName ? `${runScenarioName}: ` : ''}${params.minRate}-${params.maxRate}mm/hr rain, ${params.durationHours}h duration (${WEIGHT_SCHEME_LABEL[runScheme]})`
+    const ok = await logActivity('simulation_run', summary, {
+      minRate: params.minRate,
+      maxRate: params.maxRate,
+      durationHours: params.durationHours,
+      scheme: runScheme,
+      scenarioName: runScenarioName,
+      alertCounts: runAlertCounts,
+    })
+    setSaveState(ok ? 'saved' : 'error')
   }
 
   // Tap-to-simulate: a flat (minRate === maxRate) scenario at the tapped
@@ -229,6 +262,8 @@ export default function SimulationModePanel({
     setScenarioName('')
     setScheme('rainfall')
     setLastResults(null)
+    setLastRun(null)
+    setSaveState('idle')
     onReset?.()
   }
 
@@ -383,6 +418,36 @@ export default function SimulationModePanel({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/*
+            The only thing that writes a Reports/Activity Logs entry —
+            see this file's own header comment for why this is now a
+            separate, explicit action instead of happening automatically
+            on every run. Disabled once already saved for this exact run
+            (re-enabled only by running again, via lastRun/saveState both
+            resetting in runSimulation above) so a second click can't
+            quietly create a duplicate row.
+          */}
+          <div className="mt-3 flex items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+            <button
+              type="button"
+              className="bfw-btn rounded-md px-3 py-1.5 text-xs font-semibold"
+              onClick={saveToReports}
+              disabled={!lastRun || saveState === 'saving' || saveState === 'saved'}
+            >
+              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved ✓' : 'Save to Reports'}
+            </button>
+            {saveState === 'saved' && (
+              <span className="text-xs" style={{ color: '#2F8F6E' }}>
+                Saved — view it under Reports or Activity Logs.
+              </span>
+            )}
+            {saveState === 'error' && (
+              <span role="alert" className="text-xs" style={{ color: '#C0392B' }}>
+                Couldn&apos;t save — check your connection and try again.
+              </span>
+            )}
           </div>
         </div>
       )}

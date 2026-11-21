@@ -5,14 +5,17 @@
 // 'simulation_run' client-side) and the "Activity Logs" tab
 // (components/AdminActivityLogTab.tsx, shows every row) — one table,
 // two views, see supabase/activity-logs-setup.sql's own header comment
-// for why. Today only SimulationModePanel.tsx writes here (every real
-// "Start simulation" run and every tap-to-simulate), via lib/activityLog.ts.
+// for why. Two things write here today, both via lib/activityLog.ts:
+// explicitly saved simulation scenarios (SimulationModePanel.tsx's own
+// "Save to Reports" button, not every run — see that component's own
+// header comment for why) and new invitations (AdminInvitePanel.tsx,
+// right after a successful create).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { requireAdmin } from '@/lib/requireAdmin'
 
-const VALID_ACTION_TYPES = ['simulation_run']
+const VALID_ACTION_TYPES = ['simulation_run', 'invitation_created']
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin(req)

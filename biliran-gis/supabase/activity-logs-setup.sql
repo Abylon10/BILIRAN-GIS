@@ -17,10 +17,11 @@
 -- as reviewable scenario cards; "Activity Logs" (components/
 -- AdminActivityLogTab.tsx) shows every row from this same table as a
 -- compact audit-trail line. `action_type` is a real column (not hardcoded
--- to one value) so a future admin action beyond "simulation_run" (e.g. a
--- GIS data upload, a settings change) can log into this same table later
--- without a schema change — Activity Logs would show it too; Reports,
--- which filters to action_type = 'simulation_run' client-side, would not.
+-- to one value): "simulation_run" and "invitation_created" are both
+-- written today, and a future admin action (e.g. a GIS data upload, a
+-- settings change) can log into this same table later without a schema
+-- change — Activity Logs would show it too; Reports, which filters to
+-- action_type = 'simulation_run' client-side, would not.
 --
 -- Safe to re-run: every statement is guarded.
 
@@ -37,22 +38,36 @@ create table if not exists public.activity_logs (
   -- readable even if that profile's name/office is later edited or the
   -- account is removed.
   actor_label text,
-  -- Extensible on purpose — see this file's own header comment. Only
-  -- 'simulation_run' is ever written today.
-  action_type text not null check (action_type in ('simulation_run')),
+  -- Extensible on purpose — see this file's own header comment.
+  -- 'simulation_run' (an explicit "Save to Reports" in Simulation Mode)
+  -- and 'invitation_created' (a new invitation, AdminInvitePanel.tsx) are
+  -- written today.
+  action_type text not null check (action_type in ('simulation_run', 'invitation_created')),
   -- Human-readable one-liner for the Activity Logs list, e.g. "Ran a
-  -- 5-50mm/hr simulation, 2h duration (Rainfall base)".
+  -- 5-50mm/hr simulation, 2h duration (Rainfall base)" or "Invited
+  -- jdoe@example.com (Naval MDRRMO)".
   summary text not null,
   -- Full structured payload — for a 'simulation_run' row, this holds
   -- exactly what SimulationModePanel needs to reload the same scenario
   -- (minRate, maxRate, durationHours, scheme, scenarioName) plus a
-  -- real, already-computed alertCounts breakdown, not re-derived later.
+  -- real, already-computed alertCounts breakdown, not re-derived later;
+  -- for an 'invitation_created' row, the email/office/inviteeName already
+  -- collected on that creation form.
   details jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
 create index if not exists activity_logs_created_at_idx
   on public.activity_logs (created_at desc);
+
+-- Widens the action_type check to also allow 'invitation_created' —
+-- needed if this file's earlier version (simulation_run only) was already
+-- run once before this was added. Postgres names an inline column check
+-- constraint "<table>_<column>_check" by default; dropping and recreating
+-- it is safe to re-run regardless of which version was applied last.
+alter table public.activity_logs drop constraint if exists activity_logs_action_type_check;
+alter table public.activity_logs add constraint activity_logs_action_type_check
+  check (action_type in ('simulation_run', 'invitation_created'));
 
 alter table public.activity_logs enable row level security;
 
