@@ -3,15 +3,21 @@
 // The admin landing — what app/page.tsx now mounts for `showAdminPanel &&
 // isAdmin` instead of AdminInvitePanel directly. A full-screen admin UI
 // with a persistent LEFT SIDEBAR nav (Dashboard / Barangays / GIS & FSI
-// Data / Rainfall & Scenarios / Invitations / Users, plus Reports /
-// Activity Logs / Settings — see AdminComingSoonTab.tsx) and a slim top
+// Data / Rainfall & Scenarios / Invitations / Users / Reports / Activity
+// Logs, plus Settings — see AdminComingSoonTab.tsx) and a slim top
 // bar (breadcrumb, page title/subtitle, Day/Night + Profile), replacing
 // this shell's own earlier horizontal top-tab-bar version (see CLAUDE.md
 // for that round's history) to match a later, more detailed reference
-// mockup the user shared. Reports/Activity Logs/Settings are real nav
-// entries now (not omitted), but render an honest "not built yet"
-// placeholder — no fabricated report rows, log entries, or settings that
-// don't do anything (this project's consistent no-fabrication rule).
+// mockup the user shared. Settings is still a real nav entry with an
+// honest "not built yet" placeholder (no fabricated settings that don't
+// do anything, this project's consistent no-fabrication rule) — but
+// Reports (AdminReportsTab.tsx) and Activity Logs (AdminActivityLogTab.tsx)
+// are both real now, backed by one shared, real log table
+// (supabase/activity-logs-setup.sql, written by every Rainfall & Scenarios
+// simulation run) — see that SQL file's own header comment for why one
+// table serves both tabs, and SimulationModePanel.tsx's `prefillTrigger`
+// prop for how tapping a row there loads that scenario back into
+// Simulation Mode (`loadIntoSimulation` below).
 //
 // Fully occludes the persistent app header and the real dashboard/map
 // while open, same precedent UserDashboardModal already established (a
@@ -51,6 +57,8 @@ import AdminGisDataTab from '@/components/AdminGisDataTab'
 import AdminUsersTab from '@/components/AdminUsersTab'
 import AdminInvitePanel from '@/components/AdminInvitePanel'
 import AdminComingSoonTab from '@/components/AdminComingSoonTab'
+import AdminReportsTab, { type SimulationPrefill } from '@/components/AdminReportsTab'
+import AdminActivityLogTab from '@/components/AdminActivityLogTab'
 import UserDashboardModal from '@/components/UserDashboardModal'
 import type { Barangay } from '@/lib/dashboardData'
 import type { LiveComputedState } from '@/lib/liveIslandState'
@@ -199,6 +207,20 @@ export default function AdminShell({
 }) {
   const [tab, setTab] = useState<TabId>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Set when a Reports/Activity Logs row is tapped (see AdminReportsTab.tsx/
+  // AdminActivityLogTab.tsx's own onLoadIntoSimulation prop) — forwarded to
+  // the embedded SimulationModePanel (via UserDashboardModal) as its own
+  // prefillTrigger prop, which fills the scenario form without auto-running
+  // it. `token` is set fresh (Date.now()) on every tap, including a second
+  // tap of the same row, so SimulationModePanel's own token-comparison sync
+  // always re-fires — same convention as UserDashboardModal's existing
+  // tapTrigger.
+  const [prefillTrigger, setPrefillTrigger] = useState<(SimulationPrefill & { token: number }) | null>(null)
+
+  function loadIntoSimulation(prefill: SimulationPrefill) {
+    setPrefillTrigger({ ...prefill, token: Date.now() })
+    setTab('rainfall')
+  }
   const bg = opaqueBg(theme)
   const sidebarBg = theme === 'dark' ? '#032F30' : '#0A7075'
   const activeTab = NAV.find((n) => n.id === tab)!
@@ -228,7 +250,7 @@ export default function AdminShell({
       content = <AdminGisDataTab barangays={barangays} />
       break
     case 'rainfall':
-      content = <UserDashboardModal embedded theme={theme} liveIslandState={liveIslandState} />
+      content = <UserDashboardModal embedded theme={theme} liveIslandState={liveIslandState} prefillTrigger={prefillTrigger} />
       break
     case 'invitations':
       content = <AdminInvitePanel />
@@ -237,10 +259,10 @@ export default function AdminShell({
       content = <AdminUsersTab />
       break
     case 'reports':
-      content = <AdminComingSoonTab title="Reports" description="Generating and exporting flood-risk reports isn't built yet — this needs its own report format and export pipeline." />
+      content = <AdminReportsTab onLoadIntoSimulation={loadIntoSimulation} />
       break
     case 'activity':
-      content = <AdminComingSoonTab title="Activity Logs" description="Tracking who added, edited, or uploaded data needs a real audit table and logging on every admin action — a separate feature, not yet built." />
+      content = <AdminActivityLogTab onLoadIntoSimulation={loadIntoSimulation} />
       break
     case 'settings':
       content = <AdminComingSoonTab title="Settings" description="Configurable categories, thresholds, and weights aren't editable yet — the FSI formula's weights are currently fixed (see the GIS & FSI Data tab)." />

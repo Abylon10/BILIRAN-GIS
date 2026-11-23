@@ -5,7 +5,7 @@
 // Scenarios tab) case now renders this as an always-visible right-column
 // panel instead (see UserDashboardModal.tsx's two-column layout) — this
 // component itself is unchanged either way, just laid out differently by
-// its caller. Pick a min/max rain rate + storm duration (capped at 12
+// its caller. Pick a min/max rain rate + storm duration (capped at 24
 // hours) and run it against the WHOLE island at once
 // (lib/islandSimulation.ts) — not just the currently selected barangay.
 // Purely client-side and ephemeral — nothing here is persisted.
@@ -24,6 +24,20 @@
 // output shown here, easy to just close) and UserDashboardModal's
 // separate "⚠ SIMULATED · Clear" header chip (no longer needed once this
 // panel's own output is always visible) into one action.
+//
+// Saving to Reports/Activity Logs is now its own explicit "Save to
+// Reports" button, NOT an automatic side effect of every run (an earlier
+// version logged every "Start simulation"/tap-to-simulate run
+// automatically — reported directly as confusing, since there was no
+// visible confirmation a save had actually happened, and quick
+// exploratory taps were being saved just as permanently as a deliberately
+// named scenario). `lastRun` snapshots exactly what the last completed
+// run showed (params/scheme/scenarioName/alertCounts, at the moment it
+// finished) — Save always saves that snapshot, not whatever the form
+// fields currently hold if the admin has since changed them without
+// re-running. `saveState` tracks 'idle' | 'saving' | 'saved' | 'error' so
+// the button can show real confirmation (or a real failure) instead of
+// an optimistic "Saved" regardless of what the server actually did.
 
 'use client'
 
@@ -34,6 +48,7 @@ import { loadBasinHydrographs, hydrographForBarangay } from '@/lib/hydrographDat
 import { loadFsiFactors, WEIGHT_SCHEME_LABEL, WEIGHT_SCHEME_WEIGHTS, type WeightScheme, type FactorWeights } from '@/lib/fsiFactorData'
 import { type SimulationParams } from '@/lib/simulationMode'
 import { simulateIsland, type IslandSimResult } from '@/lib/islandSimulation'
+import { logActivity } from '@/lib/activityLog'
 
 const ALERT_LABELS: FsiLabel[] = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
 const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
@@ -41,8 +56,14 @@ const SCHEMES = ['rainfall', 'terrain', 'equal'] as const
 const DEFAULT_MIN_RATE = 5
 const DEFAULT_MAX_RATE = 50
 const DEFAULT_DURATION_HOURS = 2
-const MAX_DURATION_HOURS = 12
-const TOTAL_WINDOW_HOURS = 6
+const MAX_DURATION_HOURS = 24
+// Matches MAX_DURATION_HOURS, not a separately-tuned number — the chart's
+// displayed window has to cover at least the longest storm an admin can
+// type, or a long duration's own ramp-down/hold phase would be cut off
+// before it ever becomes visible (confirmed: at the old 6h window with a
+// 12h duration cap, the ramp only ever reached its peak at the window's
+// own right edge, never showing the decline at all).
+const TOTAL_WINDOW_HOURS = MAX_DURATION_HOURS
 const DT_HOURS = 1 / 12 // 5 minutes — matches the real storm's step, so axes line up
 
 interface BasinCheckEntry {
@@ -56,6 +77,7 @@ export default function SimulationModePanel({
   onReset,
   onSimulate,
   externalTrigger,
+  prefillTrigger,
 }: {
   // Purely informational here now (the "does the currently selected
   // barangay have its own river data" preview line) — the simulation
@@ -76,6 +98,17 @@ export default function SimulationModePanel({
   // every tap, including a second tap at the same rate, so the effect
   // below always re-fires (an unchanged `rateMmHr` alone wouldn't).
   externalTrigger?: { rateMmHr: number; token: number } | null
+  // Set by AdminReportsTab/AdminActivityLogTab (routed through
+  // AdminShell.tsx -> UserDashboardModal.tsx) when an admin taps a saved
+  // report/log row — loads that row's own saved scenario straight into
+  // this form so it can be reviewed/tweaked, WITHOUT auto-running it
+  // (direct, explicit choice: unlike externalTrigger's tap-to-simulate,
+  // which is a fast island-wide "what if this rate held," loading a past
+  // scenario back in is meant to be reviewed first, then started on
+  // purpose via the normal "Start simulation" button). `token` follows the
+  // same increment-per-tap convention as externalTrigger, for the same
+  // reason (re-fires even if the same row is tapped twice in a row).
+  prefillTrigger?: { minRate: number; maxRate: number; durationHours: number; scheme: WeightScheme; scenarioName: string; token: number } | null
 }) {
   const [minRate, setMinRate] = useState(DEFAULT_MIN_RATE)
   const [maxRate, setMaxRate] = useState(DEFAULT_MAX_RATE)
@@ -98,6 +131,11 @@ export default function SimulationModePanel({
   // already handed to the caller via onSimulate for the real dashboard
   // re-rank/re-color.
   const [lastResults, setLastResults] = useState<Map<string, IslandSimResult> | null>(null)
+  // Snapshot of exactly what the last completed run showed — what "Save
+  // to Reports" actually saves (see this file's own header comment for
+  // why this is a snapshot, not a re-read of the current form fields).
+  const [lastRun, setLastRun] = useState<{ params: SimulationParams; scheme: WeightScheme; scenarioName: string; alertCounts: Record<FsiLabel, number> } | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
     if (!selectedBarangay) return
@@ -123,15 +161,19 @@ export default function SimulationModePanel({
   // real guard rather than just letting NaN/negative values flow through.
   const inputsValid = minRate >= 0 && maxRate >= minRate && durationHours > 0
 
-  // Takes an optional explicit `params`/`weightsOverride` instead of always
-  // reading minRate/maxRate/durationHours/scheme off state — the tap-to-
-  // simulate effect below needs to run with the exact rate just tapped,
-  // and setMinRate/setMaxRate wouldn't be reflected in state until the
-  // next render (stale-closure trap), so it passes the values through
-  // directly rather than set-state-then-call.
-  function runSimulation(overrideParams?: SimulationParams, weightsOverride?: FactorWeights) {
+  // Takes an optional explicit `params`/`weightsOverride`/`scenarioNameOverride`
+  // instead of always reading minRate/maxRate/durationHours/scenarioName off
+  // state — the tap-to-simulate effect below needs to run with the exact
+  // rate/name just set, and setMinRate/setMaxRate/setScenarioName wouldn't be
+  // reflected in state until the next render (stale-closure trap), so it
+  // passes the values through directly rather than set-state-then-call.
+  // `scheme` itself never needs this treatment — nothing sets it
+  // synchronously right before calling runSimulation the way tap-to-simulate
+  // does for scenarioName, so reading it fresh off state is always correct.
+  function runSimulation(overrideParams?: SimulationParams, weightsOverride?: FactorWeights, scenarioNameOverride?: string) {
     const params = overrideParams ?? { minRate, maxRate, durationHours }
     if (!(params.minRate >= 0 && params.maxRate >= params.minRate && params.durationHours > 0)) return
+    const effectiveScenarioName = scenarioNameOverride ?? scenarioName
     setRunning(true)
     const weights = weightsOverride ?? (scheme === 'rainfall' ? undefined : WEIGHT_SCHEME_WEIGHTS[scheme])
     Promise.all([loadBasinHydrographs(), loadFsiFactors()]).then(([hydrographData, factorData]) => {
@@ -139,7 +181,37 @@ export default function SimulationModePanel({
       setRunning(false)
       setLastResults(results)
       onSimulate(results, params)
+
+      // Real counts from this exact run's own results, not re-derived
+      // from state later (`lastResults` won't have committed yet at this
+      // point) — same reduce logic as the `alertCounts` useMemo below.
+      const counts: Record<FsiLabel, number> = { 'Very Low': 0, Low: 0, Moderate: 0, High: 0, 'Very High': 0 }
+      for (const r of results.values()) counts[r.simulatedLabel] = (counts[r.simulatedLabel] ?? 0) + 1
+
+      // Snapshot this run (not a log write) — see this file's own header
+      // comment for why saving is now a separate, explicit action.
+      setLastRun({ params, scheme, scenarioName: effectiveScenarioName, alertCounts: counts })
+      setSaveState('idle')
     })
+  }
+
+  // The only thing that writes to Reports/Activity Logs now — see this
+  // file's own header comment. Awaits the real result instead of firing
+  // and forgetting, so 'saved'/'error' reflects what actually happened.
+  async function saveToReports() {
+    if (!lastRun) return
+    setSaveState('saving')
+    const { params, scheme: runScheme, scenarioName: runScenarioName, alertCounts: runAlertCounts } = lastRun
+    const summary = `${runScenarioName ? `${runScenarioName}: ` : ''}${params.minRate}-${params.maxRate}mm/hr rain, ${params.durationHours}h duration (${WEIGHT_SCHEME_LABEL[runScheme]})`
+    const ok = await logActivity('simulation_run', summary, {
+      minRate: params.minRate,
+      maxRate: params.maxRate,
+      durationHours: params.durationHours,
+      scheme: runScheme,
+      scenarioName: runScenarioName,
+      alertCounts: runAlertCounts,
+    })
+    setSaveState(ok ? 'saved' : 'error')
   }
 
   // Tap-to-simulate: a flat (minRate === maxRate) scenario at the tapped
@@ -164,8 +236,23 @@ export default function SimulationModePanel({
     setMinRate(rate)
     setMaxRate(rate)
     setDurationHours(TOTAL_WINDOW_HOURS)
-    setScenarioName(`Tapped @ ${rate.toFixed(1)} mm/hr`)
-    runSimulation({ minRate: rate, maxRate: rate, durationHours: TOTAL_WINDOW_HOURS })
+    const tapScenarioName = `Tapped @ ${rate.toFixed(1)} mm/hr`
+    setScenarioName(tapScenarioName)
+    runSimulation({ minRate: rate, maxRate: rate, durationHours: TOTAL_WINDOW_HOURS }, undefined, tapScenarioName)
+  }
+
+  // Load a saved report/log row's scenario back into this form — see
+  // this component's own `prefillTrigger` prop comment for why this
+  // deliberately does NOT call runSimulation the way externalTrigger's
+  // block above does.
+  const [prevPrefillToken, setPrevPrefillToken] = useState<number | undefined>(undefined)
+  if (prefillTrigger && prefillTrigger.token !== prevPrefillToken) {
+    setPrevPrefillToken(prefillTrigger.token)
+    setMinRate(prefillTrigger.minRate)
+    setMaxRate(prefillTrigger.maxRate)
+    setDurationHours(prefillTrigger.durationHours)
+    setScheme(prefillTrigger.scheme)
+    setScenarioName(prefillTrigger.scenarioName)
   }
 
   function reset() {
@@ -175,6 +262,8 @@ export default function SimulationModePanel({
     setScenarioName('')
     setScheme('rainfall')
     setLastResults(null)
+    setLastRun(null)
+    setSaveState('idle')
     onReset?.()
   }
 
@@ -329,6 +418,36 @@ export default function SimulationModePanel({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/*
+            The only thing that writes a Reports/Activity Logs entry —
+            see this file's own header comment for why this is now a
+            separate, explicit action instead of happening automatically
+            on every run. Disabled once already saved for this exact run
+            (re-enabled only by running again, via lastRun/saveState both
+            resetting in runSimulation above) so a second click can't
+            quietly create a duplicate row.
+          */}
+          <div className="mt-3 flex items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--card-border)' }}>
+            <button
+              type="button"
+              className="bfw-btn rounded-md px-3 py-1.5 text-xs font-semibold"
+              onClick={saveToReports}
+              disabled={!lastRun || saveState === 'saving' || saveState === 'saved'}
+            >
+              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved ✓' : 'Save to Reports'}
+            </button>
+            {saveState === 'saved' && (
+              <span className="text-xs" style={{ color: '#2F8F6E' }}>
+                Saved — view it under Reports or Activity Logs.
+              </span>
+            )}
+            {saveState === 'error' && (
+              <span role="alert" className="text-xs" style={{ color: '#C0392B' }}>
+                Couldn&apos;t save — check your connection and try again.
+              </span>
+            )}
           </div>
         </div>
       )}

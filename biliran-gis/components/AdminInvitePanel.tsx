@@ -40,6 +40,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { StatCard } from '@/components/AdminDashboardTab'
+import { logActivity } from '@/lib/activityLog'
 
 interface Invitation {
   id: number
@@ -200,6 +201,11 @@ export default function AdminInvitePanel() {
       }
 
       setCreated({ invitation: data.invitation, emailSent: data.emailSent, emailError: data.emailError })
+      // Fire-and-forget, same as the simulation-run log write — the
+      // invitation itself already succeeded and is already confirmed on
+      // screen above; this is a secondary audit-trail side effect, not
+      // something this flow needs to block on or report failure for.
+      logActivity('invitation_created', `Invited ${email} (${office})`, { email, office, inviteeName: inviteeName || null })
       setEmail('')
       setOffice('')
       setInviteeName('')
